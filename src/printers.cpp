@@ -11,7 +11,7 @@ void CLI::Printers::printAST(AltaCore::AST::Node* node, std::string indent, bool
       AltaCore::AST::RootNode* root = dynamic_cast<AltaCore::AST::RootNode*>(node);
       printf(" {\n");
       for (auto& statement: root->statements) {
-        printAST(statement, indent + "  ");
+        printAST(statement.get(), indent + "  ");
         printf("\n");
       }
       printf("%s}", indent.c_str());
@@ -19,7 +19,7 @@ void CLI::Printers::printAST(AltaCore::AST::Node* node, std::string indent, bool
     case NodeType::ExpressionStatement: {
       AltaCore::AST::ExpressionStatement* exprStmt = dynamic_cast<AltaCore::AST::ExpressionStatement*>(node);
       printf("<%s>", AltaCore::AST::NodeType_names[(size_t)exprStmt->expression->nodeType()]);
-      printAST(exprStmt->expression, indent, false, false);
+      printAST(exprStmt->expression.get(), indent, false, false);
     } break;
     case NodeType::FunctionDefinitionNode: {
       AltaCore::AST::FunctionDefinitionNode* funcDef = dynamic_cast<AltaCore::AST::FunctionDefinitionNode*>(node);
@@ -29,7 +29,7 @@ void CLI::Printers::printAST(AltaCore::AST::Node* node, std::string indent, bool
       if (funcDef->parameters.size() > 0) {
         printf("\n");
         for (auto& parameter: funcDef->parameters) {
-          printAST(parameter, indent + "    ");
+          printAST(parameter.get(), indent + "    ");
           printf(",\n");
         }
         printf("%s  ]\n", indent.c_str());
@@ -37,10 +37,10 @@ void CLI::Printers::printAST(AltaCore::AST::Node* node, std::string indent, bool
         printf("]\n");
       }
       printf("%s  returnType = ", indent.c_str());
-      printAST(funcDef->returnType, indent + "  ", false);
+      printAST(funcDef->returnType.get(), indent + "  ", false);
       printf("\n");
       printf("%s  body = ", indent.c_str());
-      printAST(funcDef->body, indent + "  ", false);
+      printAST(funcDef->body.get(), indent + "  ", false);
       printf("\n");
       printf("%s}", indent.c_str());
     } break;
@@ -48,7 +48,7 @@ void CLI::Printers::printAST(AltaCore::AST::Node* node, std::string indent, bool
       AltaCore::AST::Parameter* param = dynamic_cast<AltaCore::AST::Parameter*>(node);
       printf(" {\n");
       printf("%s  type = ", indent.c_str());
-      printAST(param->type, indent + "  ", false);
+      printAST(param->type.get(), indent + "  ", false);
       printf("\n");
       printf("%s  name = \"%s\"\n", indent.c_str(), param->name.c_str());
       printf("%s}", indent.c_str());
@@ -91,7 +91,7 @@ void CLI::Printers::printAST(AltaCore::AST::Node* node, std::string indent, bool
       AltaCore::AST::BlockNode* block = dynamic_cast<AltaCore::AST::BlockNode*>(node);
       printf(" {\n");
       for (auto& statement: block->statements) {
-        printAST(statement, indent + "  ");
+        printAST(statement.get(), indent + "  ");
         printf("\n");
       }
       printf("%s}", indent.c_str());
@@ -101,7 +101,7 @@ void CLI::Printers::printAST(AltaCore::AST::Node* node, std::string indent, bool
       printf(" {");
       if (ret->expression != nullptr) {
         printf("\n");
-        printAST(ret->expression, indent + "  ");
+        printAST(ret->expression.get(), indent + "  ");
         printf("\n%s", indent.c_str());
       }
       printf("}");
@@ -128,7 +128,7 @@ void CLI::Printers::printDET(AltaCore::DET::Node* node, std::string indent, bool
       printf(" {\n");
       printf("%s  name = \"%s\"\n", indent.c_str(), mod->name.c_str());
       printf("%s  scope = ", indent.c_str());
-      printDET(mod->scope, indent + "  ", false);
+      printDET(mod->scope.get(), indent + "  ", false);
       printf("\n%s}", indent.c_str());
     } break;
     case NodeType::Scope: {
@@ -137,7 +137,7 @@ void CLI::Printers::printDET(AltaCore::DET::Node* node, std::string indent, bool
       if (scope->items.size() > 0) {
         printf("\n");
         for (auto& item: scope->items) {
-          printDET(item, indent + "  ");
+          printDET(item.get(), indent + "  ");
           printf(",\n");
         }
         printf("%s", indent.c_str());
@@ -155,7 +155,7 @@ void CLI::Printers::printDET(AltaCore::DET::Node* node, std::string indent, bool
           printf("%s    {", indent.c_str());
           printf("%s      name = \"%s\"\n", indent.c_str(), std::get<0>(param).c_str());
           printf("%s      type = ", indent.c_str());
-          printDET(std::get<1>(param), indent + "      ", false);
+          printDET(std::get<1>(param).get(), indent + "      ", false);
           printf("%s    }", indent.c_str());
           printf(",\n");
         }
@@ -163,10 +163,10 @@ void CLI::Printers::printDET(AltaCore::DET::Node* node, std::string indent, bool
       }
       printf("]\n");
       printf("%s  returnType = ", indent.c_str());
-      printDET(func->returnType, indent + "  ", false);
+      printDET(func->returnType.get(), indent + "  ", false);
       printf("\n");
       printf("%s  scope = ", indent.c_str());
-      printDET(func->scope, indent + "  ", false);
+      printDET(func->scope.get(), indent + "  ", false);
       printf("\n");
       printf("%s}", indent.c_str());
     } break;

@@ -4,7 +4,9 @@ All the changes for the language itself will be kept in this file. For changes o
 This project and all of its subprojects follow [semantic versioning](https://semver.org).
 
 ## [Unreleased]
-Nothing yet.
+### Added
+  * Assignment expressions!
+  * Variable definitions are now expressions that return a reference to the newly defined variable
 
 ## [0.0.0] - 2018-11-08
 ### Added

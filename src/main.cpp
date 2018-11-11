@@ -112,7 +112,7 @@ int main(int argc, char** argv) {
 
     // finally, add our header to the index for all our dependents
     for (auto& dependent: mod->dependents) {
-      outfileIndex << "#define _ALTA_MODULE_" << Talta::mangleName(dependent) << "_0_INCLUDE_" << Talta::mangleName(mod) << " \"" << hOut.relativeTo(outDir / dependent->name).toString('/') << "\"\n";
+      outfileIndex << "#define _ALTA_MODULE_" << Talta::mangleName(dependent.get()) << "_0_INCLUDE_" << Talta::mangleName(mod.get()) << " \"" << hOut.relativeTo(outDir / dependent->name).toString('/') << "\"\n";
     }
   }
 
