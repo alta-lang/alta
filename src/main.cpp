@@ -104,6 +104,7 @@ int main(int argc, char** argv) {
     std::ofstream outfileC(cOut.toString());
     std::ofstream outfileH(hOut.toString());
 
+    outfileC << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
     outfileC << "#include \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
     outfileC << cRoot->toString();
     // include the index in the module's header, otherwise we won't be able to find our dependencies
