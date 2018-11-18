@@ -4,7 +4,8 @@ All the changes for the language itself will be kept in this file. For changes o
 This project and all of its subprojects follow [semantic versioning](https://semver.org).
 
 ## [Unreleased]
-Nothing yet.
+### Updated
+  * Talta v0.2.2
 
 ## [0.2.0] - 2018-11-18
 ### Added
