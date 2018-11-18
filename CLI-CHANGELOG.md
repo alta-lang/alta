@@ -6,6 +6,12 @@ This project follows [semantic versioning](https://semver.org).
 ## [Unreleased]
 Nothing yet.
 
+## [0.2.0] - 2018-11-18
+### Added
+  * File preprocessing support
+### Updated
+  * Talta v0.2.1
+
 ## [0.1.0] - 2018-11-13
 ### Updated
   * Talta v0.2.0

@@ -19,9 +19,12 @@ int main(int argc, char** argv) {
 
   const char* filename = argv[1];
   std::ifstream file(filename);
+  auto fn = AltaCore::Filesystem::Path(filename).absolutify();
   std::string line;
-  AltaCore::Lexer::Lexer lexer;
-  
+  std::map<std::string, AltaCore::Preprocessor::Expression> defs;
+  std::map<std::string, std::string> results;
+  AltaCore::Preprocessor::Preprocessor prepo(fn, defs, results);
+
   if (!file.is_open()) {
     throw std::runtime_error("Couldn't open the input file!");
   }
@@ -30,10 +33,14 @@ int main(int argc, char** argv) {
     if (file.peek() != EOF) {
       line += "\n";
     }
-    lexer.feed(line);
+    prepo.feed(line);
   }
 
   file.close();
+  prepo.done();
+
+  AltaCore::Lexer::Lexer lexer;
+  lexer.feed(results[fn.toString()]);
 
   /*
   printf("%sTokens:%s\n", CLI::COLOR_BLUE, CLI::COLOR_NORMAL);
@@ -56,6 +63,23 @@ int main(int argc, char** argv) {
     fprintf(stderr, "%sERROR%s: Failed to lex input at %zu:%zu\n", CLI::COLOR_RED, CLI::COLOR_NORMAL, line, column);
   }
 
+  AltaCore::Modules::parseModule = [&](std::string importRequest, AltaCore::Filesystem::Path requestingPath) -> std::shared_ptr<AltaCore::AST::RootNode> {
+    auto path = AltaCore::Modules::resolve(importRequest, requestingPath);
+    if (results.find(path.absolutify().toString()) == results.end()) {
+      throw std::runtime_error("its not here.");
+    }
+    AltaCore::Lexer::Lexer otherLexer;
+
+    otherLexer.feed(results[path.absolutify().toString()]);
+
+    AltaCore::Parser::Parser otherParser(otherLexer.tokens);
+    otherParser.parse();
+    auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(otherParser.root.value());
+    root->detail(path);
+
+    return root;
+  };
+
   AltaCore::Parser::Parser parser(lexer.tokens);
 
   parser.parse();
@@ -69,7 +93,8 @@ int main(int argc, char** argv) {
   */
 
   auto inputFile = AltaCore::Filesystem::Path(filename).absolutify();
-  parser.root->detail(inputFile);
+  auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(parser.root.value());
+  root->detail(inputFile);
 
   /*
   printf("\n%sDET:%s\n", CLI::COLOR_BLUE, CLI::COLOR_NORMAL);
@@ -78,7 +103,7 @@ int main(int argc, char** argv) {
   */
 
   auto outDir = inputFile.dirname() / "alta-build";
-  auto transpiledModules = Talta::recursivelyTranspileToC(parser.root);
+  auto transpiledModules = Talta::recursivelyTranspileToC(root);
   auto indexHeaderPath = outDir / "index.h";
   std::ofstream outfileIndex(indexHeaderPath.toString());
   std::stringstream uuidStream;
@@ -118,6 +143,8 @@ int main(int argc, char** argv) {
   }
 
   outfileIndex << "#endif // _ALTA_INDEX_" << indexUUID << "\n";
+
+  outfileIndex.close();
 
   printf("%sSuccessfully transpiled input!%s", CLI::COLOR_GREEN, CLI::COLOR_NORMAL);
 

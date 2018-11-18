@@ -6,6 +6,31 @@ This project and all of its subprojects follow [semantic versioning](https://sem
 ## [Unreleased]
 Nothing yet.
 
+## [0.2.0] - 2018-11-18
+### Added
+  * Preprocessing! To quote AltaCore v0.2.1's changelog:
+    * Enables compile-time code alternation
+      * This is just a fancy way of saying that it allows different code to be enabled given certain conditions at compile time
+    * Currently supports 5 different directives:
+      * `if <expression>`
+      * `else if <expression>`
+      * `else`
+      * `define <definition-name> [value-expression]`
+      * `undefine <definition-name>`
+    * Sufficient variety of expressions:
+      * Boolean logic operators: `&&` and `||`
+      * Boolean literals: `true` and `false`
+      * String literals (e.g. `"foobar"`)
+      * Macro calls (e.g. `defined(foobar)`; note: only builtin macros are supported at the moment)
+      * Comparative operators: `==`  (only `==` is supported for now)
+    * Definition substitution (`@<definition-name>@`, where `<definition-name>` is the name of the definition to substitute)
+      * Not supported in string literals or import statements
+    * 4 different expression types:
+      * Boolean
+      * String
+      * Null
+      * Undefined
+
 ## [0.1.0] - 2018-11-13
 ### Added
   * Assignment expressions!
