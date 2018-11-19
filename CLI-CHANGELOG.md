@@ -4,7 +4,8 @@ All the changes for Alta's transpiler command line interface will be kept in thi
 This project follows [semantic versioning](https://semver.org).
 
 ## [Unreleased]
-Nothing yet.
+### Updated
+  * Talta v0.3.0
 
 ## [0.2.0] - 2018-11-18
 ### Added
