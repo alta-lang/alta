@@ -17,6 +17,21 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  auto programPath = AltaCore::Filesystem::Path(argv[0]);
+
+  // set our standard library path
+#ifndef NDEBUG
+  // we're in a debug build
+  AltaCore::Modules::stlPath = AltaCore::Filesystem::Path(ALTA_DEBUG_STL_PATH);
+#else
+  // we're in a release build
+#if defined(_WIN32) || defined(_WIN64)
+  AltaCore::Modules::stlPath = programPath.dirname() / "stl";
+#else
+  AltaCore::Modules::stlPath = programPath.dirname().dirname() / "lib" / "stl";
+#endif
+#endif
+
   const char* filename = argv[1];
   std::ifstream file(filename);
   auto fn = AltaCore::Filesystem::Path(filename).absolutify();
@@ -103,6 +118,9 @@ int main(int argc, char** argv) {
   */
 
   auto outDir = inputFile.dirname() / "alta-build";
+
+  AltaCore::Filesystem::mkdirp(outDir); // ensure the output directory has been created
+
   auto transpiledModules = Talta::recursivelyTranspileToC(root);
   auto indexHeaderPath = outDir / "index.h";
   std::ofstream outfileIndex(indexHeaderPath.toString());
