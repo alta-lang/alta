@@ -6,7 +6,7 @@ This project follows [semantic versioning](https://semver.org).
 ## [Unreleased]
 ### Added
   * STL module/package resolution
-    * At the moment, our STL implementation only has a `string` module with a simple test function (`something`) that returns `4` when it's called
+    * At the moment, our STL implementation only has a `string` module with 2 simple test functions (`something` and `otherThing`) that returns integers when they're called
     * The STL directory is resolved relative to the location of the executable and expects it to be in:
       * The same directory as the executable on Windows
       * A `lib` directory in the parent directory of the executable's parent directory on Linux/macOS
@@ -16,7 +16,7 @@ This project follows [semantic versioning](https://semver.org).
     * The problem was that the output directory was being implicitly created when the first module was transpiled, but the index file handle is created before this happens, so when the index file handle was created and tried to create `index.h`, it failed because the output directory hadn't been created
     * The fix, quite simply, was to make sure the output directory is created *before* we try to create the index file
 ### Updated
-  * Talta v0.4.0
+  * Talta v0.5.0
 
 ## [0.2.0] - 2018-11-18
 ### Added

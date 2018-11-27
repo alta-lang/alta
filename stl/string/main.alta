@@ -1,3 +1,7 @@
 export function something(): int {
   return 4
 }
+
+export function otherThing(): int {
+  return 34
+}

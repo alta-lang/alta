@@ -6,6 +6,8 @@ This project and all of its subprojects follow [semantic versioning](https://sem
 ## [Unreleased]
 ### Added
   * Function-pointer types
+  * Alias imports
+  * Aliased cherry-pick imports
 
 ## [0.2.0] - 2018-11-18
 ### Added
