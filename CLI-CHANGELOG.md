@@ -15,6 +15,9 @@ This project follows [semantic versioning](https://semver.org).
   * Module inclusion index generation
     * The problem was that the output directory was being implicitly created when the first module was transpiled, but the index file handle is created before this happens, so when the index file handle was created and tried to create `index.h`, it failed because the output directory hadn't been created
     * The fix, quite simply, was to make sure the output directory is created *before* we try to create the index file
+### Changed
+  * Debug builds now use the local STL in-place, instead of copying it to the build directory
+    * They also fallback to using the executable-relative STL path when the debug STL can't be found
 ### Updated
   * Talta v0.6.0
 

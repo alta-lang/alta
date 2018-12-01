@@ -22,7 +22,17 @@ int main(int argc, char** argv) {
   // set our standard library path
 #ifndef NDEBUG
   // we're in a debug build
-  AltaCore::Modules::stlPath = AltaCore::Filesystem::Path(ALTA_DEBUG_STL_PATH);
+  auto debugSTLPath = AltaCore::Filesystem::Path(ALTA_DEBUG_STL_PATH);
+  if (debugSTLPath.exists()) {
+    AltaCore::Modules::stlPath = debugSTLPath;
+  } else {
+    // fallback to relative, platform-dependent STL directory
+#if defined(_WIN32) || defined(_WIN64)
+    AltaCore::Modules::stlPath = programPath.dirname() / "stl";
+#else
+    AltaCore::Modules::stlPath = programPath.dirname().dirname() / "lib" / "stl";
+#endif
+  }
 #else
   // we're in a release build
 #if defined(_WIN32) || defined(_WIN64)
