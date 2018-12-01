@@ -1,0 +1,3 @@
+@@CTranspiler.include("stdio.h");
+
+declare export literal function printf(data: ptr byte): int

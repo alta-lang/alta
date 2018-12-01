@@ -8,3 +8,5 @@ Makefile
 nbproject
 **/CMakeFiles
 CMakeFiles
+.vs
+**/alta-build
