@@ -3,13 +3,19 @@
 # Add steps that build, run tests, deploy, and more:
 # https://aka.ms/yaml
 
+jobs:
+- 
+
 pool:
   vmImage: 'Ubuntu 16.04'
 
 steps:
 - task: CMake@1
   inputs:
-    workingDirectory: $(Build.ArtifactStagingDirectory)\build
+    cmakeArgs: "$(Build.SourceDirectory)"
+- task: CMake@1
+  inputs:
+    cmakeArgs: "--build ."
 
 - script: |
     echo Add other tasks to build, test, and deploy your project.
