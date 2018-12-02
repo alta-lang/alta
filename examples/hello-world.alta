@@ -1,6 +1,6 @@
 import printf from "io"
 
-literal function main(argc: int, argv: ptr ptr byte): int {
+literal function main(): int {
   printf("Hello, world!\n")
 
   return 0

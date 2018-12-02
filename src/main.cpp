@@ -22,23 +22,23 @@ int main(int argc, char** argv) {
   // set our standard library path
 #ifndef NDEBUG
   // we're in a debug build
-  auto debugSTLPath = AltaCore::Filesystem::Path(ALTA_DEBUG_STL_PATH);
-  if (debugSTLPath.exists()) {
-    AltaCore::Modules::stlPath = debugSTLPath;
+  auto debugStdlibPath = AltaCore::Filesystem::Path(ALTA_DEBUG_STDLIB_PATH);
+  if (debugStdlibPath.exists()) {
+    AltaCore::Modules::standardLibraryPath = debugStdlibPath;
   } else {
-    // fallback to relative, platform-dependent STL directory
+    // fallback to relative, platform-dependent stdlib directory
 #if defined(_WIN32) || defined(_WIN64)
-    AltaCore::Modules::stlPath = programPath.dirname() / "stl";
+    AltaCore::Modules::standardLibraryPath = programPath.dirname() / "stdlib";
 #else
-    AltaCore::Modules::stlPath = programPath.dirname().dirname() / "lib" / "stl";
+    AltaCore::Modules::standardLibraryPath = programPath.dirname().dirname() / "lib" / "alta-stdlib";
 #endif
   }
 #else
   // we're in a release build
 #if defined(_WIN32) || defined(_WIN64)
-  AltaCore::Modules::stlPath = programPath.dirname() / "stl";
+  AltaCore::Modules::standardLibraryPath = programPath.dirname() / "stdlib";
 #else
-  AltaCore::Modules::stlPath = programPath.dirname().dirname() / "lib" / "stl";
+  AltaCore::Modules::standardLibraryPath = programPath.dirname().dirname() / "lib" / "alta-stdlib";
 #endif
 #endif
 

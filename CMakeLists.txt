@@ -20,5 +20,5 @@ target_include_directories(altac PRIVATE "${PROJECT_SOURCE_DIR}/include")
 
 target_link_libraries(altac PUBLIC altacore talta crossguid)
 
-# define the stl directory for debug builds
-target_compile_definitions(altac PRIVATE ALTA_DEBUG_STL_PATH="${PROJECT_SOURCE_DIR}/stl")
+# define the stdlib directory for debug builds
+target_compile_definitions(altac PRIVATE ALTA_DEBUG_STDLIB_PATH="${PROJECT_SOURCE_DIR}/stdlib")
