@@ -18,6 +18,10 @@ jobs:
   - task: CMake@1
     inputs:
       cmakeArgs: "--build ."
+  - task: PublishPipelineArtifact@0
+    inputs:
+      artifactName: "altac-linux-amd64"
+      targetPath: "build/altac"
 
 - job: Windows
   pool:
@@ -29,6 +33,10 @@ jobs:
   - task: CMake@1
     inputs:
       cmakeArgs: "--build ."
+  - task: PublishPipelineArtifact@0
+    inputs:
+      artifactName: "altac-win64.exe"
+      targetPath: "build/altac.exe"
 
 - job: macOS
   pool:
@@ -40,3 +48,7 @@ jobs:
   - task: CMake@1
     inputs:
       cmakeArgs: "--build ."
+  - task: PublishPipelineArtifact@0
+    inputs:
+      artifactName: "altac-macos"
+      targetPath: "build/altac"
