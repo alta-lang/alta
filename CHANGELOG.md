@@ -4,12 +4,32 @@ All the changes for the language itself will be kept in this file. For changes o
 This project and all of its subprojects follow [semantic versioning](https://semver.org).
 
 ## [Unreleased]
+Nothing yet.
+
+## [0.3.0] - 2018-12-03
 ### Added
   * Function-pointer types
+    * e.g. `(int, byte) -> bool` defines a function-pointer type that accepts 2 arguments (an integer and a byte) and returns a boolean
+    * Enables variables to be called like functions
   * Alias imports
+    * e.g. `import "foo" as bar` imports all of foo's exports into a namespace called `bar`. If, for example, `thing` is a variable that foo exports, then it can be accessed as `bar.thing`
   * Aliased cherry-pick imports
+    * e.g. `import thing as something from "foo"` will import `thing` from foo under a different name: `something`
   * String literals
+    * e.g. `"Hello, world!"`
+    * Simply an array of byte values (or it can also be interpreted as a pointer to the first element in an array of byte values)
   * Function declarations
+    * e.g. `declare function bob(): bool` tells Alta that a function called `bob` that accepts no parameters and returns a boolean exists
+    * It's up to the backend to find defintions of declared functions during compilation
+    * This is mainly useful for telling Alta about external, non-Alta functions (in which case, you would probably also like to use the `literal` modifier, like so: `declare literal function bob(): bool`)
+  * General attributes
+    * Attributes are used to add metadata to AST nodes, and can provide useful information to the frontend or backend
+      * e.g. the `CTranspiler.include` attribute tells the Talta C transpiler to include the specified header in the generated C code (e.g. `@@CTranspiler.include("stdio.h")` includes `<stdio.h>` in the output header for that module)
+    * So far, only general attributes (i.e. attributes that can apply to any node or no node at all) have been tested
+    * Theoretically, support for narrow attributes has already been fully implemented, but it hasn't been tested yet
+### Changed
+  * Preprocessor substitutions now have a different set of delimiters: instead of `@something@`, it's now `@[something]`
+    * This change occurred to facilitate cleaner attribute syntax
 
 ## [0.2.0] - 2018-11-18
 ### Added
