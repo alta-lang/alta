@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
 
     AltaCore::Parser::Parser otherParser(otherLexer.tokens);
     otherParser.parse();
-    auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(otherParser.root.value());
+    auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(*otherParser.root);
     root->detail(path);
 
     return root;
@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
   */
 
   auto inputFile = AltaCore::Filesystem::Path(filename).absolutify();
-  auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(parser.root.value());
+  auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(*parser.root);
   root->detail(inputFile);
 
   /*

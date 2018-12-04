@@ -1,0 +1,54 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+jobs:
+- job: Linux
+  pool:
+    vmImage: "ubuntu-16.04"
+  steps:
+  - script: |
+      sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+      sudo apt-get update
+      sudo apt-get install -y gcc-7 g++-7 uuid-dev
+  - task: CMake@1
+    inputs:
+      cmakeArgs: "-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 .."
+  - task: CMake@1
+    inputs:
+      cmakeArgs: "--build ."
+  - task: PublishPipelineArtifact@0
+    inputs:
+      artifactName: "altac-linux-amd64"
+      targetPath: "build/bin"
+
+- job: Windows
+  pool:
+    vmImage: "vs2017-win2016"
+  steps:
+  - task: CMake@1
+    inputs:
+      cmakeArgs: ".."
+  - task: CMake@1
+    inputs:
+      cmakeArgs: "--build ."
+  - task: PublishPipelineArtifact@0
+    inputs:
+      artifactName: "altac-win64"
+      targetPath: "build/bin"
+
+- job: macOS
+  pool:
+    vmImage: "macOS-10.13"
+  steps:
+  - task: CMake@1
+    inputs:
+      cmakeArgs: ".."
+  - task: CMake@1
+    inputs:
+      cmakeArgs: "--build ."
+  - task: PublishPipelineArtifact@0
+    inputs:
+      artifactName: "altac-macos"
+      targetPath: "build/bin"
