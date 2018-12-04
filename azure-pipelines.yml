@@ -8,47 +8,140 @@ jobs:
   pool:
     vmImage: "ubuntu-16.04"
   steps:
+  # set up GCC 7 (required to build because we use C++17)
+  # and install uuid-dev (dependency of crossguid)
   - script: |
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
       sudo apt-get update
       sudo apt-get install -y gcc-7 g++-7 uuid-dev
+
+  # if this is a tagged commit, build for release
   - task: CMake@1
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
     inputs:
-      cmakeArgs: "-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 .."
+      cmakeArgs: "-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Release .."
+  # otherwise, build for debug
+  - task: CMake@1
+    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
+    inputs:
+      cmakeArgs: "-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Debug .."
+
+   # build it
   - task: CMake@1
     inputs:
       cmakeArgs: "--build ."
+
+  # copy the executable (and any related products)
+  - task: CopyFiles@2
+    displayName: "Copy the executable (and related files) to artifact directory"
+    inputs:
+      sourceFolder: "build/bin"
+      contents: "*"
+      targetFolder: '$(Build.ArtifactStagingDirectory)/bin'
+
+  # copy stdlib
+  - task: CopyFiles@2
+    displayName: "Copy the standard library to artifact directory"
+    inputs:
+      contents: "stl/**"
+      targetFolder: $(Build.ArtifactStagingDirectory)/lib
+
+  # publish the relevant artifacts
   - task: PublishPipelineArtifact@0
     inputs:
       artifactName: "altac-linux-amd64"
-      targetPath: "build/bin"
+      targetPath: $(Build.ArtifactStagingDirectory)
 
 - job: Windows
   pool:
     vmImage: "vs2017-win2016"
   steps:
+  # configure it
   - task: CMake@1
     inputs:
       cmakeArgs: ".."
+
+  # if this is a tagged commit, build for release
+  # note: Visual Studio requires the build configuration type at build time,
+  #       not configuration time (unlike Make on Linux and macOS)
   - task: CMake@1
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
     inputs:
-      cmakeArgs: "--build ."
+      cmakeArgs: "--build . --config Release"
+  # otherwise, build for debug
+  - task: CMake@1
+    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
+    inputs:
+      cmakeArgs: "--build --config Debug ."
+
+  # [debug] copy the executable (and any related products)
+  - task: CopyFiles@2
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    displayName: "Copy the executable (and related files) to artifact directory"
+    inputs:
+      sourceFolder: "build\\bin\\Debug"
+      contents: "*"
+      targetFolder: '$(Build.ArtifactStagingDirectory)\\bin'
+  # [release] copy the executable (and any related products)
+  - task: CopyFiles@2
+    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
+    displayName: "Copy the executable (and related files) to artifact directory"
+    inputs:
+      sourceFolder: "build\\bin\\Release"
+      contents: "*"
+      targetFolder: '$(Build.ArtifactStagingDirectory)\\bin'
+
+  # copy stdlib
+  - task: CopyFiles@2
+    displayName: "Copy the standard library to artifact directory"
+    inputs:
+      contents: "stl/**/*"
+      targetFolder: $(Build.ArtifactStagingDirectory)
+
+  # publish the relevant artifacts
   - task: PublishPipelineArtifact@0
     inputs:
       artifactName: "altac-win64"
-      targetPath: "build/bin"
+      targetPath: $(Build.ArtifactStagingDirectory)
 
 - job: macOS
   pool:
     vmImage: "macOS-10.13"
   steps:
+  # if this is a tagged commit, build for release
   - task: CMake@1
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
     inputs:
-      cmakeArgs: ".."
+      cmakeArgs: "-DCMAKE_BUILD_TYPE=Release .."
+
+  # otherwise, build for debug
+  - task: CMake@1
+    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
+    inputs:
+      cmakeArgs: "-DCMAKE_BUILD_TYPE=Debug .."
+
+  # build it
   - task: CMake@1
     inputs:
       cmakeArgs: "--build ."
+
+  # copy the executable (and any related products)
+  - task: CopyFiles@2
+    displayName: "Copy the executable (and related files) to artifact directory"
+    inputs:
+      sourceFolder: "build/bin"
+      contents: "*"
+      targetFolder: '$(Build.ArtifactStagingDirectory)/bin'
+
+  # copy stdlib
+  - task: CopyFiles@2
+    displayName: "Copy the standard library to artifact directory"
+    inputs:
+      contents: "stl/**/*"
+      targetFolder: $(Build.ArtifactStagingDirectory)/lib
+
+  # publish the relevant artificats
   - task: PublishPipelineArtifact@0
     inputs:
       artifactName: "altac-macos"
-      targetPath: "build/bin"
+      targetPath: $(Build.ArtifactStagingDirectory)
