@@ -14,20 +14,24 @@ jobs:
       sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
       sudo apt-get update
       sudo apt-get install -y gcc-7 g++-7 uuid-dev
+    displayName: "Install GCC 7 and uuid-dev"
 
   # if this is a tagged commit, build for release
   - task: CMake@1
+    displayName: "Configure project with CMake (for release)"
     condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
     inputs:
       cmakeArgs: "-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Release .."
   # otherwise, build for debug
   - task: CMake@1
+    displayName: "Configure project with CMake (for debug)"
     condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
     inputs:
       cmakeArgs: "-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Debug .."
 
    # build it
   - task: CMake@1
+    displayName: "Build project"
     inputs:
       cmakeArgs: "--build ."
 
@@ -40,14 +44,31 @@ jobs:
       targetFolder: '$(Build.ArtifactStagingDirectory)/bin'
 
   # copy stdlib
-  - task: CopyFiles@2
+  - bash: |
+      mkdir -p "$(Build.ArtifactStagingDirectory)/lib"
+      cp -r stdlib "$(Build.ArtifactStagingDirectory)/lib/alta-stdlib"
     displayName: "Copy the standard library to artifact directory"
+
+  - task: ArchiveFiles@2
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    displayName: "Create a release archive"
     inputs:
-      contents: "stl/**"
-      targetFolder: $(Build.ArtifactStagingDirectory)/lib
+      rootFolderOrFile: '$(Build.ArtifactStagingDirectory)'
+      includeRootFolder: false
+      archiveType: 'tar'
+      tarCompression: 'xz'
+      archiveFile: '$(Build.ArtifactStagingDirectory)/altac-linux-amd64.tar.xz'
+
+  - bash: |
+      shopt -s extglob
+      rm -r !(altac-linux-amd64.tar.xz)
+    workingDirectory: $(Build.ArtifactStagingDirectory)
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    displayName: "Remove unnecessary files (for release)"
 
   # publish the relevant artifacts
   - task: PublishPipelineArtifact@0
+    displayName: "Publish the relevant artifacts"
     inputs:
       artifactName: "altac-linux-amd64"
       targetPath: $(Build.ArtifactStagingDirectory)
@@ -58,6 +79,7 @@ jobs:
   steps:
   # configure it
   - task: CMake@1
+    displayName: "Configure project with CMake"
     inputs:
       cmakeArgs: ".."
 
@@ -65,41 +87,58 @@ jobs:
   # note: Visual Studio requires the build configuration type at build time,
   #       not configuration time (unlike Make on Linux and macOS)
   - task: CMake@1
+    displayName: "Build project (for release)"
     condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
     inputs:
       cmakeArgs: "--build . --config Release"
   # otherwise, build for debug
   - task: CMake@1
+    displayName: "Build project (for debug)"
     condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
     inputs:
-      cmakeArgs: "--build --config Debug ."
+      cmakeArgs: "--build . --config Debug"
 
   # [debug] copy the executable (and any related products)
   - task: CopyFiles@2
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
-    displayName: "Copy the executable (and related files) to artifact directory"
+    displayName: "Copy the executable (and related files) to artifact directory (for release)"
+    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
     inputs:
       sourceFolder: "build\\bin\\Debug"
       contents: "*"
-      targetFolder: '$(Build.ArtifactStagingDirectory)\\bin'
+      targetFolder: '$(Build.ArtifactStagingDirectory)'
   # [release] copy the executable (and any related products)
   - task: CopyFiles@2
-    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
-    displayName: "Copy the executable (and related files) to artifact directory"
+    displayName: "Copy the executable (and related files) to artifact directory (for release)"
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
     inputs:
       sourceFolder: "build\\bin\\Release"
       contents: "*"
-      targetFolder: '$(Build.ArtifactStagingDirectory)\\bin'
+      targetFolder: '$(Build.ArtifactStagingDirectory)'
 
   # copy stdlib
-  - task: CopyFiles@2
+  # hehe, windows has bash :)
+  - bash: cp -r stdlib "$(Build.ArtifactStagingDirectory)/stdlib"
     displayName: "Copy the standard library to artifact directory"
+
+  - task: ArchiveFiles@2
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    displayName: "Create a release archive"
     inputs:
-      contents: "stl/**/*"
-      targetFolder: $(Build.ArtifactStagingDirectory)
+      rootFolderOrFile: '$(Build.ArtifactStagingDirectory)'
+      includeRootFolder: false
+      archiveType: 'zip'
+      archiveFile: '$(Build.ArtifactStagingDirectory)/altac-win64.zip'
+
+  - bash: |
+      shopt -s extglob
+      rm -r !(altac-win64.zip)
+    workingDirectory: $(Build.ArtifactStagingDirectory)
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    displayName: "Remove unnecessary files (for release)"
 
   # publish the relevant artifacts
   - task: PublishPipelineArtifact@0
+    displayName: "Publish the relevant artifacts"
     inputs:
       artifactName: "altac-win64"
       targetPath: $(Build.ArtifactStagingDirectory)
@@ -110,18 +149,21 @@ jobs:
   steps:
   # if this is a tagged commit, build for release
   - task: CMake@1
+    displayName: "Configure project with CMake (for release)"
     condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
     inputs:
       cmakeArgs: "-DCMAKE_BUILD_TYPE=Release .."
 
   # otherwise, build for debug
   - task: CMake@1
+    displayName: "Configure project with CMake (for debug)"
     condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
     inputs:
       cmakeArgs: "-DCMAKE_BUILD_TYPE=Debug .."
 
   # build it
   - task: CMake@1
+    displayName: "Build project"
     inputs:
       cmakeArgs: "--build ."
 
@@ -134,14 +176,30 @@ jobs:
       targetFolder: '$(Build.ArtifactStagingDirectory)/bin'
 
   # copy stdlib
-  - task: CopyFiles@2
+  - bash: |
+      mkdir -p "$(Build.ArtifactStagingDirectory)/lib"
+      cp -r stdlib "$(Build.ArtifactStagingDirectory)/lib/alta-stdlib"
     displayName: "Copy the standard library to artifact directory"
+
+  - task: ArchiveFiles@2
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    displayName: "Create a release archive"
     inputs:
-      contents: "stl/**/*"
-      targetFolder: $(Build.ArtifactStagingDirectory)/lib
+      rootFolderOrFile: '$(Build.ArtifactStagingDirectory)'
+      includeRootFolder: false
+      archiveType: 'zip'
+      archiveFile: '$(Build.ArtifactStagingDirectory)/altac-macos.zip'
+
+  - bash: |
+      shopt -s extglob
+      rm -r !(altac-macos.zip)
+    workingDirectory: $(Build.ArtifactStagingDirectory)
+    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    displayName: "Remove unnecessary files (for release)"
 
   # publish the relevant artificats
   - task: PublishPipelineArtifact@0
+    displayName: "Publish the relevant artifacts"
     inputs:
       artifactName: "altac-macos"
       targetPath: $(Build.ArtifactStagingDirectory)
