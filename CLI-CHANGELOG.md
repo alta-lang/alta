@@ -20,8 +20,9 @@ This project follows [semantic versioning](https://semver.org).
 ### Changed
   * Debug builds now use the local stdlib in-place, instead of copying it to the build directory
     * They also fallback to using the executable-relative stdlib path when the debug stdlib can't be found
+  * Build artificats are now put into their own folders in the build directory: `bin` for executables and `lib` for libraries
 ### Updated
-  * Talta v0.7.0
+  * Talta v0.7.1
 
 ## [0.2.0] - 2018-11-18
 ### Added
