@@ -4,9 +4,11 @@ project(alta)
 
 # we only need to add Talta
 # it'll automatically pull in AltaCore as well
-add_subdirectory("${PROJECT_SOURCE_DIR}/deps/talta")
+# btw, we add EXCLUDE_FROM_ALL to prevent the the subdirectories
+# from installing anything
+add_subdirectory("${PROJECT_SOURCE_DIR}/deps/talta" EXCLUDE_FROM_ALL)
 
-add_subdirectory("${PROJECT_SOURCE_DIR}/deps/crossguid")
+add_subdirectory("${PROJECT_SOURCE_DIR}/deps/crossguid" EXCLUDE_FROM_ALL)
 
 add_executable(altac
   "${PROJECT_SOURCE_DIR}/src/main.cpp"
@@ -28,3 +30,27 @@ set_target_properties(altac
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+# install files
+if (WIN32)
+  install(TARGETS altac
+    RUNTIME DESTINATION .
+  )
+else()
+  install(TARGETS altac
+    RUNTIME DESTINATION bin
+  )
+endif()
+
+# install standard library
+if (WIN32)
+  install(DIRECTORY "${PROJECT_SOURCE_DIR}/stdlib/"
+    DESTINATION stdlib
+    FILES_MATCHING PATTERN "*"
+  )
+else()
+  install(DIRECTORY "${PROJECT_SOURCE_DIR}/stdlib/"
+    DESTINATION lib/alta-stdlib
+    FILES_MATCHING PATTERN "*"
+  )
+endif()
