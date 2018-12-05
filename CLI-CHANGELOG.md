@@ -6,6 +6,13 @@ This project follows [semantic versioning](https://semver.org).
 ## [Unreleased]
 Nothing yet.
 
+## [0.3.1] - 2018-12-04
+### Fixed
+  * Fixed a module resolution error when the CLI is launched using a relative path on Linux
+    * Possibly affected macOS as well
+    * Fixed by absolutifying the program's path relative to the current working directory
+      * Has no effect when the path is already absolute, so :+1:
+
 ## [0.3.0] - 2018-12-04
 ### Added
   * Standard library module/package resolution

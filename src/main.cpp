@@ -13,11 +13,11 @@ int main(int argc, char** argv) {
   }
 
   if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
-    printf("AltaCore CLI v1.0.0\n");
+    printf("AltaCore CLI v3.0.1\n");
     return 0;
   }
 
-  auto programPath = AltaCore::Filesystem::Path(argv[0]);
+  auto programPath = AltaCore::Filesystem::Path(argv[0]).absolutify();
 
   // set our standard library path
 #ifndef NDEBUG
@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
 
   outfileIndex.close();
 
-  printf("%sSuccessfully transpiled input!%s", CLI::COLOR_GREEN, CLI::COLOR_NORMAL);
+  printf("%sSuccessfully transpiled input!%s\n", CLI::COLOR_GREEN, CLI::COLOR_NORMAL);
 
   return 0;
 };
