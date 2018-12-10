@@ -4,8 +4,14 @@ All the changes for Alta's transpiler command line interface will be kept in thi
 This project follows [semantic versioning](https://semver.org).
 
 ## [Unreleased]
+### Added
+  * CMakeLists.txt generation for generated C code
+  * Command line interface options (via [TCLAP](http://tclap.sourceforge.net/))
+    * Verbose output option
+    * Custom output directory option
+  * Support individual target compilation or full package compilation
 ### Updated
-  * [Talta f419719](https://github.com/alta-lang/talta/blob/f419719631dfc6ebebb85da26b4d033c90164f85/CHANGELOG.md)
+  * [Talta fb60923](https://github.com/alta-lang/talta/blob/f419719631dfc6ebebb85da26b4d033c90164f85/CHANGELOG.md)
 
 ## [0.3.1] - 2018-12-04
 ### Fixed
