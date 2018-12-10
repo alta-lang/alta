@@ -1,2 +1,6 @@
 name: examples
 version: 1.0.0
+targets:
+- name: hello-world
+  main: hello-world.alta
+  type: exe

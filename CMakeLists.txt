@@ -14,7 +14,10 @@ add_executable(altac
   "${PROJECT_SOURCE_DIR}/src/main.cpp"
   "${PROJECT_SOURCE_DIR}/src/printers.cpp"
 )
-target_include_directories(altac PRIVATE "${PROJECT_SOURCE_DIR}/include")
+target_include_directories(altac
+  PRIVATE "${PROJECT_SOURCE_DIR}/include"
+  PRIVATE "${PROJECT_SOURCE_DIR}/deps/tclap/include"
+)
 
 target_link_libraries(altac PUBLIC altacore talta crossguid)
 
