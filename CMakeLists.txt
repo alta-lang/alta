@@ -8,8 +8,6 @@ project(alta)
 # from installing anything
 add_subdirectory("${PROJECT_SOURCE_DIR}/deps/talta" EXCLUDE_FROM_ALL)
 
-add_subdirectory("${PROJECT_SOURCE_DIR}/deps/crossguid" EXCLUDE_FROM_ALL)
-
 add_executable(altac
   "${PROJECT_SOURCE_DIR}/src/main.cpp"
   "${PROJECT_SOURCE_DIR}/src/printers.cpp"
