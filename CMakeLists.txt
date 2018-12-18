@@ -22,6 +22,9 @@ target_link_libraries(altac PUBLIC altacore talta crossguid)
 # define the stdlib directory for debug builds
 target_compile_definitions(altac PRIVATE ALTA_DEBUG_STDLIB_PATH="${PROJECT_SOURCE_DIR}/stdlib")
 
+# define the runtime directory for debug builds
+target_compile_definitions(altac PRIVATE ALTA_DEBUG_RUNTIME_PATH="${PROJECT_SOURCE_DIR}/runtime")
+
 set_target_properties(altac
   PROPERTIES
   CXX_STANDARD 17
@@ -52,6 +55,19 @@ if (WIN32)
 else()
   install(DIRECTORY "${PROJECT_SOURCE_DIR}/stdlib/"
     DESTINATION lib/alta-stdlib
+    FILES_MATCHING PATTERN "*"
+  )
+endif()
+
+# install runtime
+if (WIN32)
+  install(DIRECTORY "${PROJECT_SOURCE_DIR}/runtime/"
+    DESTINATION runtime
+    FILES_MATCHING PATTERN "*"
+  )
+else()
+  install(DIRECTORY "${PROJECT_SOURCE_DIR}/runtime/"
+    DESTINATION lib/alta-runtime
     FILES_MATCHING PATTERN "*"
   )
 endif()

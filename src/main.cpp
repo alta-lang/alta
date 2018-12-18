@@ -50,6 +50,28 @@ int main(int argc, char** argv) {
 #endif
 #endif
 
+    // set our runtime path
+    AltaCore::Filesystem::Path runtimePath;
+#ifndef NDEBUG
+    auto debugRuntimePath = AltaCore::Filesystem::Path(ALTA_DEBUG_RUNTIME_PATH);
+    if (debugRuntimePath.exists()) {
+      runtimePath = debugRuntimePath;
+    } else {
+#if defined(_WIN32) || defined(_WIN64)
+      runtimePath = programPath.dirname() / "runtime";
+#else
+      runtimePath = programPath.dirname().dirname() / "lib" / "alta-runtime";
+#endif
+    }
+#else
+    // we're in a release build
+#if defined(_WIN32) || defined(_WIN64)
+    runtimePath = programPath.dirname() / "runtime";
+#else
+    runtimePath = programPath.dirname().dirname() / "lib" / "alta-runtime";
+#endif
+#endif
+
     bool givenPackage = false;
     std::string filename = filenameString.getValue();
     auto fn = AltaCore::Filesystem::Path(filename).absolutify();
@@ -108,6 +130,9 @@ int main(int argc, char** argv) {
 
     AltaCore::Filesystem::mkdirp(outDir);
 
+    auto outdirRuntime = outDir / "_runtime";
+    AltaCore::Filesystem::copyDirectory(runtimePath, outdirRuntime);
+
     std::ofstream rootCmakeLists((outDir / "CMakeLists.txt").toString());
 
     rootCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
@@ -129,6 +154,8 @@ int main(int argc, char** argv) {
       std::map<std::string, AltaCore::Preprocessor::Expression> defs;
       std::map<std::string, std::string> results;
       AltaCore::Preprocessor::Preprocessor prepo(fn, defs, results);
+
+      Talta::registerAttributes(fn);
 
       if (!file.is_open()) {
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to open the input file (\"" << fn.toString() << '"' << std::endl;
@@ -180,6 +207,9 @@ int main(int argc, char** argv) {
         if (results.find(path.absolutify().toString()) == results.end()) {
           throw std::runtime_error("its not here.");
         }
+
+        Talta::registerAttributes(path);
+
         AltaCore::Lexer::Lexer otherLexer;
 
         otherLexer.feed(results[path.absolutify().toString()]);
@@ -315,15 +345,21 @@ int main(int argc, char** argv) {
         outfileC << "#include \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
         outfileC << cRoot->toString();
 
+        auto mangledModuleName = Talta::mangleName(mod.get());
+
+        // include the Alta common runtime header
+        outfileH << "#define _ALTA_RUNTIME_COMMON_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/common.h\"\n";
+
         // include the index in the module's header, otherwise we won't be able to find our dependencies
         outfileH << "#include \"" << indexHeaderPath.relativeTo(hOut).toString('/') << "\"\n";
+
         outfileH << hRoot->toString();
 
         outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << cOut.relativeTo(modOutDir).toString('/') << "\"\n";
 
         // finally, add our header to the index for all our dependents
         for (auto& dependent: mod->dependents) {
-          outfileIndex << "#define _ALTA_MODULE_" << Talta::mangleName(dependent.get()) << "_0_INCLUDE_" << Talta::mangleName(mod.get()) << " \"" << hOut.relativeTo(outDir / dependent->name).toString('/') << "\"\n";
+          outfileIndex << "#define _ALTA_MODULE_" << Talta::mangleName(dependent.get()) << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(outDir / dependent->name).toString('/') << "\"\n";
         }
       }
 
