@@ -16,10 +16,14 @@ int main(int argc, char** argv) {
 
     TCLAP::CmdLine cmd("altac, a C transpiler for the Alta language", ' ', "0.3.1");
 
+    TCLAP::SwitchArg compileSwitch("c", "compile", "Whether to compile the generated C code with CMake after transpilation");
+    TCLAP::ValueArg<std::string> generatorArg("g", "cmake-generator", "The generator to use with CMake when compiling code. Only has meaning when `-c` is specificed", false, "", "cmake-generator");
     TCLAP::SwitchArg verboseSwitch("v", "verbose", "Whether to output extra information");
     TCLAP::ValueArg<std::string> outdirPath("o", "out-dir", "The directory in which to put the generated C files. Will be created if it doesn't exist", false, defaultOutDir, "folder");
     TCLAP::UnlabeledValueArg<std::string> filenameString("module-or-package-path", "A path to a file (for modules) or folder (for packages)", true, "", "file-or-folder");
 
+    cmd.add(generatorArg);
+    cmd.add(compileSwitch);
     cmd.add(verboseSwitch);
     cmd.add(outdirPath);
     cmd.add(filenameString);
@@ -95,7 +99,7 @@ int main(int argc, char** argv) {
           try {
             auto nearestInfo = AltaCore::Modules::findInfo(fn);
             std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": nearest package found is located at \"" << nearestInfo.toString() << '"' << std::endl;
-          } catch (AltaCore::Modules::PackageInformationNotFoundError& e) {
+          } catch (AltaCore::Modules::PackageInformationNotFoundError&) {
             // ...
           }
           return 7;
@@ -108,7 +112,7 @@ int main(int argc, char** argv) {
           std::cout << CLI::COLOR_YELLOW << "Warning" << CLI::COLOR_NORMAL << ": failed to find a main module for \"" << fn.toString() << "\". Using default main of \"" << mainPackageModulePath.toString() << '"' << std::endl;
         }
         targets = modInfo.targets;
-      } catch (AltaCore::Modules::ModuleError& e) {
+      } catch (AltaCore::Modules::ModuleError&) {
         mainPackageModulePath = fn / "main.alta";
         AltaCore::Modules::TargetInfo targetInfo;
         targetInfo.main = fn;
@@ -122,10 +126,28 @@ int main(int argc, char** argv) {
       }
       fn = mainPackageModulePath;
     } else {
-      AltaCore::Modules::TargetInfo targetInfo;
-      targetInfo.main = fn;
-      targetInfo.name = fn.filename();
-      targets.push_back(targetInfo);
+      try {
+        auto modInfo = AltaCore::Modules::getInfo(fn);
+        bool found = false;
+        for (auto& target: modInfo.targets) {
+          if (target.main == fn) {
+            targets.push_back(target);
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          AltaCore::Modules::TargetInfo targetInfo;
+          targetInfo.main = fn;
+          targetInfo.name = fn.filename();
+          targets.push_back(targetInfo);
+        }
+      } catch (AltaCore::Modules::PackageInformationNotFoundError&) {
+        AltaCore::Modules::TargetInfo targetInfo;
+        targetInfo.main = fn;
+        targetInfo.name = fn.filename();
+        targets.push_back(targetInfo);
+      }
     }
 
     AltaCore::Filesystem::mkdirp(outDir);
@@ -147,6 +169,7 @@ int main(int argc, char** argv) {
         return 8;
       }
 
+      rootCmakeLists << "set(ALTA_CURRENT_PROJECT_BINARY_DIR \"${CMAKE_BINARY_DIR}/" << target.name << "\")\n";
       rootCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/" << target.name << "\")\n";
 
       std::ifstream file(fn.toString());
@@ -226,7 +249,7 @@ int main(int argc, char** argv) {
 
       parser.parse();
 
-      if (parser.root == nullptr) {
+      if (!parser.root || !(*parser.root)) {
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to parse \"" << fn.toString() << '"' << std::endl;
         return 6;
       }
@@ -240,8 +263,12 @@ int main(int argc, char** argv) {
       }
 
       auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(*parser.root);
-      root->detail(fn);
 
+      if (!root) {
+        std::cerr << CLI::COLOR_RED << "Internal error" << CLI::COLOR_NORMAL << ": root node returned by parser was not an `AltaCore::AST::RootNode`" << std::endl;
+      }
+
+      root->detail(fn);
       root->$module->packageInfo.isEntryPackage = true;
 
       if (verboseSwitch.getValue()) {
@@ -255,6 +282,19 @@ int main(int argc, char** argv) {
       AltaCore::Filesystem::mkdirp(outDir); // ensure the output directory has been created
 
       auto transpiledModules = Talta::recursivelyTranspileToC(root);
+
+      // TL;DR: reset the attributes, otherwise you'll end up with dangling
+      //        references in the attribute callbacks for attributes in the
+      //        `CTranspiler` domain
+      //
+      // reseting the attributes is necessary because otherwise
+      // any modules used in for this target that are reused for any
+      // other targets retain the old attribute callbacks;
+      // each target uses a different transpiler instance,
+      // so that would leave attribute callbacks created for
+      // with a reference to a transpiler instance that has
+      // already been disposed of, leading to LOTS of dangling references
+      AltaCore::Attributes::clearAllAttributes();
 
       auto indexHeaderPath = outDir / "index.h";
       std::ofstream outfileIndex(indexHeaderPath.toString());
@@ -322,7 +362,7 @@ int main(int argc, char** argv) {
 
           for (auto& item: packageDependencies[mod->packageInfo.name]) {
             lists << "if (NOT ALTA_PACKAGE_DEFINITION_CHECK_" << item << ")\n";
-            lists << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << item << "\" \"${CMAKE_BINARY_DIR}/" << item << "\")\n";
+            lists << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << item << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << item << "\")\n";
             lists << "endif()\n";
           }
 
@@ -394,6 +434,42 @@ int main(int argc, char** argv) {
     rootCmakeLists.close();
 
     std::cout << CLI::COLOR_GREEN << "Successfully transpiled input!" << CLI::COLOR_NORMAL << std::endl;
+
+    if (compileSwitch.getValue()) {
+      if (system(NULL) == 0) {
+        std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to compile the C code - no command processor is available." << std::endl;
+        return 11;
+      }
+
+      AltaCore::Filesystem::mkdirp(origOutDir / "_build");
+
+      std::string configureCommand = "cmake -S \"" + origOutDir.toString() + "\" -B \"" + (origOutDir / "_build").toString() + '"';
+      std::string compileCommand = "cmake --build \"" + (origOutDir / "_build").toString() + '"';
+
+      if (!generatorArg.getValue().empty()) {
+        configureCommand += " -G \"" + generatorArg.getValue() + "\"";
+      }
+
+      auto configureResult = system(configureCommand.c_str());
+
+      if (configureResult != 0) {
+        std::cerr << CLI::COLOR_RED << "Failed to configure the C code for building." << CLI::COLOR_NORMAL << std::endl;
+        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": The command that was executed was `" << configureCommand << '`' << std::endl;
+        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": CMake exited with status code " << configureResult << std::endl;
+        return 9;
+      }
+
+      auto compileResult = system(compileCommand.c_str());
+
+      if (compileResult != 0) {
+        std::cerr << CLI::COLOR_RED << "Failed to compile the C code." << CLI::COLOR_NORMAL << std::endl;
+        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": The command that was executed was `" << compileCommand << '`' << std::endl;
+        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": CMake exited with status code " << compileResult << std::endl;
+        return 10;
+      }
+
+      std::cout << CLI::COLOR_GREEN << "Successfully compiled the generated C code!" << CLI::COLOR_NORMAL << std::endl;
+    }
 
     return 0;
   } catch (TCLAP::ArgException& e) {
