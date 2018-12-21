@@ -1,0 +1,12 @@
+import printf from "io"
+
+function fibonacci(n: int): int {
+  if n <= 2 return 1
+  return fibonacci(n - 1) + fibonacci (n - 2)
+}
+
+literal function main(): int {
+  printf("The 10th term in the Fibonacci sequence is %d", fibonacci(10))
+
+  return 0
+}

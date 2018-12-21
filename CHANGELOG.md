@@ -6,6 +6,43 @@ This project and all of its subprojects follow [semantic versioning](https://sem
 ## [Unreleased]
 Nothing yet.
 
+## [0.4.0] - 2018-12-20
+### Added
+  * Variable parameters
+    * e.g. `declare function someFunc(someParams: int...): void`
+    * Originally added to properly support `printf`, but that required 2 other features that were also added: parameter attributes and arbitrary types
+    * Fully supported for function declarations, partially supported for function definitions
+  * Parameter attributes
+    * e.g. `function foo(@SomeDomain.someAttribute @someOtherAttribute bar: int): void`
+  * Conditional statements. Examples:
+    * `if true return 9`
+    * ```alta
+      if 8 > 9 {
+        return 1
+      } else if 8 == 9 {
+        return 2
+      } else {
+        return 3
+      }
+      ```
+  * Conditional expressions
+    * Two syntaxes are supported: verbal and punctual
+    * e.g. Verbal = `3 if true else 9`
+    * e.g. Punctual = `true ? 3 : 9`
+    * The verbal style is inteded to be more natural to read, whereas the punctual style is inteded to be easier to use for people who come other languages where it is used (e.g. C, JavaScript, Java, C#, etc.)
+  * More binary operators
+    * Equality (`==`)
+    * Inequality (`!=`)
+    * Greater than (`>`)
+    * Less than (`<`)
+    * Greater than or equal to (`>=`)
+    * Less than or equal to (`<=`)
+  * `void` type
+  * Arbitrary types for function declartions
+    * e.g. `declare function foo(bar: any): void`
+    * This effectively disables type checking for whatever it's used on. In the example, it will allow any value to be passed in for `bar`
+    * Originally added to properly support `printf`
+
 ## [0.3.0] - 2018-12-03
 ### Added
   * Function-pointer types

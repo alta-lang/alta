@@ -1,7 +1,8 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
+trigger:
+- master
+- staging-*
+- dev-*
+- refs/tags/*
 
 jobs:
 - job: Linux
@@ -48,6 +49,12 @@ jobs:
       mkdir -p "$(Build.ArtifactStagingDirectory)/lib"
       cp -r stdlib "$(Build.ArtifactStagingDirectory)/lib/alta-stdlib"
     displayName: "Copy the standard library to artifact directory"
+
+  # copy runtime
+  - bash: |
+      mkdir -p "$(Build.ArtifactStagingDirectory)/lib"
+      cp -r runtime "$(Build.ArtifactStagingDirectory)/lib/alta-runtime"
+    displayName: "Copy the runtime to artifact directory"
 
   - task: ArchiveFiles@2
     condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
@@ -120,6 +127,10 @@ jobs:
   - bash: cp -r stdlib "$(Build.ArtifactStagingDirectory)/stdlib"
     displayName: "Copy the standard library to artifact directory"
 
+  # copy runtime
+  - bash: cp -r runtime "$(Build.ArtifactStagingDirectory)/runtime"
+    displayName: "Copy the runtime to artifact directory"
+
   - task: ArchiveFiles@2
     condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
     displayName: "Create a release archive"
@@ -180,6 +191,12 @@ jobs:
       mkdir -p "$(Build.ArtifactStagingDirectory)/lib"
       cp -r stdlib "$(Build.ArtifactStagingDirectory)/lib/alta-stdlib"
     displayName: "Copy the standard library to artifact directory"
+
+  # copy runtime
+  - bash: |
+      mkdir -p "$(Build.ArtifactStagingDirectory)/lib"
+      cp -r runtime "$(Build.ArtifactStagingDirectory)/lib/alta-runtime"
+    displayName: "Copy the runtime to artifact directory"
 
   - task: ArchiveFiles@2
     condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
