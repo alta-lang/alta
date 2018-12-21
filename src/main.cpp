@@ -199,21 +199,19 @@ int main(int argc, char** argv) {
       lexer.feed(results[fn.toString()]);
 
       if (verboseSwitch.getValue()) {
-        /*
         printf("%sTokens:%s\n", CLI::COLOR_BLUE, CLI::COLOR_NORMAL);
         for (const auto& token: lexer.tokens) {
-        printf(
-        "%s token (with type %d) found at %zu:%zu with content \"%s\"\n",
-        AltaCore::Lexer::TokenType_names[(int)token.type],
-        (int)token.type,
-        token.line,
-        token.column,
-        token.raw.c_str()
-        );
+          printf(
+            "%s token (with type %d) found at %zu:%zu with content \"%s\"\n",
+            AltaCore::Lexer::TokenType_names[(int)token.type],
+            (int)token.type,
+            token.line,
+            token.column,
+            token.raw.c_str()
+          );
         }
 
         if (lexer.absences.size() > 0) printf("\n");
-        */
       }
 
       for (const auto& absence: lexer.absences) {

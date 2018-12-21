@@ -4,3 +4,6 @@ targets:
 - name: hello-world
   main: hello-world.alta
   type: exe
+- name: fibonacci
+  main: fibonacci.alta
+  type: exe

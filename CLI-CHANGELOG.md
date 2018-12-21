@@ -4,14 +4,18 @@ All the changes for Alta's transpiler command line interface will be kept in thi
 This project follows [semantic versioning](https://semver.org).
 
 ## [Unreleased]
+Nothing yet.
+
+## [0.4.0] - 2018-12-20
 ### Added
   * CMakeLists.txt generation for generated C code
   * Command line interface options (via [TCLAP](http://tclap.sourceforge.net/))
     * Verbose output option
     * Custom output directory option
   * Support individual target compilation or full package compilation
+  * New example: [Fibonacci](examples/fibonacci.alta)
 ### Updated
-  * [Talta fb60923](https://github.com/alta-lang/talta/blob/f419719631dfc6ebebb85da26b4d033c90164f85/CHANGELOG.md)
+  * [Talta v0.8.0](https://github.com/alta-lang/talta/blob/v0.8.0/CHANGELOG.md#080---2018-12-20)
 
 ## [0.3.1] - 2018-12-04
 ### Fixed
