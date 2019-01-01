@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <iostream>
 #include <set>
+#include <chrono>
 
 #include "../include/cli.hpp"
 #include <crossguid/guid.hpp>
@@ -21,13 +22,18 @@ int main(int argc, char** argv) {
     TCLAP::SwitchArg verboseSwitch("v", "verbose", "Whether to output extra information");
     TCLAP::ValueArg<std::string> outdirPath("o", "out-dir", "The directory in which to put the generated C files. Will be created if it doesn't exist", false, defaultOutDir, "folder");
     TCLAP::UnlabeledValueArg<std::string> filenameString("module-or-package-path", "A path to a file (for modules) or folder (for packages)", true, "", "file-or-folder");
+    TCLAP::SwitchArg benchmarkSwitch("", "benchmark", "Whether to time each section of code processing and report the result");
 
     cmd.add(generatorArg);
     cmd.add(compileSwitch);
     cmd.add(verboseSwitch);
+    cmd.add(benchmarkSwitch);
     cmd.add(outdirPath);
     cmd.add(filenameString);
     cmd.parse(argc, argv);
+
+    bool isVerbose = verboseSwitch.getValue();
+    bool doTime = benchmarkSwitch.getValue();
 
     auto programPath = AltaCore::Filesystem::Path(argv[0]).absolutify();
 
@@ -243,13 +249,19 @@ int main(int argc, char** argv) {
         return root;
       };
 
+      auto parseTimeStart = std::chrono::high_resolution_clock::now();
       AltaCore::Parser::Parser parser(lexer.tokens);
-
       parser.parse();
+      auto parseTimeEnd = std::chrono::high_resolution_clock::now();
 
       if (!parser.root || !(*parser.root)) {
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to parse \"" << fn.toString() << '"' << std::endl;
         return 6;
+      }
+
+      if (doTime || isVerbose) {
+        auto parseDuration = std::chrono::duration_cast<std::chrono::milliseconds>(parseTimeEnd - parseTimeStart);
+        std::cout << CLI::COLOR_BLUE << "Parsed main module for target \"" << target.name << "\" in " << parseDuration.count() << " milliseconds" << CLI::COLOR_NORMAL << std::endl;
       }
 
       if (verboseSwitch.getValue()) {
