@@ -180,9 +180,31 @@ int main(int argc, char** argv) {
 
       std::ifstream file(fn.toString());
       std::string line;
+      std::unordered_map<std::string, std::string> originalSources;
       std::map<std::string, AltaCore::Preprocessor::Expression> defs;
       std::map<std::string, std::string> results;
-      AltaCore::Preprocessor::Preprocessor prepo(fn, defs, results);
+      std::unordered_map<std::string, std::vector<AltaCore::Preprocessor::Location>> locationMaps;
+      AltaCore::Preprocessor::Preprocessor prepo(fn, defs, results, locationMaps, [&](AltaCore::Preprocessor::Preprocessor& orig, AltaCore::Preprocessor::Preprocessor& newPre, std::string importRequest) {
+        auto path = AltaCore::Modules::resolve(importRequest, orig.filePath);
+        newPre.filePath = path;
+        std::ifstream file(path.toString());
+        std::string line;
+
+        if (!file.is_open()) {
+          throw std::runtime_error("Couldn't open the input file!");
+        }
+
+        while (std::getline(file, line)) {
+          if (file.peek() != EOF) {
+            line += "\n";
+          }
+          originalSources[path.toString()] += line;
+          newPre.feed(line);
+        }
+
+        file.close();
+        newPre.done();
+      });
 
       Talta::registerAttributes(fn);
 
@@ -195,13 +217,65 @@ int main(int argc, char** argv) {
         if (file.peek() != EOF) {
           line += "\n";
         }
+        originalSources[fn.toString()] += line;
         prepo.feed(line);
       }
 
       file.close();
       prepo.done();
 
-      AltaCore::Lexer::Lexer lexer;
+      auto locationMapper = [&](AltaCore::Filesystem::Path& filePath) {
+        return [&](size_t prepoLine, size_t prepoColumn) -> std::pair<size_t, size_t> {
+          using AltaCore::Preprocessor::Location;
+
+          auto& locations = locationMaps[fn.absolutify().toString()];
+          if (locations.size() == 0) {
+            return std::make_pair(prepoLine, prepoColumn);
+          }
+          
+          auto prevLocation = Location(0, 0, 0, 0, 1);
+          auto defaultLocation = Location(1, 1, 1, 1, 0);
+          auto* prevLast = &prevLocation;
+          auto* last = &defaultLocation;
+
+          bool even = true;
+          for (auto& location: locations) {
+            even = !even;
+            if (
+              location.newLine > prepoLine ||
+              (
+                location.newLine == prepoLine &&
+                location.newColumn > prepoColumn
+              )
+            ) {
+              if (even) {
+                prevLast = last;
+                last = &location;
+              }
+              break;
+            }
+            prevLast = last;
+            last = &location;
+          }
+
+          if (
+            prevLast->newLine <= prepoLine && last->newLine >= prepoLine &&
+            prevLast->newColumn <= prepoColumn && last->newColumn >= prepoColumn &&
+            prevLast != &prevLocation &&
+            last != &defaultLocation
+          ) {
+            return std::make_pair(prevLast->newLine, prevLast->newColumn);
+          } else {
+            if (last->newLine == prepoLine) {
+              return std::make_pair(last->originalLine, prepoColumn - last->newColumn + last->originalColumn);
+            } else {
+              return std::make_pair(prepoLine - last->newLine + last->originalLine, prepoColumn);
+            }
+          }
+        };
+      };
+
+      AltaCore::Lexer::Lexer lexer(locationMapper(fn));
       lexer.feed(results[fn.toString()]);
 
       if (verboseSwitch.getValue()) {
@@ -237,11 +311,11 @@ int main(int argc, char** argv) {
 
         Talta::registerAttributes(path);
 
-        AltaCore::Lexer::Lexer otherLexer;
+        AltaCore::Lexer::Lexer otherLexer(locationMapper(path));
 
         otherLexer.feed(results[path.absolutify().toString()]);
 
-        AltaCore::Parser::Parser otherParser(otherLexer.tokens);
+        AltaCore::Parser::Parser otherParser(otherLexer.tokens, path);
         otherParser.parse();
         auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(*otherParser.root);
         root->detail(path);
@@ -250,7 +324,7 @@ int main(int argc, char** argv) {
       };
 
       auto parseTimeStart = std::chrono::high_resolution_clock::now();
-      AltaCore::Parser::Parser parser(lexer.tokens);
+      AltaCore::Parser::Parser parser(lexer.tokens, fn);
       parser.parse();
       auto parseTimeEnd = std::chrono::high_resolution_clock::now();
 
@@ -287,6 +361,32 @@ int main(int argc, char** argv) {
         CLI::Printers::printDET(parser.root->$module);
         printf("\n");
         */
+      }
+
+      try {
+        AltaCore::Validator::validate(root);
+      } catch (AltaCore::Validator::ValidationError& e) {
+        std::cerr << CLI::COLOR_RED << "AST failed semantic validation" << CLI::COLOR_NORMAL << std::endl;
+        std::cerr << "Error at " << e.file.toString() << ":" << e.line << ":" << e.column << std::endl;
+        if (originalSources.find(e.file.toString()) != originalSources.end()) {
+          auto& source = originalSources[e.file.toString()];
+          size_t firstNewline = -1;
+          for (size_t i = 1; i < e.line; i++) {
+            firstNewline = source.find('\n', firstNewline + 1);
+          }
+          auto secondNewline = source.find('\n', firstNewline + 1);
+          auto line = (secondNewline == -1) ? source.substr(firstNewline + 1) : source.substr(firstNewline + 1, secondNewline - firstNewline - 1);
+          std::cerr << line << std::endl;
+          for (size_t i = 1; i < e.column; i++) {
+            std::cerr << " ";
+          }
+          std::cerr << "^" << std::endl;
+          for (size_t i = 1; i < e.column; i++) {
+            std::cerr << " ";
+          }
+          std::cerr << e.what() << std::endl;
+        }
+        return 11;
       }
 
       AltaCore::Filesystem::mkdirp(outDir); // ensure the output directory has been created
@@ -486,5 +586,8 @@ int main(int argc, char** argv) {
     std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": " << e.error() << " for argument \"" << e.argId() << "\"" << std::endl;
 
     return 1;
+  } catch (std::runtime_error& e) {
+    std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": " << e.what() << std::endl;
+    return 100;
   }
 };

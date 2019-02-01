@@ -1,7 +1,25 @@
-export function something(): int {
-  return 4
+import malloc from "memory"
+
+export function rawstringLength(str: ptr byte): int {
+  let i: int = 0
+  while *(str + i) != 0 {
+    i = i + 1
+  }
+  return i + 1
 }
 
-export function otherThing(): int {
-  return 34
+export class String {
+  public var data: ptr byte = 0
+  public constructor() {
+    this.data = malloc(0)
+  }
+  public constructor(data: ptr byte) {
+    let len: int = rawstringLength(data)
+    this.data = malloc(len)
+    let i: int = 0
+    while i < len {
+      *(this.data + i) = *(data + i)
+      i = i + 1
+    }
+  }
 }

@@ -7,3 +7,6 @@ targets:
 - name: fibonacci
   main: fibonacci.alta
   type: exe
+- name: simple-class
+  main: simple-class.alta
+  type: exe
