@@ -5,21 +5,26 @@ export function rawstringLength(str: ptr byte): int {
   while *(str + i) != 0 {
     i = i + 1
   }
-  return i + 1
+  return i
 }
 
 export class String {
   public var data: ptr byte = 0
+  public var _length: int = 0
   public constructor() {
-    this.data = malloc(0)
+    this.data = malloc(1) as ptr byte
+    valueof this.data = 0
   }
   public constructor(data: ptr byte) {
-    let len: int = rawstringLength(data)
-    this.data = malloc(len)
+    this._length = rawstringLength(data)
+    this.data = malloc(this._length + 1) as ptr byte
+
     let i: int = 0
-    while i < len {
+    while i < this._length {
       *(this.data + i) = *(data + i)
       i = i + 1
     }
+
+    *(this.data + this._length) = 0
   }
 }
