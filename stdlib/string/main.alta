@@ -27,4 +27,12 @@ export class String {
 
     *(this.data + this._length) = 0
   }
+
+  @read public function length(): int {
+    return this._length
+  }
+
+  @read public function size(): int {
+    return this.length + 1
+  }
 }

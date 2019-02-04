@@ -156,6 +156,8 @@ int main(int argc, char** argv) {
       }
     }
 
+    AltaCore::registerGlobalAttributes();
+
     AltaCore::Filesystem::mkdirp(outDir);
 
     auto outdirRuntime = outDir / "_runtime";
