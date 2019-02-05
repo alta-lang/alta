@@ -9,29 +9,31 @@ export function rawstringLength(str: ptr byte): int {
 }
 
 export class String {
-  public var data: ptr byte = 0
-  public var _length: int = 0
+  private var _data: ptr byte = 0
+  private var _length: int = 0
   public constructor() {
-    this.data = malloc(1) as ptr byte
-    valueof this.data = 0
+    this._data = malloc(1) as ptr byte
+    valueof this._data = 0
   }
   public constructor(data: ptr byte) {
     this._length = rawstringLength(data)
-    this.data = malloc(this._length + 1) as ptr byte
+    this._data = malloc(this._length + 1) as ptr byte
 
     let i: int = 0
     while i < this._length {
-      *(this.data + i) = *(data + i)
+      *(this._data + i) = *(data + i)
       i = i + 1
     }
 
-    *(this.data + this._length) = 0
+    *(this._data + this._length) = 0
   }
 
+  @read public function data(): ptr byte {
+    return this._data
+  }
   @read public function length(): int {
     return this._length
   }
-
   @read public function size(): int {
     return this.length + 1
   }
