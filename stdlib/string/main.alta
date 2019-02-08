@@ -28,6 +28,13 @@ export class String {
     *(this._data + this._length) = 0
   }
 
+  public function charAt(i: int): ref byte {
+    if i > this._length {
+      return *(this._data + this._length)
+    }
+    return *(this._data + i)
+  }
+
   @read public function data(): ptr byte {
     return this._data
   }
