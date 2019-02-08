@@ -1,7 +1,7 @@
 import malloc from "memory"
 
-export function rawstringLength(str: ptr byte): int {
-  let i: int = 0
+export function rawstringLength(str: ptr byte): unsigned long long int {
+  let i: unsigned long long int = 0
   while *(str + i) != 0 {
     i = i + 1
   }
@@ -10,7 +10,7 @@ export function rawstringLength(str: ptr byte): int {
 
 export class String {
   private var _data: ptr byte = 0
-  private var _length: int = 0
+  private var _length: unsigned long long int = 0
   public constructor() {
     this._data = malloc(1) as ptr byte
     valueof this._data = 0
@@ -19,7 +19,7 @@ export class String {
     this._length = rawstringLength(data)
     this._data = malloc(this._length + 1) as ptr byte
 
-    let i: int = 0
+    let i: unsigned long long int = 0
     while i < this._length {
       *(this._data + i) = *(data + i)
       i = i + 1
@@ -28,7 +28,7 @@ export class String {
     *(this._data + this._length) = 0
   }
 
-  public function charAt(i: int): ref byte {
+  public function charAt(i: unsigned long long int): ref byte {
     if i > this._length {
       return *(this._data + this._length)
     }
@@ -38,10 +38,10 @@ export class String {
   @read public function data(): ptr byte {
     return this._data
   }
-  @read public function length(): int {
+  @read public function length(): unsigned long long int {
     return this._length
   }
-  @read public function size(): int {
+  @read public function size(): unsigned long long int {
     return this.length + 1
   }
 }
