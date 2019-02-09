@@ -357,6 +357,8 @@ int main(int argc, char** argv) {
       root->detail(fn);
       root->$module->packageInfo.isEntryPackage = true;
 
+      auto entryPackageInfo = root->$module->packageInfo;
+
       if (verboseSwitch.getValue()) {
         /*
         printf("\n%sDET:%s\n", CLI::COLOR_BLUE, CLI::COLOR_NORMAL);
@@ -478,7 +480,7 @@ int main(int argc, char** argv) {
             lists << "endif()\n";
           }
 
-          if (mod->packageInfo.isEntryPackage) {
+          if (mod->packageInfo.name == entryPackageInfo.name) {
             if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
               lists << "add_executable(";
             } else {
