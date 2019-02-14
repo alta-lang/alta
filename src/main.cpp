@@ -355,9 +355,9 @@ int main(int argc, char** argv) {
       }
 
       root->detail(fn);
-      root->$module->packageInfo.isEntryPackage = true;
+      root->info->module->packageInfo.isEntryPackage = true;
 
-      auto entryPackageInfo = root->$module->packageInfo;
+      auto entryPackageInfo = root->info->module->packageInfo;
 
       if (verboseSwitch.getValue()) {
         /*
@@ -432,7 +432,7 @@ int main(int argc, char** argv) {
       // setup root cmakelists
       generalCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
       generalCmakeLists << "project(" << indexUUID << ")\n";
-      generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/" << root->$module->packageInfo.name << "\")\n";
+      generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/" << root->info->module->packageInfo.name << "\")\n";
       generalCmakeLists.close();
 
       for (auto& [moduleName, info]: transpiledModules) {
