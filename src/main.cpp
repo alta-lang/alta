@@ -305,8 +305,13 @@ int main(int argc, char** argv) {
         return 3;
       }
 
+      std::unordered_map<std::string, std::shared_ptr<AltaCore::AST::RootNode>> importCache;
+
       AltaCore::Modules::parseModule = [&](std::string importRequest, AltaCore::Filesystem::Path requestingPath) -> std::shared_ptr<AltaCore::AST::RootNode> {
         auto path = AltaCore::Modules::resolve(importRequest, requestingPath);
+        if (auto& imp = importCache[path.absolutify().toString()]) {
+          return imp;
+        }
         if (results.find(path.absolutify().toString()) == results.end()) {
           throw std::runtime_error("its not here.");
         }
@@ -321,6 +326,8 @@ int main(int argc, char** argv) {
         otherParser.parse();
         auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(*otherParser.root);
         root->detail(path);
+
+        importCache[path.absolutify().toString()] = root;
 
         return root;
       };
