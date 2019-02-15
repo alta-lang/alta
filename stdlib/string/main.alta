@@ -3,7 +3,7 @@ import Size from "types"
 
 export function rawstringLength(str: ptr byte): Size {
   let i: Size = 0
-  while *(str + i) != 0 {
+  while str[i] != 0 {
     i = i + 1
   }
   return i
@@ -14,7 +14,7 @@ export class String {
   private var _length: Size = 0
   public constructor() {
     this._data = malloc(1) as ptr byte
-    valueof this._data = 0
+    this._data[0] = 0
   }
   public constructor(data: ptr byte) {
     this._length = rawstringLength(data)
@@ -22,21 +22,21 @@ export class String {
 
     let i: Size = 0
     while i < this._length {
-      *(this._data + i) = *(data + i)
+      this._data[i] = data[i]
       i = i + 1
     }
 
-    *(this._data + this._length) = 0
+    this._data[this._length] = 0
   }
 
   public function charAt(i: Size): ref byte {
     if i > this._length {
-      return *(this._data + this._length)
+      return this._data[this._length]
     }
-    return *(this._data + i)
+    return this._data[i]
   }
 
-  @read public function data(): ptr byte {
+  @read public function data(): ptr const byte {
     return this._data
   }
   @read public function length(): Size {
