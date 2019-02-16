@@ -374,8 +374,36 @@ int main(int argc, char** argv) {
         std::cerr << CLI::COLOR_RED << "Internal error" << CLI::COLOR_NORMAL << ": root node returned by parser was not an `AltaCore::AST::RootNode`" << std::endl;
       }
 
-      root->detail(fn);
-      root->info->module->packageInfo.isEntryPackage = true;
+      auto logError = [&](AltaCore::Errors::Error& e) {
+        std::cerr << "Error at " << e.position.file.toString() << ":" << e.position.line << ":" << e.position.column << std::endl;
+        if (originalSources.find(e.position.file.toString()) != originalSources.end()) {
+          auto& source = originalSources[e.position.file.toString()];
+          size_t firstNewline = -1;
+          for (size_t i = 1; i < e.position.line; i++) {
+            firstNewline = source.find('\n', firstNewline + 1);
+          }
+          auto secondNewline = source.find('\n', firstNewline + 1);
+          auto line = (secondNewline == -1) ? source.substr(firstNewline + 1) : source.substr(firstNewline + 1, secondNewline - firstNewline - 1);
+          std::cerr << line << std::endl;
+          for (size_t i = 1; i < e.position.column; i++) {
+            std::cerr << " ";
+          }
+          std::cerr << "^" << std::endl;
+          for (size_t i = 1; i < e.position.column; i++) {
+            std::cerr << " ";
+          }
+          std::cerr << e.what() << std::endl;
+        }
+      };
+
+      try {
+        root->detail(fn);
+        root->info->module->packageInfo.isEntryPackage = true;
+      } catch (AltaCore::Errors::DetailingError& e) {
+        std::cerr << CLI::COLOR_RED << "AST failed detailing" << CLI::COLOR_NORMAL << std::endl;
+        logError(e);
+        return 12;
+      }
 
       auto entryPackageInfo = root->info->module->packageInfo;
 
@@ -389,27 +417,9 @@ int main(int argc, char** argv) {
 
       try {
         AltaCore::Validator::validate(root);
-      } catch (AltaCore::Validator::ValidationError& e) {
+      } catch (AltaCore::Errors::ValidationError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed semantic validation" << CLI::COLOR_NORMAL << std::endl;
-        std::cerr << "Error at " << e.file.toString() << ":" << e.line << ":" << e.column << std::endl;
-        if (originalSources.find(e.file.toString()) != originalSources.end()) {
-          auto& source = originalSources[e.file.toString()];
-          size_t firstNewline = -1;
-          for (size_t i = 1; i < e.line; i++) {
-            firstNewline = source.find('\n', firstNewline + 1);
-          }
-          auto secondNewline = source.find('\n', firstNewline + 1);
-          auto line = (secondNewline == -1) ? source.substr(firstNewline + 1) : source.substr(firstNewline + 1, secondNewline - firstNewline - 1);
-          std::cerr << line << std::endl;
-          for (size_t i = 1; i < e.column; i++) {
-            std::cerr << " ";
-          }
-          std::cerr << "^" << std::endl;
-          for (size_t i = 1; i < e.column; i++) {
-            std::cerr << " ";
-          }
-          std::cerr << e.what() << std::endl;
-        }
+        logError(e);
         return 11;
       }
 
