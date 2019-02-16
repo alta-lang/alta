@@ -1,7 +1,7 @@
 import malloc from "memory"
-import Size from "types"
+import Size, rawstring, rawconststring from "types"
 
-export function rawstringLength(str: ptr byte): Size {
+export function rawstringLength(str: rawstring): Size {
   let i: Size = 0
   while str[i] != 0 {
     i = i + 1
@@ -10,15 +10,15 @@ export function rawstringLength(str: ptr byte): Size {
 }
 
 export class String {
-  private var _data: ptr byte = 0
+  private var _data: rawstring = 0
   private var _length: Size = 0
   public constructor() {
-    this._data = malloc(1) as ptr byte
+    this._data = malloc(1) as rawstring
     this._data[0] = 0
   }
-  public constructor(data: ptr byte) {
+  public constructor(data: rawstring) {
     this._length = rawstringLength(data)
-    this._data = malloc(this._length + 1) as ptr byte
+    this._data = malloc(this._length + 1) as rawstring
 
     let i: Size = 0
     while i < this._length {
@@ -36,7 +36,7 @@ export class String {
     return this._data[i]
   }
 
-  @read public function data(): ptr const byte {
+  @read public function data(): rawconststring {
     return this._data
   }
   @read public function length(): Size {

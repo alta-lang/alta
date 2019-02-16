@@ -163,6 +163,19 @@ int main(int argc, char** argv) {
     auto outdirRuntime = outDir / "_runtime";
     AltaCore::Filesystem::copyDirectory(runtimePath, outdirRuntime);
 
+    std::ofstream runtimeCmakeLists((outDir / "_runtime" / "CMakeLists.txt").absolutify().toString());
+    runtimeCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
+    runtimeCmakeLists << "project(alta-global-runtime)\n";
+    runtimeCmakeLists << "add_library(alta-global-runtime\n";
+    auto runtimeFiles = AltaCore::Filesystem::getDirectoryListing(outdirRuntime, true);
+    for (auto& runtimeFile: runtimeFiles) {
+      if (runtimeFile.extname() == "c") {
+        runtimeCmakeLists << "  \"${PROJECT_SOURCE_DIR}/" << runtimeFile.relativeTo(outdirRuntime).toString('/') << "\"\n";
+      }
+    }
+    runtimeCmakeLists << ")\n";
+    runtimeCmakeLists.close();
+
     std::ofstream rootCmakeLists((outDir / "CMakeLists.txt").toString());
 
     rootCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
@@ -186,27 +199,27 @@ int main(int argc, char** argv) {
       std::map<std::string, AltaCore::Preprocessor::Expression> defs;
       std::map<std::string, std::string> results;
       std::unordered_map<std::string, std::vector<AltaCore::Preprocessor::Location>> locationMaps;
-      AltaCore::Preprocessor::Preprocessor prepo(fn, defs, results, locationMaps, [&](AltaCore::Preprocessor::Preprocessor& orig, AltaCore::Preprocessor::Preprocessor& newPre, std::string importRequest) {
-        auto path = AltaCore::Modules::resolve(importRequest, orig.filePath);
-        newPre.filePath = path;
-        std::ifstream file(path.toString());
-        std::string line;
+      AltaCore::Preprocessor::Preprocessor prepo(fn, defs, results, locationMaps, AltaCore::Preprocessor::defaultFileResolver,
+        [&](AltaCore::Preprocessor::Preprocessor& orig, AltaCore::Preprocessor::Preprocessor& newPre, AltaCore::Filesystem::Path path) {
+          std::ifstream file(path.toString());
+          std::string line;
 
-        if (!file.is_open()) {
-          throw std::runtime_error("Couldn't open the input file!");
-        }
-
-        while (std::getline(file, line)) {
-          if (file.peek() != EOF) {
-            line += "\n";
+          if (!file.is_open()) {
+            throw std::runtime_error("Couldn't open the input file!");
           }
-          originalSources[path.toString()] += line;
-          newPre.feed(line);
-        }
 
-        file.close();
-        newPre.done();
-      });
+          while (std::getline(file, line)) {
+            if (file.peek() != EOF) {
+              line += "\n";
+            }
+            originalSources[path.toString()] += line;
+            newPre.feed(line);
+          }
+
+          file.close();
+          newPre.done();
+        }
+      );
 
       Talta::registerAttributes(fn);
 
@@ -439,6 +452,7 @@ int main(int argc, char** argv) {
       // setup root cmakelists
       generalCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
       generalCmakeLists << "project(" << indexUUID << ")\n";
+      generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/../_runtime\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/_runtime\")\n";
       generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/" << root->info->module->packageInfo.name << "\")\n";
       generalCmakeLists.close();
 
@@ -479,10 +493,11 @@ int main(int argc, char** argv) {
           auto& lists = cmakeListsCollection[mod->packageInfo.name].first;
           lists << "cmake_minimum_required(VERSION 3.10)\n";
           lists << "project(" << mod->packageInfo.name << ")\n";
-          lists << "set(ALTA_PACKAGE_DEFINITION_CHECK_" << mod->packageInfo.name << " TRUE)\n";
+          lists << "add_custom_target(alta-dummy-target-" << mod->packageInfo.name << ")\n";
+          //lists << "set(ALTA_PACKAGE_DEFINITION_CHECK_" << mod->packageInfo.name << " \"TRUE\" CACHE INTERNAL \"package definition check for " << mod->packageInfo.name << ". do not touch or modify.\" FORCE)\n";
 
           for (auto& item: packageDependencies[mod->packageInfo.name]) {
-            lists << "if (NOT ALTA_PACKAGE_DEFINITION_CHECK_" << item << ")\n";
+            lists << "if (NOT TARGET alta-dummy-target-" << item << ")\n";
             lists << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << item << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << item << "\")\n";
             lists << "endif()\n";
           }
@@ -538,15 +553,15 @@ int main(int argc, char** argv) {
           cmakeLists << ")\n";
         }
 
-        if (packageDependencies[packageName].size() > 0) {
-          cmakeLists << "target_link_libraries(" << packageName << '-' << target.name << " PUBLIC\n";
+        cmakeLists << "target_link_libraries(" << packageName << '-' << target.name << " PUBLIC\n";
 
-          for (auto& dep: packageDependencies[packageName]) {
-            cmakeLists << "  " << dep << '-' << target.name << '\n';
-          }
+        cmakeLists << "  alta-global-runtime" << '\n';
 
-          cmakeLists << ")\n";
+        for (auto& dep: packageDependencies[packageName]) {
+          cmakeLists << "  " << dep << '-' << target.name << '\n';
         }
+
+        cmakeLists << ")\n";
 
         cmakeLists.close();
       }
