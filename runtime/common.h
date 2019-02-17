@@ -29,6 +29,10 @@ typedef struct __Alta_class_info {
   const char* typeName;
 } _Alta_class_info;
 
+typedef struct __Alta_basic_class {
+  _Alta_class_info _Alta_class_info_struct;
+} _Alta_basic_class;
+
 typedef struct {
   _Alta_bool inited;
 } _Alta_global_runtime_type;
