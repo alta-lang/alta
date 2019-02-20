@@ -1,1 +1,4 @@
-declare literal export function malloc(size: int): ptr void
+import Size from "types"
+
+declare literal export function malloc(size: Size): ptr void
+declare literal export function realloc(pointer: ptr void, newSize: Size): ptr void

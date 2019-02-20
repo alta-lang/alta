@@ -318,6 +318,28 @@ int main(int argc, char** argv) {
         return 3;
       }
 
+      auto logError = [&](AltaCore::Errors::Error& e) {
+        std::cerr << "Error at " << e.position.file.toString() << ":" << e.position.line << ":" << e.position.column << std::endl;
+        if (originalSources.find(e.position.file.toString()) != originalSources.end()) {
+          auto& source = originalSources[e.position.file.toString()];
+          size_t firstNewline = -1;
+          for (size_t i = 1; i < e.position.line; i++) {
+            firstNewline = source.find('\n', firstNewline + 1);
+          }
+          auto secondNewline = source.find('\n', firstNewline + 1);
+          auto line = (secondNewline == -1) ? source.substr(firstNewline + 1) : source.substr(firstNewline + 1, secondNewline - firstNewline - 1);
+          std::cerr << line << std::endl;
+          for (size_t i = 1; i < e.position.column; i++) {
+            std::cerr << " ";
+          }
+          std::cerr << "^" << std::endl;
+          for (size_t i = 1; i < e.position.column; i++) {
+            std::cerr << " ";
+          }
+          std::cerr << e.what() << std::endl;
+        }
+      };
+
       std::unordered_map<std::string, std::shared_ptr<AltaCore::AST::RootNode>> importCache;
 
       AltaCore::Modules::parseModule = [&](std::string importRequest, AltaCore::Filesystem::Path requestingPath) -> std::shared_ptr<AltaCore::AST::RootNode> {
@@ -336,7 +358,12 @@ int main(int argc, char** argv) {
         otherLexer.feed(results[path.absolutify().toString()]);
 
         AltaCore::Parser::Parser otherParser(otherLexer.tokens, path);
-        otherParser.parse();
+        try {
+          otherParser.parse();
+        } catch (AltaCore::Errors::Error& e) {
+          logError(e);
+          exit(13);
+        }
         auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(*otherParser.root);
         root->detail(path);
 
@@ -347,7 +374,13 @@ int main(int argc, char** argv) {
 
       auto parseTimeStart = std::chrono::high_resolution_clock::now();
       AltaCore::Parser::Parser parser(lexer.tokens, fn);
-      parser.parse();
+      try {
+        parser.parse();
+      } catch (AltaCore::Errors::Error& e) {
+        logError(e);
+        exit(13);
+      }
+      
       auto parseTimeEnd = std::chrono::high_resolution_clock::now();
 
       if (!parser.root || !(*parser.root)) {
@@ -373,28 +406,6 @@ int main(int argc, char** argv) {
       if (!root) {
         std::cerr << CLI::COLOR_RED << "Internal error" << CLI::COLOR_NORMAL << ": root node returned by parser was not an `AltaCore::AST::RootNode`" << std::endl;
       }
-
-      auto logError = [&](AltaCore::Errors::Error& e) {
-        std::cerr << "Error at " << e.position.file.toString() << ":" << e.position.line << ":" << e.position.column << std::endl;
-        if (originalSources.find(e.position.file.toString()) != originalSources.end()) {
-          auto& source = originalSources[e.position.file.toString()];
-          size_t firstNewline = -1;
-          for (size_t i = 1; i < e.position.line; i++) {
-            firstNewline = source.find('\n', firstNewline + 1);
-          }
-          auto secondNewline = source.find('\n', firstNewline + 1);
-          auto line = (secondNewline == -1) ? source.substr(firstNewline + 1) : source.substr(firstNewline + 1, secondNewline - firstNewline - 1);
-          std::cerr << line << std::endl;
-          for (size_t i = 1; i < e.position.column; i++) {
-            std::cerr << " ";
-          }
-          std::cerr << "^" << std::endl;
-          for (size_t i = 1; i < e.position.column; i++) {
-            std::cerr << " ";
-          }
-          std::cerr << e.what() << std::endl;
-        }
-      };
 
       try {
         root->detail(fn);

@@ -1,21 +1,34 @@
-import malloc from "memory"
+import malloc, realloc from "memory"
 import Size, rawstring, rawconststring from "types"
 
+# Determines the length of a null-terminated rawstring
+#
+# @param str The string whose length will be calculated
+# @returns The length of the rawstring, excluding the null-terminator
 export function rawstringLength(str: rawstring): Size {
   let i: Size = 0
-  while str[i] != 0 {
+  while str[i] != '\0' {
     i = i + 1
   }
   return i
 }
 
+# A basic, ASCII string container
 export class String {
   private var _data: rawstring = 0
   private var _length: Size = 0
+
+  # Constructs a new, empty String
   public constructor() {
     this._data = malloc(1) as rawstring
-    this._data[0] = 0
+    this._data[0] = '\0'
   }
+
+  # Constructs a new String given a rawstring (ptr byte)
+  #
+  # @param data The rawstring to us
+  # @note The length will be determined automatically
+  #       using `rawstringLength(data)`
   public constructor(data: rawstring) {
     this._length = rawstringLength(data)
     this._data = malloc(this._length + 1) as rawstring
@@ -26,23 +39,115 @@ export class String {
       i = i + 1
     }
 
-    this._data[this._length] = 0
+    this._data[this._length] = '\0'
   }
 
+  # Constructs a new String given a rawstring (ptr byte) and a length
+  #
+  # @param data   The rawstring to use
+  # @param length The length of the rawstring, *excluding* the null
+  #               terminator (i.e. length of "hi" equals 2, not 3)
+  public constructor(data: rawstring, length: Size) {
+    this._length = length
+    this._data = malloc(this._length + 1) as rawstring
+
+    let i: Size = 0
+    while i < this._length {
+      this._data[i] = data[i]
+      i = i + 1
+    }
+
+    this._data[this._length] = '\0'
+  }
+
+  # Retrieves the character at the given index and returns a reference
+  # to it, to allow modification
+  #
+  # If this String is shorter than the length required to have that
+  # character, this function will automatically reallocate enough space
+  # for it to have a character at the index.
+  #
+  # @param i The index of the character to retrieve
+  # @returns A reference to the character at the given index
   public function charAt(i: Size): ref byte {
-    if i > this._length {
-      return this._data[this._length]
+    if i >= this._length {
+      this.resize(this._length + i + 1)
     }
     return this._data[i]
   }
 
+  # The pointer to the rawconststring (ptr const byte) contained
+  # by this String
   @read public function data(): rawconststring {
     return this._data
   }
+
+  # The length of this String
+  #
+  # Note that this does *not* include the null terminator
+  # i.e. the *length* of "hi" is 2, not 3
   @read public function length(): Size {
     return this._length
   }
+
+  # The size of this String
+  #
+  # Note that this *does* include the null terminator
+  # i.e. the *size* of "hi" is 3, not 2
   @read public function size(): Size {
     return this.length + 1
+  }
+
+  private function resize(length: Size): ref String {
+    let tmp = realloc(this._data as ptr void, length + 1)
+
+    # TODO: check for null pointer rather than strictly zero.
+    #       while extremely unlikely and illogical, a platform
+    #       could decide that null pointer is not zero.
+    if tmp == 0 {
+      # TODO: throw an error
+      return this
+    }
+
+    this._data = tmp as rawstring
+    this._length = length
+    
+    return this
+  }
+
+  # Appends the given rawstring to this String
+  #
+  # @param data The string to append
+  # @param length The length of the string to append
+  # @returns A reference to this String, to allow call chaining
+  public function append(data: rawstring, length: Size): ref String {
+    let oldLen = this._length
+
+    this.resize(this._length + length)
+
+    let i: Size = 0
+    while i < length {
+      this._data[oldLen + i] = data[i]
+    }
+
+    this._data[this._length] = '\0'
+
+    return this
+  }
+  # Appends the given rawstring to this String
+  #
+  # @param data The string to append
+  # @returns A reference to this String, to allow call chaining
+  # @note The length will be determined automatically
+  #       using `rawstringLength(data)`
+  public function append(data: rawstring): ref String {
+    return this.append(data, rawstringLength(data))
+  }
+  # Appends the given String to this String
+  #
+  # @param data The String to append
+  # @returns A reference to this String, to allow call chaining
+  public function append(data: String): ref String {
+    return this.append(data._data, data._length)
   }
 }
