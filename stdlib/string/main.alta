@@ -1,5 +1,12 @@
-import malloc, realloc from "memory"
+import malloc, realloc, free from "memory"
 import Size, rawstring, rawconststring from "types"
+import printf from "io"
+
+##define STRING_DEBUG true
+
+##if STRING_DEBUG
+let stringUUID: Size = 0
+##end if
 
 # Determines the length of a null-terminated rawstring
 #
@@ -18,10 +25,18 @@ export class String {
   private var _data: rawstring = 0
   private var _length: Size = 0
 
+##if STRING_DEBUG
+  private var uuid = (stringUUID = stringUUID + 1) - 1
+##end if
+
   # Constructs a new, empty String
   public constructor() {
     this._data = malloc(1) as rawstring
     this._data[0] = '\0'
+
+##if STRING_DEBUG
+    printf("constructed a new String (%llu)\n", this.uuid)
+##end if
   }
 
   # Constructs a new String given a rawstring (ptr byte)
@@ -40,6 +55,10 @@ export class String {
     }
 
     this._data[this._length] = '\0'
+
+##if STRING_DEBUG
+    printf("constructed a new String (%llu)\n", this.uuid)
+##end if
   }
 
   # Constructs a new String given a rawstring (ptr byte) and a length
@@ -58,6 +77,38 @@ export class String {
     }
 
     this._data[this._length] = '\0'
+
+##if STRING_DEBUG
+    printf("constructed a new String (%llu)\n", this.uuid)
+##end if
+  }
+
+  # Constructs a new String by copying another String
+  #
+  # @param other The String to copy
+  public @copy constructor(other: ref String) {
+    this._length = other._length
+    this._data = malloc(this._length + 1) as rawstring
+
+    let i: Size = 0
+    while i < this._length {
+      this._data[i] = other._data[i]
+      i = i + 1
+    }
+
+    this._data[this._length] = '\0'
+
+##if STRING_DEBUG
+    printf("copied a String (%llu -> %llu)\n", other.uuid, this.uuid)
+##end if
+  }
+
+  public destructor() {
+    free(this._data as ptr void)
+
+##if STRING_DEBUG
+    printf("destroyed a String (%llu)\n", this.uuid)
+##end if
   }
 
   # Retrieves the character at the given index and returns a reference
