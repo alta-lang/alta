@@ -37,3 +37,48 @@ let foo: @safe(80) ptr byte
 let foo: @safe(3) ptr @safe(7) ptr byte
 ```
 But, in my opinion, that's uglier, and syntax should try to be as sweet as possible
+
+## Try Catch Resume
+Typical exception mechanisms do a pretty good job of throwing and catching errors.
+However, the usual purpose of errors is to alert the user that something is wrong, right?
+But, if the user can fix the problem, code should be able to continue without issue.
+
+Therefore, if we can provide a mechanism to facilitate error recovery, it should make code much more robust.
+
+### Syntax
+
+Error throwing:
+```alta
+function something(): void {
+  # oh no, something's wrong
+  throw new WeirdError("oh no")
+  # only resume *if* a condition is true
+  # because, obviously, you threw the error
+  # for a reason. now, in order to resume,
+  # you need to make sure the error has been
+  # fixed
+  resume if errorFixedCondition
+  printf("you fixed it!\n")
+}
+```
+
+Error handling:
+```alta
+try {
+  something()
+  printf("this will happen :)\n")
+} catch e: WeirdError {
+  printf("it looks like there's a weird error. now fixing...\n")
+  # somehow handle it and fix it
+  # ...
+  # now that we've fixed it, go back
+  # to the function call
+  resume
+} catch e: OtherError {
+  # it's also possible that there's an error we
+  # can't recover from
+  # in that case, just don't resume and log the
+  # error or do whatever it is you want with it
+  printf("oh no, we can't recover from this :(\n")
+}
+```
