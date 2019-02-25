@@ -15,7 +15,7 @@ errors sooner rather than later.
 You may be thinking "gee, this sure sounds *a lot* like C99's variable-sized 
 arrays", and you'd be right. The key differences, however, are that
   * these can be attached on-the-fly to any random pointer via a type cast,
-  * they don't allocate anything, they simply describe the data they point to, and
+  * ~~they don't allocate anything, they simply describe the data they point to,~~ and
   * they're monitored for safety at both compile-time *and* runtime
 
 ### Syntax

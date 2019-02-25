@@ -19,6 +19,16 @@
 #include <stdlib.h>
 #include <setjmp.h>
 
+/**
+ * a little hack to grab the containing struct of another struct
+ * e.g.
+ * create a Foobar variable (a class with a Foo parent)
+ * in C, the Foo parent struct is added as a member of the Foobar struct
+ * when you have a pointer to a Foo struct, you can get a pointer to the
+ * Foobar struct using this technique
+ */
+#define _ALTA_GET_PARENT_STRUCT_PTR(ITEM, STRUCT_TYPE, MEMBER_NAME) ((STRUCT_TYPE*)(((char*)ITEM) - offsetof(STRUCT_TYPE, MEMBER_NAME)))
+
 typedef unsigned char _Alta_bool;
 enum _Alta_bool_value {
   _Alta_bool_false = 0,
@@ -34,6 +44,8 @@ typedef struct __Alta_class_info {
   _Alta_bool destroyed;
   _Alta_bool persistent;
   _Alta_destructor destructor;
+  _Alta_bool isBaseStruct;
+  const char* parentTypeName;
 } _Alta_class_info;
 
 struct __Alta_basic_class {
