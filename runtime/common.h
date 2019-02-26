@@ -18,6 +18,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <setjmp.h>
+#include <string.h>
 
 /**
  * a little hack to grab the containing struct of another struct
