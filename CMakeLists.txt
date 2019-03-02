@@ -20,10 +20,7 @@ target_include_directories(altac
 target_link_libraries(altac PUBLIC altacore talta crossguid)
 
 # define the stdlib directory for debug builds
-target_compile_definitions(altac PRIVATE ALTA_DEBUG_STDLIB_PATH="${PROJECT_SOURCE_DIR}/stdlib")
-
-# define the runtime directory for debug builds
-target_compile_definitions(altac PRIVATE ALTA_DEBUG_RUNTIME_PATH="${PROJECT_SOURCE_DIR}/runtime")
+target_compile_definitions(altac PRIVATE ALTA_DEBUG_STDLIB_PATH="${PROJECT_SOURCE_DIR}/stdlib" PRIVATE ALTA_DEBUG_RUNTIME_PATH="${PROJECT_SOURCE_DIR}/runtime")
 
 set_target_properties(altac
   PROPERTIES

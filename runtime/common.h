@@ -15,6 +15,10 @@
 #define _Alta_runtime_export
 #endif
 
+#define __STDC_LIMIT_MACROS
+#define __STDC_CONSTANT_MACROS
+
+#include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <setjmp.h>
