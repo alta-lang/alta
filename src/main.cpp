@@ -195,10 +195,10 @@ int main(int argc, char** argv) {
 
       std::ifstream file(fn.toString());
       std::string line;
-      std::unordered_map<std::string, std::string> originalSources;
-      std::map<std::string, AltaCore::Preprocessor::Expression> defs;
-      std::map<std::string, std::string> results;
-      std::unordered_map<std::string, std::vector<AltaCore::Preprocessor::Location>> locationMaps;
+      ALTACORE_MAP<std::string, std::string> originalSources;
+      ALTACORE_MAP<std::string, AltaCore::Preprocessor::Expression> defs;
+      ALTACORE_MAP<std::string, std::string> results;
+      ALTACORE_MAP<std::string, std::vector<AltaCore::Preprocessor::Location>> locationMaps;
       AltaCore::Preprocessor::Preprocessor prepo(fn, defs, results, locationMaps, AltaCore::Preprocessor::defaultFileResolver,
         [&](AltaCore::Preprocessor::Preprocessor& orig, AltaCore::Preprocessor::Preprocessor& newPre, AltaCore::Filesystem::Path path) {
           std::ifstream file(path.toString());
@@ -340,7 +340,7 @@ int main(int argc, char** argv) {
         }
       };
 
-      std::unordered_map<std::string, std::shared_ptr<AltaCore::AST::RootNode>> importCache;
+      ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::AST::RootNode>> importCache;
 
       AltaCore::Modules::parseModule = [&](std::string importRequest, AltaCore::Filesystem::Path requestingPath) -> std::shared_ptr<AltaCore::AST::RootNode> {
         auto path = AltaCore::Modules::resolve(importRequest, requestingPath);
@@ -457,8 +457,8 @@ int main(int argc, char** argv) {
       auto generalCmakeListsPath = outDir / "CMakeLists.txt";
       std::ofstream generalCmakeLists(generalCmakeListsPath.toString());
 
-      std::map<std::string, std::pair<std::ofstream, AltaCore::Modules::PackageInfo>> cmakeListsCollection;
-      std::map<std::string, std::set<std::string>> packageDependencies;
+      ALTACORE_MAP<std::string, std::pair<std::ofstream, AltaCore::Modules::PackageInfo>> cmakeListsCollection;
+      ALTACORE_MAP<std::string, std::set<std::string>> packageDependencies;
 
       std::stringstream uuidStream;
       uuidStream << xg::newGuid();
