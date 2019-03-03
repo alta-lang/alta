@@ -181,6 +181,19 @@ int main(int argc, char** argv) {
     std::ofstream rootCmakeLists((outDir / "CMakeLists.txt").toString());
 
     rootCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
+    rootCmakeLists << "if (WIN32)\n";
+    rootCmakeLists << "  set(ALTA_EXECUTABLE_EXTENSION \".exe\")\n";
+    rootCmakeLists << "  set(ALTA_DYLIB_EXTENSION \".dll\")\n";
+    rootCmakeLists << "  set(ALTA_STATLIB_EXTENSION \".lib\")\n";
+    rootCmakeLists << "else()\n";
+    rootCmakeLists << "  set(ALTA_EXECUTABLE_EXTENSION \"\")\n";
+    rootCmakeLists << "  set(ALTA_STATLIB_EXTENSION \".a\")\n";
+    rootCmakeLists << "  if (APPLE)\n";
+    rootCmakeLists << "    set(ALTA_DYLIB_EXTENSION \".dylib\")\n";
+    rootCmakeLists << "  else()\n";
+    rootCmakeLists << "    set(ALTA_DYLIB_EXTENSION \".so\")\n";
+    rootCmakeLists << "  endif()\n";
+    rootCmakeLists << "endif()\n";
     rootCmakeLists << "project(ALTA_TOPLEVEL_PROJECT-" << fn.dirname().basename() << ")\n";
 
     for (auto& target: targets) {
@@ -585,6 +598,24 @@ int main(int argc, char** argv) {
         }
 
         cmakeLists << ")\n";
+
+        if (modInfo.isEntryPackage) {
+          std::string extensionVar;
+          if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
+            extensionVar = "${ALTA_EXECUTABLE_EXTENSION}";
+          } else {
+            extensionVar = "${ALTA_STATLIB_EXTENSION}";
+          }
+          cmakeLists << "add_custom_command(TARGET " << packageName << '-' << target.name << " POST_BUILD\n";
+          std::string outFileDir;
+          if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
+            outFileDir = "bin";
+          } else {
+            outFileDir = "lib";
+          }
+          cmakeLists << "  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:" << packageName << '-' << target.name << "> \"${CMAKE_BINARY_DIR}/" << outFileDir << '/' << target.name << extensionVar << "\"\n";
+          cmakeLists << ")\n";
+        }
 
         cmakeLists.close();
       }
