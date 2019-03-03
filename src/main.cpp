@@ -166,14 +166,16 @@ int main(int argc, char** argv) {
     std::ofstream runtimeCmakeLists((outDir / "_runtime" / "CMakeLists.txt").absolutify().toString());
     runtimeCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
     runtimeCmakeLists << "project(alta-global-runtime)\n";
-    runtimeCmakeLists << "add_library(alta-global-runtime\n";
+    runtimeCmakeLists << "if (NOT TARGET alta-global-runtime)\n";
+    runtimeCmakeLists << "  add_library(alta-global-runtime\n";
     auto runtimeFiles = AltaCore::Filesystem::getDirectoryListing(outdirRuntime, true);
     for (auto& runtimeFile: runtimeFiles) {
       if (runtimeFile.extname() == "c") {
-        runtimeCmakeLists << "  \"${PROJECT_SOURCE_DIR}/" << runtimeFile.relativeTo(outdirRuntime).toString('/') << "\"\n";
+        runtimeCmakeLists << "    \"${PROJECT_SOURCE_DIR}/" << runtimeFile.relativeTo(outdirRuntime).toString('/') << "\"\n";
       }
     }
-    runtimeCmakeLists << ")\n";
+    runtimeCmakeLists << "  )\n";
+    runtimeCmakeLists << "endif()\n";
     runtimeCmakeLists.close();
 
     std::ofstream rootCmakeLists((outDir / "CMakeLists.txt").toString());
@@ -514,11 +516,11 @@ int main(int argc, char** argv) {
           auto& lists = cmakeListsCollection[mod->packageInfo.name].first;
           lists << "cmake_minimum_required(VERSION 3.10)\n";
           lists << "project(" << mod->packageInfo.name << ")\n";
-          lists << "add_custom_target(alta-dummy-target-" << mod->packageInfo.name << ")\n";
+          lists << "add_custom_target(alta-dummy-target-" << mod->packageInfo.name << '-' << target.name << ")\n";
           //lists << "set(ALTA_PACKAGE_DEFINITION_CHECK_" << mod->packageInfo.name << " \"TRUE\" CACHE INTERNAL \"package definition check for " << mod->packageInfo.name << ". do not touch or modify.\" FORCE)\n";
 
           for (auto& item: packageDependencies[mod->packageInfo.name]) {
-            lists << "if (NOT TARGET alta-dummy-target-" << item << ")\n";
+            lists << "if (NOT TARGET alta-dummy-target-" << item << '-' << target.name << ")\n";
             lists << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << item << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << item << "\")\n";
             lists << "endif()\n";
           }
