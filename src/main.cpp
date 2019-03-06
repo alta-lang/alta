@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     cmd.parse(argc, argv);
 
     bool isVerbose = verboseSwitch.getValue();
-    bool doTime = benchmarkSwitch.getValue();
+    bool doTime = benchmarkSwitch.getValue() || isVerbose;
 
     auto programPath = AltaCore::Filesystem::Path(argv[0]).absolutify();
 
@@ -253,6 +253,13 @@ int main(int argc, char** argv) {
 
       file.close();
       prepo.done();
+      
+      if (doTime) {
+        for (auto& [path, timer]: AltaCore::Timing::preprocessTimes) {
+          auto duration = AltaCore::Timing::toMilliseconds(timer.total());
+          std::cout << CLI::COLOR_BLUE << "Info" << ": preprocessed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
+        }
+      }
 
       auto locationMapper = [&](AltaCore::Filesystem::Path& filePath) {
         return [&](size_t prepoLine, size_t prepoColumn) -> std::pair<size_t, size_t> {
@@ -305,8 +312,15 @@ int main(int argc, char** argv) {
         };
       };
 
-      AltaCore::Lexer::Lexer lexer(locationMapper(fn));
+      AltaCore::Lexer::Lexer lexer(fn, locationMapper(fn));
       lexer.feed(results[fn.toString()]);
+
+      if (doTime) {
+        for (auto& [path, timer]: AltaCore::Timing::lexTimes) {
+          auto duration = AltaCore::Timing::toMilliseconds(timer.total());
+          std::cout << CLI::COLOR_BLUE << "Info" << ": lexed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
+        }
+      }
 
       if (verboseSwitch.getValue()) {
         printf("%sTokens:%s\n", CLI::COLOR_BLUE, CLI::COLOR_NORMAL);
@@ -368,7 +382,7 @@ int main(int argc, char** argv) {
 
         Talta::registerAttributes(path);
 
-        AltaCore::Lexer::Lexer otherLexer(locationMapper(path));
+        AltaCore::Lexer::Lexer otherLexer(path, locationMapper(path));
 
         otherLexer.feed(results[path.absolutify().toString()]);
 
@@ -395,17 +409,15 @@ int main(int argc, char** argv) {
         logError(e);
         exit(13);
       }
-      
-      auto parseTimeEnd = std::chrono::high_resolution_clock::now();
 
       if (!parser.root || !(*parser.root)) {
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to parse \"" << fn.toString() << '"' << std::endl;
         return 6;
       }
 
-      if (doTime || isVerbose) {
-        auto parseDuration = std::chrono::duration_cast<std::chrono::milliseconds>(parseTimeEnd - parseTimeStart);
-        std::cout << CLI::COLOR_BLUE << "Parsed main module for target \"" << target.name << "\" in " << parseDuration.count() << " milliseconds" << CLI::COLOR_NORMAL << std::endl;
+      if (doTime) {
+        auto duration = AltaCore::Timing::toMilliseconds(AltaCore::Timing::parseTimes[fn].total());
+        std::cout << CLI::COLOR_BLUE << "Info" << ": parsed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
       }
 
       if (verboseSwitch.getValue()) {
@@ -429,6 +441,14 @@ int main(int argc, char** argv) {
         std::cerr << CLI::COLOR_RED << "AST failed detailing" << CLI::COLOR_NORMAL << std::endl;
         logError(e);
         return 12;
+      }
+
+      if (doTime) {
+        for (auto& [path, timer]: AltaCore::Timing::parseTimes) {
+          if (path == fn) continue;
+          auto duration = AltaCore::Timing::toMilliseconds(timer.total());
+          std::cout << CLI::COLOR_BLUE << "Info" << ": parsed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
+        }
       }
 
       auto entryPackageInfo = root->info->module->packageInfo;
