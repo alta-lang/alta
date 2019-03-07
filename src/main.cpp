@@ -316,10 +316,9 @@ int main(int argc, char** argv) {
       lexer.feed(results[fn.toString()]);
 
       if (doTime) {
-        for (auto& [path, timer]: AltaCore::Timing::lexTimes) {
-          auto duration = AltaCore::Timing::toMilliseconds(timer.total());
-          std::cout << CLI::COLOR_BLUE << "Info" << ": lexed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
-        }
+        auto timer = AltaCore::Timing::lexTimes[fn];
+        auto duration = AltaCore::Timing::toMilliseconds(timer.total());
+        std::cout << CLI::COLOR_BLUE << "Info" << ": lexed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
       }
 
       if (verboseSwitch.getValue()) {
@@ -444,6 +443,11 @@ int main(int argc, char** argv) {
       }
 
       if (doTime) {
+        for (auto& [path, timer]: AltaCore::Timing::lexTimes) {
+          if (path == fn) continue;
+          auto duration = AltaCore::Timing::toMilliseconds(timer.total());
+          std::cout << CLI::COLOR_BLUE << "Info" << ": lexed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
+        }
         for (auto& [path, timer]: AltaCore::Timing::parseTimes) {
           if (path == fn) continue;
           auto duration = AltaCore::Timing::toMilliseconds(timer.total());
