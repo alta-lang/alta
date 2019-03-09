@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
       if (doTime) {
         auto timer = AltaCore::Timing::lexTimes[fn];
         auto duration = AltaCore::Timing::toMilliseconds(timer.total());
-        std::cout << CLI::COLOR_BLUE << "Info" << ": lexed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
+        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": lexed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
       }
 
       if (verboseSwitch.getValue()) {
@@ -422,7 +422,7 @@ int main(int argc, char** argv) {
 
       if (doTime) {
         auto duration = AltaCore::Timing::toMilliseconds(AltaCore::Timing::parseTimes[fn].total());
-        std::cout << CLI::COLOR_BLUE << "Info" << ": preprocessed and parsed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
+        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": preprocessed and parsed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
       }
 
       if (verboseSwitch.getValue()) {
@@ -452,12 +452,12 @@ int main(int argc, char** argv) {
         for (auto& [path, timer]: AltaCore::Timing::lexTimes) {
           if (path == fn) continue;
           auto duration = AltaCore::Timing::toMilliseconds(timer.total());
-          std::cout << CLI::COLOR_BLUE << "Info" << ": lexed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
+          std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": lexed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
         }
         for (auto& [path, timer]: AltaCore::Timing::parseTimes) {
           if (path == fn) continue;
           auto duration = AltaCore::Timing::toMilliseconds(timer.total());
-          std::cout << CLI::COLOR_BLUE << "Info" << ": preprocessed and parsed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
+          std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": preprocessed and parsed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
         }
       }
 
