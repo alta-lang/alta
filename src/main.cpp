@@ -210,9 +210,10 @@ int main(int argc, char** argv) {
 
       std::ifstream file(fn.toString());
       std::string line;
-      ALTACORE_MAP<std::string, std::string> originalSources;
-      ALTACORE_MAP<std::string, AltaCore::Preprocessor::Expression> defs;
-      ALTACORE_MAP<std::string, std::string> results;
+      //ALTACORE_MAP<std::string, std::string> originalSources;
+      ALTACORE_MAP<std::string, AltaCore::Parser::PrepoExpression> defs;
+      AltaCore::Modules::parsingDefinitions = &defs;
+      /*ALTACORE_MAP<std::string, std::string> results;
       ALTACORE_MAP<std::string, std::vector<AltaCore::Preprocessor::Location>> locationMaps;
       AltaCore::Preprocessor::Preprocessor prepo(fn, defs, results, locationMaps, AltaCore::Preprocessor::defaultFileResolver,
         [&](AltaCore::Preprocessor::Preprocessor& orig, AltaCore::Preprocessor::Preprocessor& newPre, AltaCore::Filesystem::Path path) {
@@ -234,10 +235,11 @@ int main(int argc, char** argv) {
           file.close();
           newPre.done();
         }
-      );
+      );*/
 
       Talta::registerAttributes(fn);
 
+      /*
       if (!file.is_open()) {
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to open the input file (\"" << fn.toString() << '"' << std::endl;
         return 2;
@@ -253,6 +255,7 @@ int main(int argc, char** argv) {
 
       file.close();
       prepo.done();
+
       
       if (doTime) {
         for (auto& [path, timer]: AltaCore::Timing::preprocessTimes) {
@@ -260,7 +263,9 @@ int main(int argc, char** argv) {
           std::cout << CLI::COLOR_BLUE << "Info" << ": preprocessed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
         }
       }
+      */
 
+      /*
       auto locationMapper = [&](AltaCore::Filesystem::Path& filePath) {
         return [&](size_t prepoLine, size_t prepoColumn) -> std::pair<size_t, size_t> {
           using AltaCore::Preprocessor::Location;
@@ -311,9 +316,25 @@ int main(int argc, char** argv) {
           }
         };
       };
+      */
 
-      AltaCore::Lexer::Lexer lexer(fn, locationMapper(fn));
-      lexer.feed(results[fn.toString()]);
+      AltaCore::Lexer::Lexer lexer(fn/*, locationMapper(fn)*/);
+
+      if (!file.is_open()) {
+        std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to open the input file (\"" << fn.toString() << '"' << std::endl;
+        return 2;
+      }
+
+      while (std::getline(file, line)) {
+        if (file.peek() != EOF) {
+          line += "\n";
+        }
+        lexer.feed(line);
+      }
+
+      file.close();
+
+      //lexer.feed(results[fn.toString()]);
 
       if (doTime) {
         auto timer = AltaCore::Timing::lexTimes[fn];
@@ -348,6 +369,7 @@ int main(int argc, char** argv) {
 
       auto logError = [&](AltaCore::Errors::Error& e) {
         std::cerr << "Error at " << e.position.file.toString() << ":" << e.position.line << ":" << e.position.column << std::endl;
+        /*
         if (originalSources.find(e.position.file.toString()) != originalSources.end()) {
           auto& source = originalSources[e.position.file.toString()];
           size_t firstNewline = -1;
@@ -366,42 +388,26 @@ int main(int argc, char** argv) {
           }
           std::cerr << e.what() << std::endl;
         }
+        */
       };
 
       ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::AST::RootNode>> importCache;
 
+      auto defaultParseModule = AltaCore::Modules::parseModule;
       AltaCore::Modules::parseModule = [&](std::string importRequest, AltaCore::Filesystem::Path requestingPath) -> std::shared_ptr<AltaCore::AST::RootNode> {
         auto path = AltaCore::Modules::resolve(importRequest, requestingPath);
-        if (auto& imp = importCache[path.absolutify().toString()]) {
-          return imp;
-        }
-        if (results.find(path.absolutify().toString()) == results.end()) {
-          throw std::runtime_error("its not here.");
-        }
 
         Talta::registerAttributes(path);
 
-        AltaCore::Lexer::Lexer otherLexer(path, locationMapper(path));
-
-        otherLexer.feed(results[path.absolutify().toString()]);
-
-        AltaCore::Parser::Parser otherParser(otherLexer.tokens, path);
         try {
-          otherParser.parse();
+          return defaultParseModule(importRequest, requestingPath);
         } catch (AltaCore::Errors::Error& e) {
           logError(e);
           exit(13);
         }
-        auto root = std::dynamic_pointer_cast<AltaCore::AST::RootNode>(*otherParser.root);
-        root->detail(path);
-
-        importCache[path.absolutify().toString()] = root;
-
-        return root;
       };
 
-      auto parseTimeStart = std::chrono::high_resolution_clock::now();
-      AltaCore::Parser::Parser parser(lexer.tokens, fn);
+      AltaCore::Parser::Parser parser(lexer.tokens, defs, fn);
       try {
         parser.parse();
       } catch (AltaCore::Errors::Error& e) {
@@ -416,7 +422,7 @@ int main(int argc, char** argv) {
 
       if (doTime) {
         auto duration = AltaCore::Timing::toMilliseconds(AltaCore::Timing::parseTimes[fn].total());
-        std::cout << CLI::COLOR_BLUE << "Info" << ": parsed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
+        std::cout << CLI::COLOR_BLUE << "Info" << ": preprocessed and parsed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
       }
 
       if (verboseSwitch.getValue()) {
@@ -451,7 +457,7 @@ int main(int argc, char** argv) {
         for (auto& [path, timer]: AltaCore::Timing::parseTimes) {
           if (path == fn) continue;
           auto duration = AltaCore::Timing::toMilliseconds(timer.total());
-          std::cout << CLI::COLOR_BLUE << "Info" << ": parsed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
+          std::cout << CLI::COLOR_BLUE << "Info" << ": preprocessed and parsed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
         }
       }
 
