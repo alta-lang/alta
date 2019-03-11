@@ -358,6 +358,7 @@ int main(int argc, char** argv) {
         if (lexer.absences.size() > 0) printf("\n");
       }
 
+      /*
       for (const auto& absence: lexer.absences) {
         auto[line, column] = absence;
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to lex input at " << line << ":" << column << std::endl;
@@ -366,6 +367,7 @@ int main(int argc, char** argv) {
       if (lexer.absences.size() > 0) {
         return 3;
       }
+      */
 
       auto logError = [&](AltaCore::Errors::Error& e) {
         std::cerr << "Error at " << e.position.file.toString() << ":" << e.position.line << ":" << e.position.column << std::endl;
