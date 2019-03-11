@@ -371,26 +371,22 @@ int main(int argc, char** argv) {
 
       auto logError = [&](AltaCore::Errors::Error& e) {
         std::cerr << "Error at " << e.position.file.toString() << ":" << e.position.line << ":" << e.position.column << std::endl;
-        /*
-        if (originalSources.find(e.position.file.toString()) != originalSources.end()) {
-          auto& source = originalSources[e.position.file.toString()];
-          size_t firstNewline = -1;
-          for (size_t i = 1; i < e.position.line; i++) {
-            firstNewline = source.find('\n', firstNewline + 1);
-          }
-          auto secondNewline = source.find('\n', firstNewline + 1);
-          auto line = (secondNewline == -1) ? source.substr(firstNewline + 1) : source.substr(firstNewline + 1, secondNewline - firstNewline - 1);
+        if (e.position.file) {
+          std::ifstream fileSource(e.position.file.toString());
+          // seek to the beginning of the line
+          fileSource.seekg(e.position.filePosition - e.position.column);
+          std::string line;
+          std::getline(fileSource, line);
           std::cerr << line << std::endl;
           for (size_t i = 1; i < e.position.column; i++) {
-            std::cerr << " ";
+            std::cerr << ' ';
           }
-          std::cerr << "^" << std::endl;
+          std::cerr << '^' << std::endl;
           for (size_t i = 1; i < e.position.column; i++) {
-            std::cerr << " ";
+            std::cerr << ' ';
           }
-          std::cerr << e.what() << std::endl;
         }
-        */
+        std::cerr << e.what() << std::endl;
       };
 
       ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::AST::RootNode>> importCache;
