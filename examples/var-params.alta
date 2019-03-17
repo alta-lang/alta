@@ -1,0 +1,38 @@
+import printf from "io"
+import Size, rawconststring from "types"
+import rawstringLength from "string"
+
+function doSomething(nums: int...): void {
+  let i: Size = 0
+  while i < nums.length {
+    printf("num #%llu = %d\n", i + 1, nums[i])
+    i = i + 1
+  }
+}
+
+function sum(nums: int..., strings: rawconststring...): Size {
+  let total: Size = 0
+
+  let i: Size = 0
+  while i < nums.length {
+    total = total + nums[i]
+    i = i + 1
+  }
+
+  i = 0
+  while i < strings.length {
+    total = total + rawstringLength(strings[i])
+    i = i + 1
+  }
+
+  return total
+}
+
+literal function main(): int {
+  doSomething(5, 8, 3)
+  
+  let total = sum(3, 4, "foo", "bar")
+  printf("total = %llu\n", total)
+
+  return 0
+}

@@ -10,3 +10,6 @@ targets:
 - name: simple-class
   main: simple-class.alta
   type: exe
+- name: var-params
+  main: var-params.alta
+  type: exe

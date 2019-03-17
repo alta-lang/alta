@@ -12,7 +12,7 @@ let stringUUID: Size = 0
 #
 # @param str The string whose length will be calculated
 # @returns The length of the rawstring, excluding the null-terminator
-export function rawstringLength(str: rawstring): Size {
+export function rawstringLength(str: rawconststring): Size {
   let i: Size = 0
   while str[i] != '\0' {
     i = i + 1
