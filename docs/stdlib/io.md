@@ -5,11 +5,13 @@ This module contains I/O constructs bridged over from C, wrapped up to be more A
   * C
     * [`stdio.h`](https://en.cppreference.com/w/cpp/header/cstdio)
 
-## Functions
-### `printf(data: ptr byte): int`
-This is C's native `printf` function, exposed to Alta, although it doesn't support
-variable arguments (varargs) yet, so no printing values for now.
+Functions
+---
+## `printf(string: ptr byte, data: any...): int`
+This is C's native `printf` function, exposed to Alta.
 
-  * **Parameters**
-    * `data` = The native string to print. Must be null-terminated
-  * **Returns**: A integer indicating the number of characters printed
+**Parameters**:
+  * `string` = The native string to print. Must be null-terminated
+  * `data...` = Arguments that correspond to the format specifiers in `string` (if there are any)
+
+**Returns**: An integer indicating the number of characters printed
