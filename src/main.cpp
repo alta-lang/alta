@@ -639,9 +639,6 @@ int main(int argc, char** argv) {
         outfileIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
       }
 
-      outfileIndex << "#endif // _ALTA_INDEX_" << indexUUID << "\n";
-      outfileIndex.close();
-
       for (auto& [packageName, cmakeInfo]: cmakeListsCollection) {
         auto& [cmakeLists, modInfo] = cmakeInfo;
 
@@ -667,6 +664,8 @@ int main(int argc, char** argv) {
         auto base = outDir / moduleName;
         auto modOutDir = outDir / mod->packageInfo.name;
         auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
+        auto mangledModuleName = Talta::mangleName(mod.get());
+        auto moduleNamePath = AltaCore::Filesystem::Path(moduleName);
 
         for (size_t i = 0; i < gRoots.size(); i++) {
           auto gOut = base + "-" + std::to_string(i) + ".c";
@@ -676,9 +675,13 @@ int main(int argc, char** argv) {
 
           for (auto& item: mod->genericDependencies[gItem->id]) {
             auto& name = item->packageInfo.name;
+            auto mangledImportName = Talta::mangleName(item.get());
+            auto depBase = outDir / item->name;
+            auto depHOut = depBase + ".h";
             outfileCmake << "if (NOT TARGET alta-dummy-target-" << name << '-' << target.name << ")\n";
             outfileCmake << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << name << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << name << "\")\n";
             outfileCmake << "endif()\n";
+            outfileIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledImportName << " \"" << depHOut.relativeTo(cOut).toString('/') << "\"\n";
           }
 
           outfileCmake << "add_library(" << targetName << '\n';
@@ -687,6 +690,11 @@ int main(int argc, char** argv) {
           } else {
             outfileCmake << "  \"${PROJECT_SOURCE_DIR}/../" << dummySourcePath.relativeTo(modOutDir).toString('/') << "\"\n";
           }
+          outfileCmake << ")\n";
+          outfileCmake << "set_target_properties(" << targetName << " PROPERTIES\n";
+          auto dashName = (moduleNamePath + "-" + std::to_string(i)).toString('-');
+          outfileCmake << "  OUTPUT_NAME " << dashName << '\n';
+          outfileCmake << "  COMPILE_PDB_NAME " << dashName << '\n';
           outfileCmake << ")\n";
           if (gItem->instantiatedFromSamePackage) {
             outfileCmake << "target_sources(" << mod->packageInfo.name << "-core-" << target.name << " PUBLIC\n";
@@ -769,6 +777,9 @@ int main(int argc, char** argv) {
 
         outfileCmake.close();
       }
+
+      outfileIndex << "#endif // _ALTA_INDEX_" << indexUUID << "\n";
+      outfileIndex.close();
     }
 
     rootCmakeLists.close();
