@@ -540,7 +540,7 @@ int main(int argc, char** argv) {
         }
 
         for (auto& generic: mod->genericsUsed) {
-          auto& gMod = AltaCore::Util::getModule(generic->parentScope.lock().get()).lock();
+          auto gMod = AltaCore::Util::getModule(generic->parentScope.lock().get()).lock();
           if (gMod->packageInfo.name == mod->packageInfo.name) continue;
           genericsUsed[mod->packageInfo.name].push_back(generic);
         }
@@ -718,7 +718,7 @@ int main(int argc, char** argv) {
           if (auto klass = std::dynamic_pointer_cast<AltaCore::DET::Class>(gItem)) {
             for (auto& generic: klass->genericArguments) {
               if (generic->klass && generic->klass->genericParameterCount > 0) {
-                auto& genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
+                auto genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
                 outfileCmake << "  " << Talta::mangleName(generic->klass.get()) << '-' << target.name << '\n';
               }
             }
