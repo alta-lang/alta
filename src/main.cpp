@@ -500,8 +500,15 @@ int main(int argc, char** argv) {
       auto generalCmakeListsPath = outDir / "CMakeLists.txt";
       std::ofstream generalCmakeLists(generalCmakeListsPath.toString());
 
+      auto dummySourcePath = outDir / "dummy.c";
+      std::ofstream dummySource(dummySourcePath.toString());
+
+      dummySource << "\n";
+      dummySource.close();
+
       ALTACORE_MAP<std::string, std::pair<std::ofstream, AltaCore::Modules::PackageInfo>> cmakeListsCollection;
       ALTACORE_MAP<std::string, std::set<std::string>> packageDependencies;
+      ALTACORE_MAP<std::string, std::vector<std::shared_ptr<AltaCore::DET::ScopeItem>>> genericsUsed;
 
       std::stringstream uuidStream;
       uuidStream << xg::newGuid();
@@ -521,7 +528,7 @@ int main(int argc, char** argv) {
       generalCmakeLists.close();
 
       for (auto& [moduleName, info]: transpiledModules) {
-        auto& [cRoot, hRoot, mod] = info;
+        auto& [cRoot, hRoot, gRoots, gItems, mod] = info;
 
         if (packageDependencies.find(mod->packageInfo.name) == packageDependencies.end()) {
           packageDependencies[mod->packageInfo.name] = std::set<std::string>();
@@ -531,14 +538,21 @@ int main(int argc, char** argv) {
           if (dep->packageInfo.name == mod->packageInfo.name) continue;
           packageDependencies[mod->packageInfo.name].insert(dep->packageInfo.name);
         }
+
+        for (auto& generic: mod->genericsUsed) {
+          auto gMod = AltaCore::Util::getModule(generic->parentScope.lock().get()).lock();
+          if (gMod->packageInfo.name == mod->packageInfo.name) continue;
+          genericsUsed[mod->packageInfo.name].push_back(generic);
+        }
       }
 
       for (auto& [moduleName, info]: transpiledModules) {
-        auto& [cRoot, hRoot, mod] = info;
+        auto& [cRoot, hRoot, gRoots, gItems, mod] = info;
         auto base = outDir / moduleName;
         auto modOutDir = outDir / mod->packageInfo.name;
         auto cOut = base + ".c";
         auto hOut = base + ".h";
+        std::vector<AltaCore::Filesystem::Path> gOuts;
         auto cmakeOut = modOutDir / "CMakeLists.txt";
 
         auto ok = AltaCore::Filesystem::mkdirp(base.dirname());
@@ -550,6 +564,13 @@ int main(int argc, char** argv) {
 
         std::ofstream outfileC(cOut.toString());
         std::ofstream outfileH(hOut.toString());
+        std::vector<std::ofstream> outfileGs;
+
+        for (size_t i = 0; i < gRoots.size(); i++) {
+          auto gOut = base + "-" + std::to_string(i) + ".c";
+          gOuts.push_back(gOut);
+          outfileGs.push_back(std::ofstream(gOut.toString()));
+        }
 
         if (cmakeListsCollection.find(mod->packageInfo.name) == cmakeListsCollection.end()) {
           // set up the cmakelists for this package
@@ -566,17 +587,17 @@ int main(int argc, char** argv) {
             lists << "endif()\n";
           }
 
-          if (mod->packageInfo.name == entryPackageInfo.name) {
+          /*if (mod->packageInfo.name == entryPackageInfo.name) {
             if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
               lists << "add_executable(";
             } else {
               lists << "add_library(";
             }
-          } else {
+          } else {*/
             lists << "add_library(";
-          }
+          //}
 
-          lists << mod->packageInfo.name << '-' << target.name << "\n";
+          lists << mod->packageInfo.name << "-core-" << target.name << "\n";
         }
 
         auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
@@ -584,6 +605,18 @@ int main(int argc, char** argv) {
         outfileC << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
         outfileC << "#include \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
         outfileC << cRoot->toString();
+
+        for (size_t i = 0; i < gRoots.size(); i++) {
+          auto& gRoot = gRoots[i];
+          auto& outfileG = outfileGs[i];
+          auto& gOut = gOuts[i];
+          auto& gItem = gItems[i];
+          auto gName = Talta::headerMangle(gItem.get());
+          outfileG << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
+          outfileG << "#define " + gName + "\n";
+          outfileG << "#include \"" << hOut.relativeTo(gOut).toString('/') << "\"\n";
+          outfileG << gRoot->toString();
+        }
 
         auto mangledModuleName = Talta::mangleName(mod.get());
 
@@ -601,23 +634,17 @@ int main(int argc, char** argv) {
         for (auto& dependent: mod->dependents) {
           outfileIndex << "#define _ALTA_MODULE_" << Talta::mangleName(dependent.get()) << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(outDir / dependent->name).toString('/') << "\"\n";
         }
-      }
 
-      outfileIndex << "#endif // _ALTA_INDEX_" << indexUUID << "\n";
-      outfileIndex.close();
+        // add our header to index for ourselves (in case we have any generics that we use)
+        outfileIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
+      }
 
       for (auto& [packageName, cmakeInfo]: cmakeListsCollection) {
         auto& [cmakeLists, modInfo] = cmakeInfo;
 
         cmakeLists << ")\n";
 
-        if (modInfo.isEntryPackage) {
-          cmakeLists << "set_target_properties(" << packageName << '-' << target.name << " PROPERTIES\n";
-          cmakeLists << "  OUTPUT_NAME " << target.name << '\n';
-          cmakeLists << ")\n";
-        }
-
-        cmakeLists << "target_link_libraries(" << packageName << '-' << target.name << " PUBLIC\n";
+        cmakeLists << "target_link_libraries(" << packageName << "-core-" << target.name << " PUBLIC\n";
 
         cmakeLists << "  alta-global-runtime" << '\n';
 
@@ -625,28 +652,134 @@ int main(int argc, char** argv) {
           cmakeLists << "  " << dep << '-' << target.name << '\n';
         }
 
-        cmakeLists << ")\n";
+        for (auto& generic: genericsUsed[packageName]) {
+          cmakeLists << "  " << Talta::mangleName(generic.get()) << '-' << target.name << '\n';
+        }
 
-        if (modInfo.isEntryPackage) {
+        cmakeLists << ")\n";
+      }
+
+      for (auto& [moduleName, info]: transpiledModules) {
+        auto& [cRoot, hRoot, gRoots, gItems, mod] = info;
+        auto base = outDir / moduleName;
+        auto modOutDir = outDir / mod->packageInfo.name;
+        auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
+        auto mangledModuleName = Talta::mangleName(mod.get());
+        auto moduleNamePath = AltaCore::Filesystem::Path(moduleName);
+
+        for (size_t i = 0; i < gRoots.size(); i++) {
+          auto gOut = base + "-" + std::to_string(i) + ".c";
+          auto cOut = base + ".c";
+          auto& gItem = gItems[i];
+          auto targetName = Talta::mangleName(gItem.get()) + '-' + target.name;
+
+          for (auto& item: mod->genericDependencies[gItem->id]) {
+            auto& name = item->packageInfo.name;
+            auto mangledImportName = Talta::mangleName(item.get());
+            auto depBase = outDir / item->name;
+            auto depHOut = depBase + ".h";
+            outfileCmake << "if (NOT TARGET alta-dummy-target-" << name << '-' << target.name << ")\n";
+            outfileCmake << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << name << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << name << "\")\n";
+            outfileCmake << "endif()\n";
+            outfileIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledImportName << " \"" << depHOut.relativeTo(cOut).toString('/') << "\"\n";
+          }
+
+          outfileCmake << "add_library(" << targetName << '\n';
+          if (!gItem->instantiatedFromSamePackage) {
+            outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << gOut.relativeTo(modOutDir).toString('/') << "\"\n";
+          } else {
+            outfileCmake << "  \"${PROJECT_SOURCE_DIR}/../" << dummySourcePath.relativeTo(modOutDir).toString('/') << "\"\n";
+          }
+          outfileCmake << ")\n";
+          outfileCmake << "set_target_properties(" << targetName << " PROPERTIES\n";
+          auto dashName = (moduleNamePath + "-" + std::to_string(i)).toString('-');
+          outfileCmake << "  OUTPUT_NAME " << dashName << '\n';
+          outfileCmake << "  COMPILE_PDB_NAME " << dashName << '\n';
+          outfileCmake << ")\n";
+          if (gItem->instantiatedFromSamePackage) {
+            outfileCmake << "target_sources(" << mod->packageInfo.name << "-core-" << target.name << " PUBLIC\n";
+            outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << gOut.relativeTo(modOutDir).toString('/') << "\"\n";
+            outfileCmake << ")\n";
+          }
+          outfileCmake << "target_link_libraries(" << targetName << " PUBLIC\n";
+          if (gItem->instantiatedFromSamePackage || !mod->packageInfo.isEntryPackage || (mod->packageInfo.isEntryPackage && target.type != AltaCore::Modules::OutputBinaryType::Exectuable)) {
+            outfileCmake << "  " << mod->packageInfo.name << "-core-" << target.name << '\n';
+          }
+
+          if (gItem->instantiatedFromSamePackage) {
+            outfileCmake << ")\n";
+            outfileCmake << "target_link_libraries(" << mod->packageInfo.name << "-core-" << target.name << " PUBLIC\n";
+          }
+
+          for (auto& item: mod->genericDependencies[gItem->id]) {
+            outfileCmake << "  " << item->packageInfo.name << '-' << target.name << '\n';
+          }
+
+          if (auto klass = std::dynamic_pointer_cast<AltaCore::DET::Class>(gItem)) {
+            for (auto& generic: klass->genericArguments) {
+              if (generic->klass && generic->klass->genericParameterCount > 0) {
+                auto genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
+                outfileCmake << "  " << Talta::mangleName(generic->klass.get()) << '-' << target.name << '\n';
+              }
+            }
+          } else {
+            throw std::runtime_error("wth");
+          }
+
+          outfileCmake << ")\n";
+        }
+      }
+
+      for (auto& [moduleName, info]: transpiledModules) {
+        auto& [cRoot, hRoot, gRoots, gItems, mod] = info;
+        auto base = outDir / moduleName;
+        auto modOutDir = outDir / mod->packageInfo.name;
+        auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
+
+        if (mod->packageInfo.name == entryPackageInfo.name) {
+          if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
+            outfileCmake << "add_executable(";
+          } else {
+            outfileCmake << "add_library(";
+          }
+        } else {
+          outfileCmake << "add_library(";
+        }
+
+        outfileCmake << mod->packageInfo.name << '-' << target.name << '\n';
+        outfileCmake << "  \"${PROJECT_SOURCE_DIR}/../" << dummySourcePath.relativeTo(modOutDir).toString('/') << "\"\n";
+        outfileCmake << ")\n";
+        outfileCmake << "target_link_libraries(" << mod->packageInfo.name << '-' << target.name << " PUBLIC\n";
+        outfileCmake << "  " << mod->packageInfo.name << "-core-" << target.name << '\n';
+        outfileCmake << ")\n";
+
+        if (mod->packageInfo.isEntryPackage) {
           std::string extensionVar;
           if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
             extensionVar = "${ALTA_EXECUTABLE_EXTENSION}";
           } else {
             extensionVar = "${ALTA_STATLIB_EXTENSION}";
           }
-          cmakeLists << "add_custom_command(TARGET " << packageName << '-' << target.name << " POST_BUILD\n";
+          outfileCmake << "add_custom_command(TARGET " << mod->packageInfo.name << '-' << target.name << " POST_BUILD\n";
           std::string outFileDir;
           if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
             outFileDir = "bin";
           } else {
             outFileDir = "lib";
           }
-          cmakeLists << "  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:" << packageName << '-' << target.name << "> \"${CMAKE_BINARY_DIR}/" << outFileDir << '/' << target.name << extensionVar << "\"\n";
-          cmakeLists << ")\n";
+          outfileCmake << "  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:" << mod->packageInfo.name << '-' << target.name << "> \"${CMAKE_BINARY_DIR}/" << outFileDir << '/' << target.name << extensionVar << "\"\n";
+          outfileCmake << ")\n";
+
+          outfileCmake << "set_target_properties(" << mod->packageInfo.name << '-' << target.name << " PROPERTIES\n";
+          outfileCmake << "  OUTPUT_NAME " << target.name << '\n';
+          outfileCmake << ")\n";
         }
 
-        cmakeLists.close();
+        outfileCmake.close();
       }
+
+      outfileIndex << "#endif // _ALTA_INDEX_" << indexUUID << "\n";
+      outfileIndex.close();
     }
 
     rootCmakeLists.close();
