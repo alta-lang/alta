@@ -1,0 +1,38 @@
+import Vector from "vector"
+import Size from "types"
+
+export generic class Map<K, V> {
+  private var keys: Vector<K> = new Vector<K>
+  private var values: Vector<V> = new Vector<V>
+
+  public constructor() {}
+  public constructor(keys: Vector<K>, values: Vector<V>) {
+    this.keys = keys
+    this.values = values
+  }
+
+  # Gets a reference to the value associated with the given key
+  # @returns a reference to the value
+  public function get(key: K): ref V {
+    for i: Size in 0..this.keys.length {
+      if this.keys.get(i) == key {
+        return this.values.get(i)
+      }
+    }
+
+    this.keys.push(key)
+    return this.values.push()
+  }
+
+  # Checks whether a given key exists in this Map
+  # @returns `true` if the key is present, `false` otherwise
+  public function has(key: K): bool {
+    for i: Size in 0..this.keys.length {
+      if this.keys.get(i) == key {
+        return true
+      }
+    }
+
+    return false
+  }
+}

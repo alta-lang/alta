@@ -1,0 +1,25 @@
+import rawstring, Size, uint8 from "types"
+import power from "math"
+import rawstringLength from "string"
+
+export function parseSize(string: rawstring, length: Size): Size {
+  let result: Size = 0
+
+  for i: Size in 0..length {
+    let digit = 0
+
+    if string[i] >= '0' && string[i] <= '9' {
+      digit = string[i] - 48
+    } else {
+      # TODO: throw an error
+    }
+
+    result = result + (digit * power(10, length - (i + 1)))
+  }
+
+  return result
+}
+
+export function parseSize(string: rawstring): Size {
+  return parseSize(string, rawstringLength(string))
+}

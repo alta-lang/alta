@@ -1,3 +1,13 @@
-export type Size = unsigned long long int
+export type int8 = byte
+export type int16 = short int
+export type int32 = long int
+export type int64 = long long int
+
+export type uint8 = unsigned int8
+export type uint16 = unsigned int16
+export type uint32 = unsigned int32
+export type uint64 = unsigned int64
+
+export type Size = uint64
 export type rawstring = ptr byte
 export type rawconststring = ptr const byte

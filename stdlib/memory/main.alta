@@ -3,3 +3,4 @@ import Size from "types"
 declare literal export function malloc(size: Size): ptr void
 declare literal export function realloc(pointer: ptr void, newSize: Size): ptr void
 declare literal export function free(pointer: ptr void): void
+declare literal export function calloc(count: Size, elmSize: Size): ptr void

@@ -1,0 +1,28 @@
+@@CTranspiler.include("stdlib.h");
+
+import Size, int64 from "types"
+
+declare export literal function abs(n: int64): int64
+declare literal function rand(): int
+
+export function power(num: int64, to: int64): int64 {
+  # anything to power of zero is 1
+  if to == 0 return 1
+
+  for i: Size in to::1 {
+    num = num * num
+  }
+
+  return num
+}
+
+export function power(num: Size, to: Size): Size {
+  # anything to power of zero is 1
+  if to == 0 return 1
+
+  for i: Size in to::1 {
+    num = num * num
+  }
+
+  return num
+}
