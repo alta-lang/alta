@@ -26,3 +26,14 @@ export function power(num: Size, to: Size): Size {
 
   return num
 }
+
+export function power(num: double, to: double): double {
+  # anything to power of zero is 1
+  if to == 0.0 return 1.0
+
+  for i: Size in to::1 {
+    num *= num
+  }
+
+  return num
+}
