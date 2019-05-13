@@ -10,7 +10,7 @@ export function power(num: int64, to: int64): int64 {
   if to == 0 return 1
 
   for i: Size in to::1 {
-    num = num * num
+    num *= num
   }
 
   return num
@@ -21,7 +21,7 @@ export function power(num: Size, to: Size): Size {
   if to == 0 return 1
 
   for i: Size in to::1 {
-    num = num * num
+    num *= num
   }
 
   return num

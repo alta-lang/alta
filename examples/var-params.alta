@@ -12,11 +12,11 @@ function sum(nums: int..., strings: rawconststring...): Size {
   let total: Size = 0
 
   for i: Size in 0..nums.length {
-    total = total + nums[i]
+    total += nums[i]
   }
 
   for i: Size in 0..strings.length {
-    total = total + rawstringLength(strings[i])
+    total += rawstringLength(strings[i])
   }
 
   return total
