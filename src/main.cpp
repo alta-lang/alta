@@ -644,6 +644,10 @@ int main(int argc, char** argv) {
 
         cmakeLists << ")\n";
 
+        cmakeLists << "set_target_properties(" << packageName << "-core-" << target.name << " PROPERTIES\n";
+        cmakeLists << "  C_STANDARD 99\n";
+        cmakeLists << ")\n";
+
         cmakeLists << "target_link_libraries(" << packageName << "-core-" << target.name << " PUBLIC\n";
 
         cmakeLists << "  alta-global-runtime" << '\n';
@@ -695,6 +699,7 @@ int main(int argc, char** argv) {
           auto dashName = (moduleNamePath + "-" + std::to_string(i)).toString('-');
           outfileCmake << "  OUTPUT_NAME " << dashName << '\n';
           outfileCmake << "  COMPILE_PDB_NAME " << dashName << '\n';
+          outfileCmake << "  C_STANDARD 99\n";
           outfileCmake << ")\n";
           if (gItem->instantiatedFromSamePackage) {
             outfileCmake << "target_sources(" << mod->packageInfo.name << "-core-" << target.name << " PUBLIC\n";
@@ -772,6 +777,7 @@ int main(int argc, char** argv) {
 
           outfileCmake << "set_target_properties(" << mod->packageInfo.name << '-' << target.name << " PROPERTIES\n";
           outfileCmake << "  OUTPUT_NAME " << target.name << '\n';
+          outfileCmake << "  C_STANDARD 99\n";
           outfileCmake << ")\n";
         }
 
