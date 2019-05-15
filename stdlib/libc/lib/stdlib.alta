@@ -1,0 +1,26 @@
+@@CTranspiler.include("stdlib.h");
+
+declare literal export function abs(n: int): int
+declare literal export function labs(n: long int): long int
+declare literal export function llabs(n: long long int): long long int
+
+# the C standard doesn't enforce an order,
+# so the underlying implementation could put either value first;
+# however, we don't care because these are just declarations to let
+# Alta know these structs exist and have these members.
+export literal @external @typed struct div_t {
+  quot: int;
+  rem: int;
+}
+export literal @external @typed struct ldiv_t {
+  quot: long int;
+  rem: long int;
+}
+export literal @external @typed struct lldiv_t {
+  quot: long long int;
+  rem: long long int;
+}
+
+declare literal export function div(num: int, denom: int): div_t
+declare literal export function ldiv(num: long int, denom: long int): ldiv_t
+declare literal export function lldiv(num: long long int, denom: long long int): lldiv_t

@@ -833,8 +833,11 @@ int main(int argc, char** argv) {
     std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": " << e.error() << " for argument \"" << e.argId() << "\"" << std::endl;
 
     return 1;
-  } catch (std::runtime_error& e) {
+  } catch (std::exception& e) {
     std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": " << e.what() << std::endl;
     return 100;
+  } catch (...) {
+    std::cerr << CLI::COLOR_RED << "Unknown error" << CLI::COLOR_NORMAL << std::endl;
+    return 101;
   }
 };
