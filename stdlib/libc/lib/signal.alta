@@ -1,7 +1,6 @@
 @@CTranspiler.include("signal.h");
 
-# see TODO in stddef.alta at line 3
-export type sig_atomic_t = byte
+export type sig_atomic_t = any
 
 declare literal export function signal(signal: int, handler: (int) -> void): (int) -> void
 declare literal export function raise(signal: int): int

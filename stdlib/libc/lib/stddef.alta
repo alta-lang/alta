@@ -1,10 +1,6 @@
 @@CTranspiler.include("stddef.h");
 
-# TODO: implement native type declaration and replace this with the following:
-#           export @native type size_t
-#       and have it treated as a native type (like int, char, double, etc.)
-export type size_t = unsigned long long int
-# TODO: ditto
-export type ptrdiff_t = long long int
+export type size_t = any
+export type ptrdiff_t = any
 
 declare literal export var NULL: ptr void

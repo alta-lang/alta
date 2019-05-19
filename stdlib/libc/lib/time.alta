@@ -3,8 +3,8 @@
 import size_t, NULL from "./stddef.alta"
 import rawstring, rawconststring from "types"
 
-export type clock_t = long int
-export type time_t = long int
+export type clock_t = any
+export type time_t = any
 
 export literal @external struct tm {
   tm_sec: int;

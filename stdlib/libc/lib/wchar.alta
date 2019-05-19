@@ -1,5 +1,4 @@
 @@CTranspiler.include("wchar.h");
 
-# see TODO in stddef.alta at line 3
-export type wchar_t = unsigned short int
-export type wint_t = unsigned int
+export type wchar_t = any
+export type wint_t = any

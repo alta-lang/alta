@@ -5,47 +5,47 @@ import sig_atomic_t from "./signal.alta"
 import wchar_t, wint_t from "./wchar.alta"
 
 # see TODO in stddef.alta at line 3
-export type intmax_t = long long int
-export type uintmax_t = unsigned long long int
+export type intmax_t = any
+export type uintmax_t = any
 
-export type int8_t = byte
-export type uint8_t = unsigned byte
+export type int8_t = any
+export type uint8_t = any
 
-export type int16_t = short int
-export type uint16_t = unsigned short int
+export type int16_t = any
+export type uint16_t = any
 
-export type int32_t = long int
-export type uint32_t = unsigned long int
+export type int32_t = any
+export type uint32_t = any
 
-export type int64_t = long long int
-export type uint64_t = unsigned long long int
+export type int64_t = any
+export type uint64_t = any
 
-export type int_least8_t = int8_t
-export type uint_least8_t = uint8_t
+export type int_least8_t = any
+export type uint_least8_t = any
 
-export type int_least16_t = int16_t
-export type uint_least16_t = uint16_t
+export type int_least16_t = any
+export type uint_least16_t = any
 
-export type int_least32_t = int32_t
-export type uint_least32_t = uint32_t
+export type int_least32_t = any
+export type uint_least32_t = any
 
-export type int_least64_t = int64_t
-export type uint_least64_t = uint64_t
+export type int_least64_t = any
+export type uint_least64_t = any
 
-export type int_fast8_t = int8_t
-export type uint_fast8_t = uint8_t
+export type int_fast8_t = any
+export type uint_fast8_t = any
 
-export type int_fast16_t = int16_t
-export type uint_fast16_t = uint16_t
+export type int_fast16_t = any
+export type uint_fast16_t = any
 
-export type int_fast32_t = int32_t
-export type uint_fast32_t = uint32_t
+export type int_fast32_t = any
+export type uint_fast32_t = any
 
-export type int_fast64_t = int64_t
-export type uint_fast64_t = uint64_t
+export type int_fast64_t = any
+export type uint_fast64_t = any
 
-export type intptr_t = int64_t
-export type uintptr_t = uint64_t
+export type intptr_t = any
+export type uintptr_t = any
 
 declare literal export var INTMAX_MIN: const intmax_t
 declare literal export var INTMAX_MAX: const intmax_t
