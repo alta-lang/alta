@@ -1,0 +1,118 @@
+@@CTranspiler.include("stdint.h");
+
+import size_t, ptrdiff_t from "./stddef.alta"
+import sig_atomic_t from "./signal.alta"
+import wchar_t, wint_t from "./wchar.alta"
+
+# see TODO in stddef.alta at line 3
+export type intmax_t = long long int
+export type uintmax_t = unsigned long long int
+
+export type int8_t = byte
+export type uint8_t = unsigned byte
+
+export type int16_t = short int
+export type uint16_t = unsigned short int
+
+export type int32_t = long int
+export type uint32_t = unsigned long int
+
+export type int64_t = long long int
+export type uint64_t = unsigned long long int
+
+export type int_least8_t = int8_t
+export type uint_least8_t = uint8_t
+
+export type int_least16_t = int16_t
+export type uint_least16_t = uint16_t
+
+export type int_least32_t = int32_t
+export type uint_least32_t = uint32_t
+
+export type int_least64_t = int64_t
+export type uint_least64_t = uint64_t
+
+export type int_fast8_t = int8_t
+export type uint_fast8_t = uint8_t
+
+export type int_fast16_t = int16_t
+export type uint_fast16_t = uint16_t
+
+export type int_fast32_t = int32_t
+export type uint_fast32_t = uint32_t
+
+export type int_fast64_t = int64_t
+export type uint_fast64_t = uint64_t
+
+export type intptr_t = int64_t
+export type uintptr_t = uint64_t
+
+declare literal export var INTMAX_MIN: const intmax_t
+declare literal export var INTMAX_MAX: const intmax_t
+declare literal export var UINTMAX_MAX: const uintmax_t
+
+declare literal export var INT8_MIN: const int8_t
+declare literal export var INT8_MAX: const int8_t
+declare literal export var UINT8_MAX: const uint8_t
+
+declare literal export var INT16_MIN: const int16_t
+declare literal export var INT16_MAX: const int16_t
+declare literal export var UINT16_MAX: const uint16_t
+
+declare literal export var INT32_MIN: const int32_t
+declare literal export var INT32_MAX: const int32_t
+declare literal export var UINT32_MAX: const uint32_t
+
+declare literal export var INT64_MIN: const int64_t
+declare literal export var INT64_MAX: const int64_t
+declare literal export var UINT64_MAX: const uint64_t
+
+declare literal export var INT_LEAST8_MIN: const int_least8_t
+declare literal export var INT_LEAST8_MAX: const int_least8_t
+declare literal export var UINT_LEAST8_MAX: const uint_least8_t
+
+declare literal export var INT_LEAST16_MIN: const int_least16_t
+declare literal export var INT_LEAST16_MAX: const int_least16_t
+declare literal export var UINT_LEAST16_MAX: const uint_least16_t
+
+declare literal export var INT_LEAST32_MIN: const int_least32_t
+declare literal export var INT_LEAST32_MAX: const int_least32_t
+declare literal export var UINT_LEAST32_MAX: const uint_least32_t
+
+declare literal export var INT_LEAST64_MIN: const int_least64_t
+declare literal export var INT_LEAST64_MAX: const int_least64_t
+declare literal export var UINT_LEAST64_MAX: const uint_least64_t
+
+declare literal export var INT_FAST8_MIN: const int_fast8_t
+declare literal export var INT_FAST8_MAX: const int_fast8_t
+declare literal export var UINT_FAST8_MAX: const uint_fast8_t
+
+declare literal export var INT_FAST16_MIN: const int_fast16_t
+declare literal export var INT_FAST16_MAX: const int_fast16_t
+declare literal export var UINT_FAST16_MAX: const uint_fast16_t
+
+declare literal export var INT_FAST32_MIN: const int_fast32_t
+declare literal export var INT_FAST32_MAX: const int_fast32_t
+declare literal export var UINT_FAST32_MAX: const uint_fast32_t
+
+declare literal export var INT_FAST64_MIN: const int_fast64_t
+declare literal export var INT_FAST64_MAX: const int_fast64_t
+declare literal export var UINT_FAST64_MAX: const uint_fast64_t
+
+declare literal export var INTPTR_MIN: const intptr_t
+declare literal export var INTPTR_MAX: const intptr_t
+declare literal export var UINTPTR_MAX: const uintptr_t
+
+declare literal export var SIZE_MAX: const size_t
+
+declare literal export var PTRDIFF_MIN: const ptrdiff_t
+declare literal export var PTRDIFF_MAX: const ptrdiff_t
+
+declare literal export var SIG_ATOMIC_MIN: const sig_atomic_t
+declare literal export var SIG_ATOMIC_MAX: const sig_atomic_t
+
+declare literal export var WCHAR_MIN: const wchar_t
+declare literal export var WCHAR_MAX: const wchar_t
+
+declare literal export var WINT_MIN: const wint_t
+declare literal export var WINT_MAX: const wint_t

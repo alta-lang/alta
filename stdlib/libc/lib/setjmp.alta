@@ -1,0 +1,7 @@
+@@CTranspiler.include("setjmp.h");
+
+# see TODO in stddef.alta at line 3
+export literal @external @typed struct jmp_buf {}
+
+declare literal export function longjmp(environment: jmp_buf, state: int): void
+declare literal export function setjmp(environment: jmp_buf): int

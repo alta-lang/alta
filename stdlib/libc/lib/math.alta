@@ -1,5 +1,7 @@
 @@CTranspiler.include("math.h");
 
+import rawstring, rawconststring from "types"
+
 declare literal export function fabsf(n: float): float
 declare literal export function fabs(n: double): double
 declare literal export function fabsl(n: long double): long double
@@ -28,9 +30,9 @@ declare literal export function fdimf(x: float, y: float): float
 declare literal export function fdim(x: double, y: double): double
 declare literal export function fdiml(x: long double, y: long double): long double
 
-declare literal export function nanf(arg: ptr const byte): float
-declare literal export function nan(arg: ptr const byte): double
-declare literal export function nanl(arg: ptr const byte): long double
+declare literal export function nanf(arg: rawconststring): float
+declare literal export function nan(arg: rawconststring): double
+declare literal export function nanl(arg: rawconststring): long double
 
 declare literal export function expf(n: float): float
 declare literal export function exp(n: double): double

@@ -1,0 +1,7 @@
+@@CTranspiler.include("errno.h");
+
+declare literal export var errno: int
+
+declare literal export var EDOM: const int
+declare literal export var ERANGE: const int
+declare literal export var EILSEQ: const int

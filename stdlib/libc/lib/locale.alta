@@ -1,0 +1,34 @@
+@@CTranspiler.include("locale.h");
+
+import rawstring, rawconststring from "types"
+
+export literal @external struct lconv {
+  decimal_point: rawstring;
+  thousands_sep: rawstring;
+  grouping: rawstring;
+  int_curr_symbol: rawstring;
+  currency_symbol: rawstring;
+  mon_decimal_point: rawstring;
+  mon_thousands_sep: rawstring;
+  mon_grouping: rawstring;
+  positive_sign: rawstring;
+  negative_sign: rawstring;
+  frac_digits: byte;
+  p_cs_precedes: byte;
+  n_cs_precedes: byte;
+  p_sep_by_space: byte;
+  n_sep_by_space: byte;
+  p_sign_posn: byte;
+  n_sign_posn: byte;
+  int_frac_digits: byte;
+  int_p_cs_precedes: byte;
+  int_n_cs_precedes: byte;
+  int_p_sep_by_space: byte;
+  int_n_sep_by_space: byte;
+  int_p_sign_posn: byte;
+  int_n_sign_posn: byte;
+}
+
+declare literal export function setlocale(category: int, locale: rawconststring): rawstring
+
+declare literal export function localeconv(): ptr lconv

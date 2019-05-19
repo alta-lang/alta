@@ -1,0 +1,4 @@
+@@CTranspiler.include("stdarg.h");
+
+# see TODO in stddef.alta at line 3
+export literal @external @typed struct va_list {}
