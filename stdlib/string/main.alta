@@ -1,6 +1,7 @@
 import malloc, realloc, free from "memory"
 import Size, rawstring, rawconststring from "types"
 import printf from "io"
+import strlen from "libc/lib/string"
 
 ##define STRING_DEBUG false
 

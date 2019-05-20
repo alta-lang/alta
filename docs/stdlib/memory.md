@@ -2,8 +2,7 @@
 This module exposes lots of necessary and useful functions and classes for working with memory.
 
 ## Depends on
-  * Alta
-    * [`types`](types.md)
+  * `lib/stdlib` from [`libc`](libc.md)
 
 Functions
 ---

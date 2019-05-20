@@ -2,9 +2,9 @@
 This module contains 
 
 ## Depends on
-  * Alta
-    * [`memory`](memory.md)
-    * [`types`](types.md)
+  * [`memory`](memory.md)
+  * [`types`](types.md)
+  * `lib/string.alta` from [`libc`](libc.md)
 
 Functions
 ---
@@ -18,7 +18,7 @@ Determines the length of the given raw string.
 
 Classes
 ---
-## String
+## `String`
 **Has copy constructor**: Yes\
 **Has destructor**: Yes
 

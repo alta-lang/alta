@@ -1,13 +1,14 @@
-export type int8 = byte
-export type int16 = short int
-export type int32 = long int
-export type int64 = long long int
+export size_t as Size from "libc/lib/stddef"
+export {
+  int8_t as int8,
+  int16_t as int16,
+  int32_t as int32,
+  int64_t as int64,
+  uint8_t as uint8,
+  uint16_t as uint16,
+  uint32_t as uint32,
+  uint64_t as uint64,
+} from "libc/lib/stdint"
 
-export type uint8 = unsigned int8
-export type uint16 = unsigned int16
-export type uint32 = unsigned int32
-export type uint64 = unsigned int64
-
-export type Size = uint64
 export type rawstring = ptr byte
 export type rawconststring = ptr const byte
