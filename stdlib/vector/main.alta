@@ -44,7 +44,7 @@ export generic class Vector<T> {
 
   public function push(): ref T {
     this.ensureSize(this._length + 1)
-    ++this._length
+    ;++this._length
     return this._data[this._length - 1]
   }
   public function push(value: T): ref T {
