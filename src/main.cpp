@@ -727,6 +727,13 @@ int main(int argc, char** argv) {
                 outfileCmake << "  " << Talta::mangleName(generic->klass.get()) << '-' << target.name << '\n';
               }
             }
+          } else if (auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(gItem)) {
+            for (auto& generic: func->genericArguments) {
+              if (generic->klass && generic->klass->genericParameterCount > 0) {
+                auto genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
+                outfileCmake << "  " << Talta::mangleName(generic->klass.get()) << '-' << target.name << '\n';
+              }
+            }
           } else {
             throw std::runtime_error("wth");
           }
