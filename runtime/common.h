@@ -51,6 +51,7 @@ typedef struct __Alta_class_info {
   _Alta_destructor destructor;
   _Alta_bool isBaseStruct;
   const char* parentTypeName;
+  ptrdiff_t realOffset;
 } _Alta_class_info;
 
 struct __Alta_basic_class {
