@@ -1,9 +1,9 @@
 import rawstring, Size, uint8 from "types"
 import power from "math"
-import rawstringLength from "string"
+import rawstringLength, String from "string"
 
-export function parseSize(string: rawstring, length: Size): Size {
-  let result: Size = 0
+export function parseNumber<T>(string: rawstring, length: Size): T {
+  let result: T = 0
 
   for i: Size in 0..length {
     let digit = 0
@@ -14,12 +14,16 @@ export function parseSize(string: rawstring, length: Size): Size {
       # TODO: throw an error
     }
 
-    result += digit * power(10, length - (i + 1))
+    result += digit * power<T>(10, length - (i + 1))
   }
 
   return result
 }
 
-export function parseSize(string: rawstring): Size {
-  return parseSize(string, rawstringLength(string))
+export function parseNumber<T>(string: rawstring): T {
+  return parseNumber<T>(string, rawstringLength(string))
+}
+
+export function parseNumber<T>(string: String): T {
+  return parseNumber<T>(string.data, string.length)
 }
