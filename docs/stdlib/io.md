@@ -6,7 +6,7 @@ This module contains I/O constructs bridged over from C, wrapped up to be more A
 
 Functions
 ---
-## `printf(string: types.rawconststring, data: any...): int`
+## `printf(string: [types].rawconststring, data: any...): int`
 This is C's native `printf` function, exposed to Alta.
 
 **Parameters**:

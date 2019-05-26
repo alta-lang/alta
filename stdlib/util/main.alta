@@ -1,4 +1,4 @@
-import rawstring, Size, uint8 from "types"
+import rawstring, Size from "types"
 import power from "math"
 import rawstringLength, String from "string"
 

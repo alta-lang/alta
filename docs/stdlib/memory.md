@@ -6,7 +6,7 @@ This module exposes lots of necessary and useful functions and classes for worki
 
 Functions
 ---
-## `malloc(size: types.Size): ptr void`
+## `malloc(size: [types].Size): ptr void`
 This is the C stdandard library's `malloc` function, exposed to Alta. It allocates memory without zeroing it.
 
 **Parameters**:
@@ -30,3 +30,12 @@ This is the C standard library's `free` function, exposed to Alta. It deallocate
   * `pointer` = A pointer to the block of memory to deallocate. This must point to a block of memory previously allocated with `malloc`, `calloc`, or `realloc`
 
 **Returns**: Nothing
+
+## `calloc(count: [types].Size, elementSize: [types].Size): ptr void`
+This is C standard library's `calloc` function, exposed to Alta. It allocates memory and zeroes it.
+
+**Parameters**:
+  * `count` = The number of elements of size `elementSize` to allocate
+  * `elementSize` = The size of each element in the allocated block
+
+**Returns**: A void pointer to the newly allocated memory. `NULL` if allocation failed

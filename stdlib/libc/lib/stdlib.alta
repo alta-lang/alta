@@ -32,7 +32,7 @@ declare literal export function strtoul(str: rawconststring, end: ptr rawstring,
 declare literal export function rand(): int
 declare literal export function srand(seed: unsigned int): void
 
-declare literal export function calloc(count: size_t, elementsize_t: size_t): ptr void
+declare literal export function calloc(count: size_t, elementSize: size_t): ptr void
 declare literal export function malloc(size: size_t): ptr void
 declare literal export function realloc(pointer: ptr void, size: size_t): ptr void
 declare literal export function free(pointer: ptr void): void
@@ -44,7 +44,7 @@ declare literal export function getenv(name: rawconststring): rawstring
 declare literal export function system(command: rawconststring): int
 
 declare literal export function bsearch(key: ptr const void, array: ptr const void, count: size_t, comparator: (ptr const void, ptr const void) -> int): ptr void
-declare literal export function qsort(array: ptr const void, count: size_t, elementsize_t: size_t, comparator: (ptr const void, ptr const void) -> int): void
+declare literal export function qsort(array: ptr const void, count: size_t, elementSize: size_t, comparator: (ptr const void, ptr const void) -> int): void
 
 declare literal export function abs(n: int): int
 declare literal export function div(num: int, denom: int): div_t
