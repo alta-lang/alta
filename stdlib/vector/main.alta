@@ -1,0 +1,68 @@
+import malloc, free, realloc from "memory"
+import Size from "types"
+
+export generic class Vector<T> {
+  private var _data: ptr T = (0 as ptr T)
+  private var _length: Size = 0
+  private var _size: Size = 0
+
+  public constructor() {
+    this._data = malloc(0) as ptr T
+  }
+  public constructor(length: Size) {
+    this._size = length
+    this._length = this._size
+    this._data = malloc(length * sizeof T) as ptr T
+  }
+  public @copy constructor(other: ref Vector<T>) {
+    this._size = other._size
+    this._length = other._length
+    this._data = malloc(other._size * sizeof T) as ptr T
+
+    for i: Size in 0..this._length {
+      this._data[i] = other._data[i]
+    }
+  }
+
+  public destructor() {
+    free(this._data as ptr void)
+  }
+
+  public @read function length(): Size {
+    return this._length
+  }
+
+  public @read function data(): ptr T {
+    return this._data
+  }
+
+  public function get(index: Size): ref T {
+    return this._data[index]
+  }
+
+  private function ensureSize(desiredSize: Size): void {
+    if this._size < desiredSize {
+      let tmp = realloc(this._data as ptr void, desiredSize * sizeof T) as ptr T
+
+      if tmp == 0 {
+        # welp, something happened
+        # TODO: throw an error
+        return
+      }
+
+      this._data = tmp
+      this._size = desiredSize
+    }
+  }
+
+  public function push(): ref T {
+    this.ensureSize(this._length + 1)
+    ;++this._length
+    return this._data[this._length - 1]
+  }
+  public function push(value: T): ref T {
+    let elm: ref T = this.push()
+    elm = value
+    return elm
+  }
+}

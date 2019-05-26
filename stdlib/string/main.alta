@@ -1,8 +1,9 @@
 import malloc, realloc, free from "memory"
 import Size, rawstring, rawconststring from "types"
 import printf from "io"
+import strlen from "libc/lib/string"
 
-##define STRING_DEBUG true
+##define STRING_DEBUG false
 
 ##if STRING_DEBUG
 let stringUUID: Size = 0
@@ -15,7 +16,7 @@ let stringUUID: Size = 0
 export function rawstringLength(str: rawconststring): Size {
   let i: Size = 0
   while str[i] != '\0' {
-    i = i + 1
+    i++
   }
   return i
 }
@@ -26,7 +27,7 @@ export class String {
   private var _length: Size = 0
 
 ##if STRING_DEBUG
-  private var uuid = (stringUUID = stringUUID + 1) - 1
+  private var uuid = stringUUID++
 ##end if
 
   # Constructs a new, empty String
@@ -48,10 +49,8 @@ export class String {
     this._length = rawstringLength(data)
     this._data = malloc(this._length + 1) as rawstring
 
-    let i: Size = 0
-    while i < this._length {
+    for i: Size in 0..this._length {
       this._data[i] = data[i]
-      i = i + 1
     }
 
     this._data[this._length] = '\0'
@@ -70,10 +69,8 @@ export class String {
     this._length = length
     this._data = malloc(this._length + 1) as rawstring
 
-    let i: Size = 0
-    while i < this._length {
+    for i: Size in 0..this._length {
       this._data[i] = data[i]
-      i = i + 1
     }
 
     this._data[this._length] = '\0'
@@ -90,10 +87,8 @@ export class String {
     this._length = other._length
     this._data = malloc(this._length + 1) as rawstring
 
-    let i: Size = 0
-    while i < this._length {
+    for i: Size in 0..this._length {
       this._data[i] = other._data[i]
-      i = i + 1
     }
 
     this._data[this._length] = '\0'
@@ -129,7 +124,7 @@ export class String {
 
   # The pointer to the rawconststring (ptr const byte) contained
   # by this String
-  @read public function data(): rawconststring {
+  public @read function data(): rawconststring {
     return this._data
   }
 
@@ -137,7 +132,7 @@ export class String {
   #
   # Note that this does *not* include the null terminator
   # i.e. the *length* of "hi" is 2, not 3
-  @read public function length(): Size {
+  public @read function length(): Size {
     return this._length
   }
 
@@ -145,7 +140,7 @@ export class String {
   #
   # Note that this *does* include the null terminator
   # i.e. the *size* of "hi" is 3, not 2
-  @read public function size(): Size {
+  public @read function size(): Size {
     return this.length + 1
   }
 
@@ -176,10 +171,8 @@ export class String {
 
     this.resize(this._length + length)
 
-    let i: Size = 0
-    while i < length {
+    for i: Size in 0..length {
       this._data[oldLen + i] = data[i]
-      i = i + 1
     }
 
     this._data[this._length] = '\0'

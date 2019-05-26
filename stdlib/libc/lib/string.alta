@@ -1,0 +1,31 @@
+@@CTranspiler.include("string.h");
+
+import NULL, size_t from "./stddef.alta"
+import rawstring, rawconststring from "types"
+
+declare literal export function memcpy(destination: ptr void, source: ptr const void, byteLength: size_t): ptr void
+declare literal export function memmove(destination: ptr void, source: ptr const void, byteLength: size_t): ptr void
+declare literal export function strcpy(destination: rawstring, source: rawconststring): rawstring
+declare literal export function strncpy(destination: rawstring, source: rawconststring, length: size_t): rawstring
+
+declare literal export function strcat(destination: rawstring, source: rawconststring): rawstring
+declare literal export function strncat(destination: rawstring, source: rawconststring, length: size_t): rawstring
+
+declare literal export function memcmp(first: ptr const void, second: ptr const void, byteLength: size_t): int
+declare literal export function strcmp(first: rawconststring, second: rawconststring): int
+declare literal export function strcoll(first: rawconststring, second: rawconststring): int
+declare literal export function strncmp(first: rawconststring, second: rawconststring, byteLength: size_t): int
+declare literal export function strxfrm(destination: rawstring, source: rawconststring, byteLength: size_t): size_t
+
+declare literal export function memchr(source: ptr const void, target: int, byteLength: size_t): ptr void
+declare literal export function strchr(source: rawconststring, target: int): rawstring
+declare literal export function strcspn(source: rawconststring, target: rawconststring): size_t
+declare literal export function strpbrk(source: rawconststring, target: rawconststring): rawstring
+declare literal export function strrchr(source: rawconststring, target: int): rawstring
+declare literal export function strspn(source: rawconststring, target: rawconststring): size_t
+declare literal export function strstr(source: rawconststring, target: rawconststring): rawstring
+declare literal export function strtok(buffer: rawstring, delimiters: rawconststring): rawstring
+
+declare literal export function memset(destination: ptr void, value: int, byteLength: size_t): ptr void
+declare literal export function strerror(errorNumber: int): rawstring
+declare literal export function strlen(string: rawconststring): size_t

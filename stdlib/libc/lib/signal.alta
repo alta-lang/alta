@@ -1,0 +1,17 @@
+@@CTranspiler.include("signal.h");
+
+export type sig_atomic_t = any
+
+declare literal export function signal(signal: int, handler: (int) -> void): (int) -> void
+declare literal export function raise(signal: int): int
+
+declare literal export var SIGABRT: const int
+declare literal export var SIGFPE: const int
+declare literal export var SIGILL: const int
+declare literal export var SIGINT: const int
+declare literal export var SIGSEGV: const int
+declare literal export var SIGTERM: const int
+
+declare literal export var SIG_DFL: (int) -> void
+declare literal export var SIG_IGN: (int) -> void
+declare literal export var SIG_ERR: (int) -> void

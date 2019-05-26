@@ -1,0 +1,6 @@
+@@CTranspiler.include("stddef.h");
+
+export type size_t = any
+export type ptrdiff_t = any
+
+declare literal export var NULL: const ptr void

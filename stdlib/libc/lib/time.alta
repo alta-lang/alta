@@ -1,0 +1,32 @@
+@@CTranspiler.include("time.h");
+
+import size_t, NULL from "./stddef.alta"
+import rawstring, rawconststring from "types"
+
+export type clock_t = any
+export type time_t = any
+
+export literal @external struct tm {
+  tm_sec: int;
+  tm_min: int;
+  tm_hour: int;
+  tm_mday: int;
+  tm_mon: int;
+  tm_year: int;
+  tm_wday: int;
+  tm_yday: int;
+  tm_isdst: int;
+}
+
+declare literal export function clock(): clock_t
+declare literal export function difftime(end: time_t, beginning: time_t): double
+declare literal export function mktime(time: ptr tm): time_t
+declare literal export function time(timer: ptr time_t): time_t
+
+declare literal export function asctime(time: ptr const tm): rawstring
+declare literal export function ctime(time: ptr const time_t): rawstring
+declare literal export function gmtime(timer: ptr const time_t): ptr tm
+declare literal export function localtime(timer: ptr const time_t): ptr tm
+declare literal export function strftime(destination: rawstring, size: size_t, format: rawconststring, time: ptr const tm): size_t
+
+declare literal export var CLOCKS_PER_SEC: const clock_t

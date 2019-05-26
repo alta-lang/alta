@@ -1,3 +1,14 @@
-export type Size = unsigned long long int
+export size_t as Size from "libc/lib/stddef"
+export {
+  int8_t as int8,
+  int16_t as int16,
+  int32_t as int32,
+  int64_t as int64,
+  uint8_t as uint8,
+  uint16_t as uint16,
+  uint32_t as uint32,
+  uint64_t as uint64,
+} from "libc/lib/stdint"
+
 export type rawstring = ptr byte
 export type rawconststring = ptr const byte

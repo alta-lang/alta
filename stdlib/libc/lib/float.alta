@@ -1,0 +1,45 @@
+@@CTranspiler.include("float.h");
+
+declare literal export var FLT_RADIX: const int
+
+declare literal export var FLT_MANT_DIG: const int
+declare literal export var DBL_MANT_DIG: const int
+declare literal export var LDBL_MANT_DIG: const int
+
+declare literal export var FLT_DIG: const int
+declare literal export var DBL_DIG: const int
+declare literal export var LDBL_DIG: const int
+
+declare literal export var FLT_MIN_EXP: const int
+declare literal export var DBL_MIN_EXP: const int
+declare literal export var LDBL_MIN_EXP: const int
+
+declare literal export var FLT_MIN_10_EXP: const int
+declare literal export var DBL_MIN_10_EXP: const int
+declare literal export var LDBL_MIN_10_EXP: const int
+
+declare literal export var FLT_MAX_EXP: const int
+declare literal export var DBL_MAX_EXP: const int
+declare literal export var LDBL_MAX_EXP: const int
+
+declare literal export var FLT_MAX_10_EXP: const int
+declare literal export var DBL_MAX_10_EXP: const int
+declare literal export var LDBL_MAX_10_EXP: const int
+
+declare literal export var FLT_MAX: const float
+declare literal export var DBL_MAX: const double
+declare literal export var LDBL_MAX: const long double
+
+declare literal export var FLT_EPSILON: const float
+declare literal export var DBL_EPSILON: const double
+declare literal export var LDBL_EPSILON: const long double
+
+declare literal export var FLT_MIN: const float
+declare literal export var DBL_MIN: const double
+declare literal export var LBDL_MIN: const long double
+
+declare literal export var FLT_ROUNDS: const int
+
+declare literal export var FLT_EVAL_METHOD: const int
+
+declare literal export var DECIMAL_DIG: const int

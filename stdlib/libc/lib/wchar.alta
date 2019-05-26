@@ -1,0 +1,4 @@
+@@CTranspiler.include("wchar.h");
+
+export type wchar_t = any
+export type wint_t = any

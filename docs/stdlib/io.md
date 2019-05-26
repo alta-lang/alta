@@ -2,12 +2,11 @@
 This module contains I/O constructs bridged over from C, wrapped up to be more Alta-style. It also conatins some Alta-specific useful utilities.
 
 ## Depends on
-  * C
-    * [`stdio.h`](https://en.cppreference.com/w/cpp/header/cstdio)
+  * `lib/stdio` from [`libc`](libc.md)
 
 Functions
 ---
-## `printf(string: ptr byte, data: any...): int`
+## `printf(string: [types].rawconststring, data: any...): int`
 This is C's native `printf` function, exposed to Alta.
 
 **Parameters**:

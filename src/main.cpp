@@ -644,6 +644,10 @@ int main(int argc, char** argv) {
 
         cmakeLists << ")\n";
 
+        cmakeLists << "set_target_properties(" << packageName << "-core-" << target.name << " PROPERTIES\n";
+        cmakeLists << "  C_STANDARD 99\n";
+        cmakeLists << ")\n";
+
         cmakeLists << "target_link_libraries(" << packageName << "-core-" << target.name << " PUBLIC\n";
 
         cmakeLists << "  alta-global-runtime" << '\n';
@@ -695,6 +699,7 @@ int main(int argc, char** argv) {
           auto dashName = (moduleNamePath + "-" + std::to_string(i)).toString('-');
           outfileCmake << "  OUTPUT_NAME " << dashName << '\n';
           outfileCmake << "  COMPILE_PDB_NAME " << dashName << '\n';
+          outfileCmake << "  C_STANDARD 99\n";
           outfileCmake << ")\n";
           if (gItem->instantiatedFromSamePackage) {
             outfileCmake << "target_sources(" << mod->packageInfo.name << "-core-" << target.name << " PUBLIC\n";
@@ -717,6 +722,13 @@ int main(int argc, char** argv) {
 
           if (auto klass = std::dynamic_pointer_cast<AltaCore::DET::Class>(gItem)) {
             for (auto& generic: klass->genericArguments) {
+              if (generic->klass && generic->klass->genericParameterCount > 0) {
+                auto genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
+                outfileCmake << "  " << Talta::mangleName(generic->klass.get()) << '-' << target.name << '\n';
+              }
+            }
+          } else if (auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(gItem)) {
+            for (auto& generic: func->genericArguments) {
               if (generic->klass && generic->klass->genericParameterCount > 0) {
                 auto genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
                 outfileCmake << "  " << Talta::mangleName(generic->klass.get()) << '-' << target.name << '\n';
@@ -772,6 +784,7 @@ int main(int argc, char** argv) {
 
           outfileCmake << "set_target_properties(" << mod->packageInfo.name << '-' << target.name << " PROPERTIES\n";
           outfileCmake << "  OUTPUT_NAME " << target.name << '\n';
+          outfileCmake << "  C_STANDARD 99\n";
           outfileCmake << ")\n";
         }
 
@@ -827,8 +840,11 @@ int main(int argc, char** argv) {
     std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": " << e.error() << " for argument \"" << e.argId() << "\"" << std::endl;
 
     return 1;
-  } catch (std::runtime_error& e) {
+  } catch (std::exception& e) {
     std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": " << e.what() << std::endl;
     return 100;
+  } catch (...) {
+    std::cerr << CLI::COLOR_RED << "Unknown error" << CLI::COLOR_NORMAL << std::endl;
+    return 101;
   }
 };

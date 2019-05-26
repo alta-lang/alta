@@ -1,0 +1,65 @@
+@@CTranspiler.include("stdlib.h");
+
+import rawconststring, rawstring from "types"
+import size_t from "./stddef.alta"
+import wchar_t from "./wchar.alta"
+
+# the C standard doesn't enforce an order,
+# so the underlying implementation could put either value first;
+# however, we don't care because these are just declarations to let
+# Alta know these structs exist and have these members.
+export literal @external @typed struct div_t {
+  quot: int;
+  rem: int;
+}
+export literal @external @typed struct ldiv_t {
+  quot: long int;
+  rem: long int;
+}
+export literal @external @typed struct lldiv_t {
+  quot: long long int;
+  rem: long long int;
+}
+
+declare literal export function atof(str: rawconststring): double
+declare literal export function atoi(str: rawconststring): int
+declare literal export function atol(str: rawconststring): long int
+
+declare literal export function strtod(str: rawconststring, end: ptr rawstring): double
+declare literal export function strtol(str: rawconststring, end: ptr rawstring, base: int): long int
+declare literal export function strtoul(str: rawconststring, end: ptr rawstring, base: int): unsigned long int
+
+declare literal export function rand(): int
+declare literal export function srand(seed: unsigned int): void
+
+declare literal export function calloc(count: size_t, elementSize: size_t): ptr void
+declare literal export function malloc(size: size_t): ptr void
+declare literal export function realloc(pointer: ptr void, size: size_t): ptr void
+declare literal export function free(pointer: ptr void): void
+
+declare literal export function abort(): void
+declare literal export function atexit(callback: () -> void): void
+declare literal export function exit(status: int): void
+declare literal export function getenv(name: rawconststring): rawstring
+declare literal export function system(command: rawconststring): int
+
+declare literal export function bsearch(key: ptr const void, array: ptr const void, count: size_t, comparator: (ptr const void, ptr const void) -> int): ptr void
+declare literal export function qsort(array: ptr const void, count: size_t, elementSize: size_t, comparator: (ptr const void, ptr const void) -> int): void
+
+declare literal export function abs(n: int): int
+declare literal export function div(num: int, denom: int): div_t
+declare literal export function labs(n: long int): long int
+declare literal export function ldiv(num: long int, denom: long int): ldiv_t
+
+declare literal export function mblen(string: rawconststring, max: size_t): int
+declare literal export function mbtowc(destination: ptr wchar_t, source: rawconststring, max: size_t): int
+declare literal export function wctomb(destination: rawstring, source: wchar_t): int
+
+declare literal export function mbstowcs(destination: ptr wchar_t, source: rawconststring, max: size_t): size_t
+declare literal export function wcstombs(destination: rawstring, source: ptr const wchar_t, max: size_t): size_t
+
+declare literal export var EXIT_FAILURE: const int
+declare literal export var EXIT_SUCCESS: const int
+
+declare literal export var MB_CUR_MAX: const size_t
+declare literal export var RAND_MAX: const int
