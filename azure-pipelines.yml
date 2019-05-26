@@ -14,13 +14,13 @@ jobs:
   # if this is a tagged commit, build for release
   - task: CMake@1
     displayName: "Configure project with CMake (for release)"
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     inputs:
       cmakeArgs: "-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Release .."
   # otherwise, build for debug
   - task: CMake@1
     displayName: "Configure project with CMake (for debug)"
-    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
     inputs:
       cmakeArgs: "-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Debug .."
 
@@ -51,7 +51,7 @@ jobs:
     displayName: "Copy the runtime to artifact directory"
 
   - task: ArchiveFiles@2
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     displayName: "Create a release archive"
     inputs:
       rootFolderOrFile: '$(Build.ArtifactStagingDirectory)'
@@ -64,7 +64,7 @@ jobs:
       shopt -s extglob
       rm -r !(altac-linux-amd64.tar.xz)
     workingDirectory: $(Build.ArtifactStagingDirectory)
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     displayName: "Remove unnecessary files (for release)"
 
   # publish the relevant artifacts
@@ -89,20 +89,20 @@ jobs:
   #       not configuration time (unlike Make on Linux and macOS)
   - task: CMake@1
     displayName: "Build project (for release)"
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     inputs:
       cmakeArgs: "--build . --config Release"
   # otherwise, build for debug
   - task: CMake@1
     displayName: "Build project (for debug)"
-    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
     inputs:
       cmakeArgs: "--build . --config Debug"
 
   # [debug] copy the executable (and any related products)
   - task: CopyFiles@2
     displayName: "Copy the executable (and related files) to artifact directory (for release)"
-    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
     inputs:
       sourceFolder: "build\\bin\\Debug"
       contents: "*"
@@ -110,7 +110,7 @@ jobs:
   # [release] copy the executable (and any related products)
   - task: CopyFiles@2
     displayName: "Copy the executable (and related files) to artifact directory (for release)"
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     inputs:
       sourceFolder: "build\\bin\\Release"
       contents: "*"
@@ -126,7 +126,7 @@ jobs:
     displayName: "Copy the runtime to artifact directory"
 
   - task: ArchiveFiles@2
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     displayName: "Create a release archive"
     inputs:
       rootFolderOrFile: '$(Build.ArtifactStagingDirectory)'
@@ -138,7 +138,7 @@ jobs:
       shopt -s extglob
       rm -r !(altac-win64.zip)
     workingDirectory: $(Build.ArtifactStagingDirectory)
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     displayName: "Remove unnecessary files (for release)"
 
   # publish the relevant artifacts
@@ -155,14 +155,14 @@ jobs:
   # if this is a tagged commit, build for release
   - task: CMake@1
     displayName: "Configure project with CMake (for release)"
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     inputs:
       cmakeArgs: "-DCMAKE_BUILD_TYPE=Release .."
 
   # otherwise, build for debug
   - task: CMake@1
     displayName: "Configure project with CMake (for debug)"
-    condition: not(contains(variables['Build.SourceBranch'], 'refs/tags/'))
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
     inputs:
       cmakeArgs: "-DCMAKE_BUILD_TYPE=Debug .."
 
@@ -193,7 +193,7 @@ jobs:
     displayName: "Copy the runtime to artifact directory"
 
   - task: ArchiveFiles@2
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     displayName: "Create a release archive"
     inputs:
       rootFolderOrFile: '$(Build.ArtifactStagingDirectory)'
@@ -205,7 +205,7 @@ jobs:
       shopt -s extglob
       rm -r !(altac-macos.zip)
     workingDirectory: $(Build.ArtifactStagingDirectory)
-    condition: contains(variables['Build.SourceBranch'], 'refs/tags/')
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
     displayName: "Remove unnecessary files (for release)"
 
   # publish the relevant artificats
