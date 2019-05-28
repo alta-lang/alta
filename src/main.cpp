@@ -528,7 +528,7 @@ int main(int argc, char** argv) {
       generalCmakeLists.close();
 
       for (auto& [moduleName, info]: transpiledModules) {
-        auto& [cRoot, hRoot, gRoots, gItems, mod] = info;
+        auto& [cRoot, hRoot, dRoot, gRoots, gItems, mod] = info;
 
         if (packageDependencies.find(mod->packageInfo.name) == packageDependencies.end()) {
           packageDependencies[mod->packageInfo.name] = std::set<std::string>();
@@ -547,11 +547,12 @@ int main(int argc, char** argv) {
       }
 
       for (auto& [moduleName, info]: transpiledModules) {
-        auto& [cRoot, hRoot, gRoots, gItems, mod] = info;
+        auto& [cRoot, hRoot, dRoot, gRoots, gItems, mod] = info;
         auto base = outDir / moduleName;
         auto modOutDir = outDir / mod->packageInfo.name;
         auto cOut = base + ".c";
         auto hOut = base + ".h";
+        auto dOut = base + ".d.h";
         std::vector<AltaCore::Filesystem::Path> gOuts;
         auto cmakeOut = modOutDir / "CMakeLists.txt";
 
@@ -564,6 +565,7 @@ int main(int argc, char** argv) {
 
         std::ofstream outfileC(cOut.toString());
         std::ofstream outfileH(hOut.toString());
+        std::ofstream outfileD(dOut.toString());
         std::vector<std::ofstream> outfileGs;
 
         for (size_t i = 0; i < gRoots.size(); i++) {
@@ -623,12 +625,18 @@ int main(int argc, char** argv) {
         // include the Alta common runtime header
         outfileH << "#define _ALTA_RUNTIME_COMMON_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/common.h\"\n";
 
+        // define the definition header include path
+        outfileH << "#define _ALTA_DEF_HEADER_" << mangledModuleName << " \"" << dOut.relativeTo(hOut).toString('/') << "\"\n";
+
         // include the index in the module's header, otherwise we won't be able to find our dependencies
         outfileH << "#include \"" << indexHeaderPath.relativeTo(hOut).toString('/') << "\"\n";
 
         outfileH << hRoot->toString();
 
         outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << cOut.relativeTo(modOutDir).toString('/') << "\"\n";
+
+        outfileD << dRoot->toString();
+        outfileD.close();
 
         // finally, add our header to the index for all our dependents
         for (auto& dependent: mod->dependents) {
@@ -664,7 +672,7 @@ int main(int argc, char** argv) {
       }
 
       for (auto& [moduleName, info]: transpiledModules) {
-        auto& [cRoot, hRoot, gRoots, gItems, mod] = info;
+        auto& [cRoot, hRoot, dRoot, gRoots, gItems, mod] = info;
         auto base = outDir / moduleName;
         auto modOutDir = outDir / mod->packageInfo.name;
         auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
@@ -743,7 +751,7 @@ int main(int argc, char** argv) {
       }
 
       for (auto& [moduleName, info]: transpiledModules) {
-        auto& [cRoot, hRoot, gRoots, gItems, mod] = info;
+        auto& [cRoot, hRoot, dRoot, gRoots, gItems, mod] = info;
         auto base = outDir / moduleName;
         auto modOutDir = outDir / mod->packageInfo.name;
         auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
