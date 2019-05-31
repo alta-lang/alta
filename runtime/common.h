@@ -42,7 +42,7 @@ enum _Alta_bool_value {
 
 typedef struct __Alta_basic_class _Alta_basic_class;
 
-typedef void (*_Alta_destructor)(_Alta_basic_class*);
+typedef void (*_Alta_destructor)(_Alta_basic_class*, _Alta_bool);
 
 typedef struct __Alta_class_info {
   const char* typeName;

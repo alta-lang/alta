@@ -1,0 +1,23 @@
+import malloc, realloc, free from "memory"
+import Size from "types"
+import Vector from "vector"
+
+export generic class Stack<T> {
+  private var _vec: Vector<T> = new Vector<T>
+
+  public @read function top(): ref T {
+    return this._vec.last
+  }
+
+  public @read function length(): Size {
+    return this._vec.length
+  }
+
+  public function push(value: T): ref T {
+    return this._vec.push(value)
+  }
+
+  public function pop(): T {
+    return this._vec.pop()
+  }
+}

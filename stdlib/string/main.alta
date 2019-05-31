@@ -197,4 +197,62 @@ export class String {
   public function append(data: String): ref String {
     return this.append(data._data, data._length)
   }
+
+  public function append(data: byte): ref String {
+    return this.append(&data, 1)
+  }
+
+  public function substring(from: Size, to: Size): String {
+    let sub = new String
+    for i: Size in from..to {
+      if i >= this._length break
+      sub.append(this.charAt(i))
+    }
+    return sub
+  }
+  # possible because Alta takes parameters names into account when determining overloads
+  # and defaults to the first overload found when ambiguities arise
+  public function substring(from: Size, length: Size): String {
+    return this.substring(from, to: from + length)
+  }
+  public function substring(from: Size): String {
+    return this.substring(from, to: this._length)
+  }
+  # possible for the same reason as above
+  public function substring(to: Size): String {
+    return this.substring(0, to: to)
+  }
+  public function substring(length: Size): String {
+    return this.substring(0, length: length)
+  }
+
+  public function prepend(data: rawstring, length: Size): ref String {
+    let oldLen = this._length
+
+    this.resize(this._length + length)
+
+    for i: Size in oldLen::0 {
+      this._data[i - 1 + length] = this._data[i - 1]
+    }
+
+    for i: Size in 0..length {
+      this._data[i] = data[i]
+    }
+
+    this._data[this._length] = '\0'
+
+    return this
+  }
+
+  public function prepend(data: rawstring): ref String {
+    return this.prepend(data, rawstringLength(data))
+  }
+
+  public function prepend(data: String): ref String {
+    return this.prepend(data._data, data._length)
+  }
+
+  public function prepend(data: byte): ref String {
+    return this.prepend(&data, 1)
+  }
 }

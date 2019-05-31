@@ -1,15 +1,19 @@
 import rawstring, Size from "types"
 import power from "math"
 import rawstringLength, String from "string"
+import fmod, modf from "libc/lib/math"
 
 export function parseNumber<T>(string: rawstring, length: Size): T {
   let result: T = 0
+  let negate = false
 
   for i: Size in 0..length {
     let digit = 0
 
-    if string[i] >= '0' && string[i] <= '9' {
-      digit = string[i] - 48
+    if i == 0 && string[i] == '-' {
+      negate = true
+    } else if string[i] >= '0' && string[i] <= '9' {
+      digit = string[i] - '0'
     } else {
       # TODO: throw an error
     }
@@ -17,7 +21,7 @@ export function parseNumber<T>(string: rawstring, length: Size): T {
     result += digit * power<T>(10, length - (i + 1))
   }
 
-  return result
+  return -result if negate else result
 }
 
 export function parseNumber<T>(string: rawstring): T {
@@ -26,4 +30,169 @@ export function parseNumber<T>(string: rawstring): T {
 
 export function parseNumber<T>(string: String): T {
   return parseNumber<T>(string.data, string.length)
+}
+
+export generic class Pair<T1, T2> {
+  public var first: T1
+  public var second: T2
+
+  public constructor(first: T1, second: T2) {
+    this.first @strict = first
+    this.second @strict = second
+  }
+}
+
+export function parseFloatingPoint<T>(string: String): T {
+  if string.length < 1 return 0
+  let first: Size = 0
+  for i: Size in 0...string.length {
+    if i == string.length {
+      first = string.length
+      break
+    }
+    let char = string.charAt(i)
+    if !(char >= '0' && char <= '9') {
+      first = i
+      break
+    }
+  }
+  if first == 0 && string.charAt(0) != '.' return 0
+  let whole = parseNumber<T>(string.substring(0, to: first))
+  if first == string.length return whole
+
+  let isExponent = false
+  let charThere = string.charAt(first)
+  if charThere == '.' {
+    isExponent = false
+  } else if charThere == 'e' || charThere == 'E' {
+    isExponent = true
+  } else {
+    return whole
+  }
+
+  let second: Size = 0
+  ;++first
+  for i: Size in first...string.length {
+    if i == string.length {
+      second = string.length
+      break
+    }
+    let char = string.charAt(i)
+    if !(char >= '0' && char <= '9') {
+      second = i
+      break
+    }
+  }
+  if second == first return whole
+
+  let secondPart = parseNumber<T>(string.substring(first, to: second))
+
+  if isExponent {
+    return whole * power<T>(10, secondPart)
+  } else {
+    let decimal = whole + (secondPart / power<T>(10, second - first))
+    if second == string.length return decimal
+    if string.charAt(second) != 'e' && string.charAt(second) != 'E' return decimal
+
+    let third: Size = 0
+    ;++second
+    for i: Size in second...string.length {
+      if i == string.length {
+        third = string.length
+        break
+      }
+      let char = string.charAt(i)
+      if !(char >= '0' && char <= '9') {
+        third = i
+        break
+      }
+    }
+    if third == second return decimal
+
+    let thirdPart = parseNumber<T>(string.substring(second, to: third))
+
+    return decimal * power<T>(10, thirdPart)
+  }
+}
+
+export function parseFloatingPoint<T>(string: rawstring, length: Size): T {
+  return parseFloatingPoint<T>(new String(string, length))
+}
+
+export function parseFloatingPoint<T>(string: rawstring): T {
+  return parseFloatingPoint<T>(new String(string))
+}
+
+export function numberToString<T>(number: T): String {
+  let result = new String
+  let iteration = 1
+  while number >= 1 {
+    let mod = power<T>(10, iteration)
+    let num = number % mod
+    let digit: byte = num * 10 / mod
+
+    result.prepend(digit + '0')
+
+    number -= num
+
+    ;++iteration
+  }
+
+  if result.length == 0 result.append("0")
+
+  return result
+}
+
+export function floatingPointToString<T>(number: T): String {
+  let whole: T = 0
+  let frac = modf(number, &whole)
+
+  let result = new String
+  let iteration = 1
+  while whole >= 1 {
+    let mod = power<T>(10, iteration)
+    let num = fmod(whole, mod)
+    let digit: byte = num * 10 / mod
+
+    result.prepend(digit + '0')
+
+    whole -= num
+
+    ;++iteration
+  }
+
+  result.append('.')
+  iteration = 1
+
+  while frac > 0 {
+    let mod = power<T>(10, -iteration)
+    let num = fmod(frac, mod)
+    let digit: byte = (frac - num) / mod
+
+    result.append(digit + '0')
+
+    frac = num
+    ;++iteration
+
+    # maximum significant decimal places of a double = 15
+    # long double? not that big of a difference, so just lump it in there, too
+    if iteration == 16 {
+      break
+    }
+  }
+
+  if result.length == 0 || result.charAt(result.length - 1) == '.' result.append("0")
+
+  for i: Size in result.length::0 {
+    let char = result.charAt(i - 1)
+    if char != '0' {
+      if char == '.' {
+        result = result.substring(length: result.length - 1)
+      }
+      break
+    }
+    result = result.substring(length: result.length - 1)
+  }
+
+  return result
 }

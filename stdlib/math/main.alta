@@ -3,6 +3,7 @@ export abs, rand from "libc/lib/stdlib"
 export generic function power<T>(num: T, to: T): T {
   # anything to power of zero is 1
   if to == 0 return 1
+  if to < 0 return 1 / power<T>(num, -to)
 
   let result = num
   for i: T in to::1 {

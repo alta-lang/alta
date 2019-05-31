@@ -20,7 +20,7 @@ export generic class Vector<T> {
     this._data = malloc(other._size * sizeof T) as ptr T
 
     for i: Size in 0..this._length {
-      this._data[i] = other._data[i]
+      this._data[i] @strict = other._data[i]
     }
   }
 
@@ -34,6 +34,14 @@ export generic class Vector<T> {
 
   public @read function data(): ptr T {
     return this._data
+  }
+
+  public @read function first(): ref T {
+    return this._data[0]
+  }
+
+  public @read function last(): ref T {
+    return  this._data[this._length - 1]
   }
 
   public function get(index: Size): ref T {
@@ -56,13 +64,19 @@ export generic class Vector<T> {
   }
 
   public function push(): ref T {
-    this.ensureSize(this._length + 1)
-    ;++this._length
-    return this._data[this._length - 1]
+    this.ensureSize(++this._length)
+    return this.last
   }
   public function push(value: T): ref T {
     let elm: ref T = this.push()
-    elm = value
+    this._data[this._length - 1] @strict = value
     return elm
+  }
+
+  public function pop(): T {
+    let value: T = this.last
+    delete this.last
+    ;--this._length
+    return value
   }
 }

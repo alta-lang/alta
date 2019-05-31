@@ -113,7 +113,7 @@ _Alta_runtime_export void _Alta_object_stack_pop(_Alta_object_stack* stack) {
 
   _Alta_object_stack_node* node = stack->nodeList;
   if (!node->object->_Alta_class_info_struct.destroyed && node->object->_Alta_class_info_struct.destructor != NULL) {
-    node->object->_Alta_class_info_struct.destructor(node->object);
+    node->object->_Alta_class_info_struct.destructor(node->object, _Alta_bool_false);
   }
 
   stack->nodeList = node->prev;
@@ -129,7 +129,7 @@ _Alta_runtime_export void _Alta_object_stack_cherry_pick(_Alta_object_stack* sta
   while (node != NULL) {
     if (node->object == object) {
       if (!node->object->_Alta_class_info_struct.destroyed && node->object->_Alta_class_info_struct.destructor != NULL) {
-        node->object->_Alta_class_info_struct.destructor(node->object);
+        node->object->_Alta_class_info_struct.destructor(node->object, _Alta_bool_false);
       }
 
       if (previousNode != NULL) {
