@@ -11,6 +11,118 @@
 #include <crossguid/guid.hpp>
 #include <tclap/CmdLine.h>
 
+#if defined(_WIN32) || defined(_WIN64)
+#include <Windows.h>
+#else
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <limits.h>
+#endif
+
+AltaCore::Filesystem::Path findProgramPath(const std::string arg) {
+  using Path = AltaCore::Filesystem::Path;
+  auto asPath = Path(arg);
+  auto proc = Path("/proc");
+  bool doDefault = false;
+  std::string sep = "";
+
+  if (asPath.isAbsolute()) {
+    return asPath;
+  }
+
+#if defined(_WIN32) || defined(_WIN64)
+  sep = ";";
+
+  size_t bufferSize = MAX_PATH;
+  LPSTR buffer = NULL;
+  bool ok = false;
+  bool possible = true;
+
+  while (!ok && possible) {
+    if (buffer != NULL) {
+      delete[] buffer;
+    }
+    buffer = new TCHAR[bufferSize + 1]();
+    auto result = GetModuleFileName(NULL, buffer, bufferSize);
+    if (result == bufferSize && GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
+      possible = true;
+      ok = false;
+      continue;
+    }
+    if (result == 0) {
+      possible = false;
+      ok = false;
+      delete[] buffer;
+      break;
+    }
+    ok = true;
+    possible = true;
+    auto asString = std::string(buffer);
+    delete[] buffer;
+    return asString;
+  }
+
+  if (arg.find('\\') != std::string::npos) {
+    return asPath.absolutify();
+  }
+#else
+  sep = ":";
+
+  if (proc.exists()) {
+    auto link = proc / "self" / "exe";
+    if (!link.exists()) {
+      link = proc / "curproc" / "file";
+      if (!link.exists()) {
+        link = proc / "self" / "path" / "a.out";
+        if (!link.exists()) {
+          doDefault = true;
+        }
+      }
+    }
+    if (!doDefault) {
+      auto linkStr = link.toString();
+      struct stat info;
+      size_t bufferSize = PATH_MAX;
+      if (lstat(linkStr.c_str(), &info) < 0) {
+        bufferSize = info.st_size;
+      }
+      char* buffer = new char[bufferSize + 1]();
+      if (readlink(linkStr.c_str(), buffer, bufferSize) < 0) {
+        doDefault = true;
+      }
+      std::string result = doDefault ? std::string() : std::string(buffer);
+      delete[] buffer;
+      if (!doDefault) {
+        return result;
+      }
+    }
+  } else {
+    doDefault = true;
+  }
+
+  if (arg.find('/') != std::string::npos) {
+    return asPath.absolutify();
+  }
+#endif
+
+  auto pathVar = getenv("PATH");
+  auto paths = Path(pathVar, sep);
+
+  for (auto path: paths.components) {
+    auto pathPath = Path(path);
+    if (!pathPath.exists()) continue;
+    if (!pathPath.isDirectory()) continue;
+
+    auto result = pathPath / asPath;
+    if (result.exists()) {
+      return result;
+    }
+  }
+
+  return Path();
+};
+
 int main(int argc, char** argv) {
   try {
     auto defaultOutDir = "alta-build";
@@ -35,7 +147,11 @@ int main(int argc, char** argv) {
     bool isVerbose = verboseSwitch.getValue();
     bool doTime = benchmarkSwitch.getValue() || isVerbose;
 
-    auto programPath = AltaCore::Filesystem::Path(argv[0]).absolutify();
+    auto programPath = findProgramPath(argv[0]);
+    if (!programPath) {
+      std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to determine the path of this executable" << std::endl;
+      return 14;
+    }
 
     // set our standard library path
 #ifndef NDEBUG
