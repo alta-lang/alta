@@ -162,3 +162,43 @@ _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, s
     }
   }
 };
+
+_Alta_runtime_export void _Alta_common_dtor(_Alta_basic_class* klass, _Alta_bool isPersistent) {
+  _Alta_basic_class* base = (_Alta_basic_class*)((char*)klass - klass->_Alta_class_info_struct.baseOffset);
+  if (base->_Alta_class_info_struct.destructor != NULL) {
+    base->_Alta_class_info_struct.destructor(base, isPersistent);
+  } else if (isPersistent || base->_Alta_class_info_struct.persistent) {
+    free(base);
+  }
+};
+
+_Alta_runtime_export _Alta_basic_class* _Alta_get_child(_Alta_basic_class* klass, size_t count, ...) {
+  va_list parentNames;
+  va_start(parentNames, count);
+
+  size_t i;
+  for (i = 0; i < count; i++) {
+    char* parentName = va_arg(parentNames, char*);
+    while (klass != NULL) {
+      if (strcmp(klass->_Alta_class_info_struct.parentTypeName, parentName) == 0) {
+        break;
+      } else if (klass->_Alta_class_info_struct.nextOffset < PTRDIFF_MAX) {
+        klass = (_Alta_basic_class*)((char*)klass + klass->_Alta_class_info_struct.nextOffset);
+      } else {
+        klass = NULL;
+      }
+    }
+    if (klass == NULL) break;
+    klass = (_Alta_basic_class*)((char*)klass - klass->_Alta_class_info_struct.parentOffset);
+  }
+
+  va_end(parentNames);
+
+  return klass;
+};
+
+_Alta_runtime_export _Alta_basic_class* _Alta_get_real_version(_Alta_basic_class* klass) {
+  // condensed as a single ternary so that it's easier for compilers to inline
+  // besides, this is perfectly readable
+  return (klass->_Alta_class_info_struct.realOffset < PTRDIFF_MAX) ? (_Alta_basic_class*)((char*)klass - klass->_Alta_class_info_struct.realOffset) : klass;
+};

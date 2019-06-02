@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <setjmp.h>
 #include <string.h>
+#include <stdarg.h>
 
 /**
  * a little hack to grab the containing struct of another struct
@@ -54,6 +55,7 @@ typedef struct __Alta_class_info {
   ptrdiff_t realOffset;
   ptrdiff_t nextOffset;
   size_t baseOffset;
+  size_t parentOffset;
 } _Alta_class_info;
 
 struct __Alta_basic_class {
@@ -128,6 +130,9 @@ _Alta_runtime_export void _Alta_object_stack_pop(_Alta_object_stack* stack);
 _Alta_runtime_export void _Alta_object_stack_cherry_pick(_Alta_object_stack* stack, _Alta_basic_class* object);
 _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, size_t count, _Alta_bool isPosition);
 
-void _Alta_common_dtor(_Alta_basic_class* klass);
+void _Alta_common_dtor(_Alta_basic_class* klass, _Alta_bool isPersistent);
+
+_Alta_basic_class* _Alta_get_child(_Alta_basic_class* klass, size_t count, ...);
+_Alta_basic_class* _Alta_get_real_version(_Alta_basic_class* klass);
 
 #endif /* _ALTA_RUNTIME_COMMON_H */
