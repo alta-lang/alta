@@ -44,6 +44,7 @@ enum _Alta_bool_value {
 typedef struct __Alta_basic_class _Alta_basic_class;
 
 typedef void (*_Alta_destructor)(_Alta_basic_class*, _Alta_bool);
+typedef void (*_Alta_memory_destructor)(void*);
 
 typedef struct __Alta_class_info {
   const char* typeName;
@@ -108,6 +109,24 @@ typedef struct __Alta_object_stack {
 } _Alta_object_stack;
 // </object-stack>
 
+// <generic-stack>
+typedef struct __Alta_generic_stack_node {
+  void* memory;
+  _Alta_memory_destructor dtor;
+  struct __Alta_generic_stack_node* prev;
+} _Alta_generic_stack_node;
+
+typedef struct __Alta_generic_stack {
+  _Alta_generic_stack_node* nodeList;
+  size_t nodeCount;
+  _Alta_generic_stack_node** freeList;
+  size_t freeSize;
+  size_t freeCount;
+  _Alta_generic_stack_node* nodeBlock;
+  size_t blockSize;
+} _Alta_generic_stack;
+// </generic-stack>
+
 typedef struct __Alta_global_runtime_type {
   _Alta_bool inited;
 
@@ -116,6 +135,9 @@ typedef struct __Alta_global_runtime_type {
 
   // object stack for "malloc-ed" (i.e. persistent) variables
   _Alta_object_stack persistent;
+
+  // memory stack for other persistent values
+  _Alta_generic_stack otherPersistent;
 } _Alta_global_runtime_type;
 
 extern _Alta_global_runtime_type _Alta_global_runtime;
@@ -127,8 +149,15 @@ _Alta_runtime_export void _Alta_object_stack_init(_Alta_object_stack* stack);
 _Alta_runtime_export void _Alta_object_stack_deinit(_Alta_object_stack* stack);
 _Alta_runtime_export void _Alta_object_stack_push(_Alta_object_stack* stack, _Alta_basic_class* object);
 _Alta_runtime_export void _Alta_object_stack_pop(_Alta_object_stack* stack);
-_Alta_runtime_export void _Alta_object_stack_cherry_pick(_Alta_object_stack* stack, _Alta_basic_class* object);
+_Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stack* stack, _Alta_basic_class* object);
 _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, size_t count, _Alta_bool isPosition);
+
+_Alta_runtime_export void _Alta_generic_stack_init();
+_Alta_runtime_export void _Alta_generic_stack_deinit();
+_Alta_runtime_export void _Alta_generic_stack_push(void* memory, _Alta_memory_destructor dtor);
+_Alta_runtime_export void _Alta_generic_stack_pop();
+_Alta_runtime_export void _Alta_generic_stack_cherry_pick(void* memory);
+_Alta_runtime_export void _Alta_generic_stack_unwind(size_t count, _Alta_bool isPosition);
 
 void _Alta_common_dtor(_Alta_basic_class* klass, _Alta_bool isPersistent);
 
