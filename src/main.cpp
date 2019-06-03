@@ -13,12 +13,41 @@
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <Windows.h>
+#include <direct.h>
+#define changeDir _chdir
 #else
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <limits.h>
+#define changeDir chdir
 #endif
+
+ALTACORE_MAP<std::string, std::vector<std::string>> libsToLink;
+
+#define AC_ATTRIBUTE_FUNC [=](std::shared_ptr<AST::Node> _target, std::shared_ptr<DH::Node> _info, std::vector<Attributes::AttributeArgument> args) -> void
+#define AC_ATTRIBUTE_CAST(x) auto target = std::dynamic_pointer_cast<AST::x>(_target);\
+  auto info = std::dynamic_pointer_cast<DH::x>(_info);\
+  if (!target || !info) throw std::runtime_error("this isn't supposed to happen");
+#define AC_ATTRIBUTE(x, ...) Attributes::registerAttribute({ __VA_ARGS__ }, { AST::NodeType::x }, AC_ATTRIBUTE_FUNC {\
+  AC_ATTRIBUTE_CAST(x);
+#define AC_GENERAL_ATTRIBUTE(...) Attributes::registerAttribute({ __VA_ARGS__ }, {}, AC_ATTRIBUTE_FUNC {
+#define AC_END_ATTRIBUTE }, file.toString())
+
+void registerAttributes(AltaCore::Filesystem::Path file) {
+  using namespace AltaCore;
+  AC_GENERAL_ATTRIBUTE("CTranspiler", "link");
+    if (args.size() < 1) return;
+    if (!args[0].isString) return;
+    auto ast = std::dynamic_pointer_cast<AST::RootNode>(_target);
+    libsToLink[ast->info->module->packageInfo.name].push_back(args[0].string);
+  AC_END_ATTRIBUTE;
+};
+
+#undef AC_END_ATTRIBUTE
+#undef AC_ATTIBUTE
+#undef AC_ATTRIBUTE_CAST
+#undef AC_ATTRIBUTE_FUNC
 
 AltaCore::Filesystem::Path findProgramPath(const std::string arg) {
   using Path = AltaCore::Filesystem::Path;
@@ -326,115 +355,46 @@ int main(int argc, char** argv) {
 
       std::ifstream file(fn.toString());
       std::string line;
-      //ALTACORE_MAP<std::string, std::string> originalSources;
       ALTACORE_MAP<std::string, AltaCore::Parser::PrepoExpression> defs;
+
+      std::string platform = "other";
+      std::string compatability = "none";
+
+#if defined(_WIN32) || defined(_WIN32)
+      platform = "windows";
+      compatability = "nt";
+#if defined(__CYGWIN__)
+      compatability += ";posix";
+#endif
+#elif defined(__linux__)
+      compatability = "posix";
+#if defined(__ANDROID__)
+      platform = "android";
+#else
+      platform = "linux";
+#endif
+#elif defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(__bsdi__) || defined(__DragonFly__) || defined(__FreeBSD_kernel__)
+      compatability = "posix";
+      platform = "bsd";
+#elif defined(__APPLE__)
+      compatability = "posix";
+      platform = "darwin";
+#elif defined(macintosh) || defined(Macintosh)
+      platform = "oldmac";
+#elif defined(sun) || defined(__sun)
+      compatability = "posix";
+      platform = "solaris";
+#endif
+
+      defs["platform"] = platform;
+      defs["compatability"] = compatability;
+
       AltaCore::Modules::parsingDefinitions = &defs;
-      /*ALTACORE_MAP<std::string, std::string> results;
-      ALTACORE_MAP<std::string, std::vector<AltaCore::Preprocessor::Location>> locationMaps;
-      AltaCore::Preprocessor::Preprocessor prepo(fn, defs, results, locationMaps, AltaCore::Preprocessor::defaultFileResolver,
-        [&](AltaCore::Preprocessor::Preprocessor& orig, AltaCore::Preprocessor::Preprocessor& newPre, AltaCore::Filesystem::Path path) {
-          std::ifstream file(path.toString());
-          std::string line;
 
-          if (!file.is_open()) {
-            throw std::runtime_error("Couldn't open the input file!");
-          }
-
-          while (std::getline(file, line)) {
-            if (file.peek() != EOF) {
-              line += "\n";
-            }
-            originalSources[path.toString()] += line;
-            newPre.feed(line);
-          }
-
-          file.close();
-          newPre.done();
-        }
-      );*/
-
+      registerAttributes(fn);
       Talta::registerAttributes(fn);
 
-      /*
-      if (!file.is_open()) {
-        std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to open the input file (\"" << fn.toString() << '"' << std::endl;
-        return 2;
-      }
-
-      while (std::getline(file, line)) {
-        if (file.peek() != EOF) {
-          line += "\n";
-        }
-        originalSources[fn.toString()] += line;
-        prepo.feed(line);
-      }
-
-      file.close();
-      prepo.done();
-
-      
-      if (doTime) {
-        for (auto& [path, timer]: AltaCore::Timing::preprocessTimes) {
-          auto duration = AltaCore::Timing::toMilliseconds(timer.total());
-          std::cout << CLI::COLOR_BLUE << "Info" << ": preprocessed \"" << path.toString() << "\" in " << duration.count() << "ms" << std::endl;
-        }
-      }
-      */
-
-      /*
-      auto locationMapper = [&](AltaCore::Filesystem::Path& filePath) {
-        return [&](size_t prepoLine, size_t prepoColumn) -> std::pair<size_t, size_t> {
-          using AltaCore::Preprocessor::Location;
-
-          auto& locations = locationMaps[fn.absolutify().toString()];
-          if (locations.size() == 0) {
-            return std::make_pair(prepoLine, prepoColumn);
-          }
-          
-          auto prevLocation = Location(0, 0, 0, 0, 1);
-          auto defaultLocation = Location(1, 1, 1, 1, 0);
-          auto* prevLast = &prevLocation;
-          auto* last = &defaultLocation;
-
-          bool even = true;
-          for (auto& location: locations) {
-            even = !even;
-            if (
-              location.newLine > prepoLine ||
-              (
-                location.newLine == prepoLine &&
-                location.newColumn > prepoColumn
-              )
-            ) {
-              if (even) {
-                prevLast = last;
-                last = &location;
-              }
-              break;
-            }
-            prevLast = last;
-            last = &location;
-          }
-
-          if (
-            prevLast->newLine <= prepoLine && last->newLine >= prepoLine &&
-            prevLast->newColumn <= prepoColumn && last->newColumn >= prepoColumn &&
-            prevLast != &prevLocation &&
-            last != &defaultLocation
-          ) {
-            return std::make_pair(prevLast->newLine, prevLast->newColumn);
-          } else {
-            if (last->newLine == prepoLine) {
-              return std::make_pair(last->originalLine, prepoColumn - last->newColumn + last->originalColumn);
-            } else {
-              return std::make_pair(prepoLine - last->newLine + last->originalLine, prepoColumn);
-            }
-          }
-        };
-      };
-      */
-
-      AltaCore::Lexer::Lexer lexer(fn/*, locationMapper(fn)*/);
+      AltaCore::Lexer::Lexer lexer(fn);
 
       if (!file.is_open()) {
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to open the input file (\"" << fn.toString() << '"' << std::endl;
@@ -449,8 +409,6 @@ int main(int argc, char** argv) {
       }
 
       file.close();
-
-      //lexer.feed(results[fn.toString()]);
 
       if (doTime) {
         auto timer = AltaCore::Timing::lexTimes[fn];
@@ -473,17 +431,6 @@ int main(int argc, char** argv) {
 
         if (lexer.absences.size() > 0) printf("\n");
       }
-
-      /*
-      for (const auto& absence: lexer.absences) {
-        auto[line, column] = absence;
-        std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to lex input at " << line << ":" << column << std::endl;
-      }
-
-      if (lexer.absences.size() > 0) {
-        return 3;
-      }
-      */
 
       auto logError = [&](AltaCore::Errors::Error& e) {
         std::cerr << "Error at " << e.position.file.toString() << ":" << e.position.line << ":" << e.position.column << std::endl;
@@ -511,6 +458,7 @@ int main(int argc, char** argv) {
       AltaCore::Modules::parseModule = [&](std::string importRequest, AltaCore::Filesystem::Path requestingPath) -> std::shared_ptr<AltaCore::AST::RootNode> {
         auto path = AltaCore::Modules::resolve(importRequest, requestingPath);
 
+        registerAttributes(path);
         Talta::registerAttributes(path);
 
         try {
@@ -697,7 +645,6 @@ int main(int argc, char** argv) {
           lists << "cmake_minimum_required(VERSION 3.10)\n";
           lists << "project(" << mod->packageInfo.name << ")\n";
           lists << "add_custom_target(alta-dummy-target-" << mod->packageInfo.name << '-' << target.name << ")\n";
-          //lists << "set(ALTA_PACKAGE_DEFINITION_CHECK_" << mod->packageInfo.name << " \"TRUE\" CACHE INTERNAL \"package definition check for " << mod->packageInfo.name << ". do not touch or modify.\" FORCE)\n";
 
           for (auto& item: packageDependencies[mod->packageInfo.name]) {
             lists << "if (NOT TARGET alta-dummy-target-" << item << '-' << target.name << ")\n";
@@ -705,17 +652,7 @@ int main(int argc, char** argv) {
             lists << "endif()\n";
           }
 
-          /*if (mod->packageInfo.name == entryPackageInfo.name) {
-            if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
-              lists << "add_executable(";
-            } else {
-              lists << "add_library(";
-            }
-          } else {*/
-            lists << "add_library(";
-          //}
-
-          lists << mod->packageInfo.name << "-core-" << target.name << "\n";
+          lists << "add_library(" << mod->packageInfo.name << "-core-" << target.name << "\n";
         }
 
         auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
@@ -782,6 +719,10 @@ int main(int argc, char** argv) {
 
         for (auto& generic: genericsUsed[packageName]) {
           cmakeLists << "  " << Talta::mangleName(generic.get()) << '-' << target.name << '\n';
+        }
+
+        for (auto& lib: libsToLink[packageName]) {
+          cmakeLists << "  " << lib << '\n';
         }
 
         cmakeLists << ")\n";
@@ -929,16 +870,23 @@ int main(int argc, char** argv) {
         return 11;
       }
 
-      AltaCore::Filesystem::mkdirp(origOutDir / "_build");
+      auto rootBuildDir = origOutDir / "_build";
+      auto rbdAsString = rootBuildDir.toString();
 
-      std::string configureCommand = "cmake -S \"" + origOutDir.toString() + "\" -B \"" + (origOutDir / "_build").toString() + '"';
-      std::string compileCommand = "cmake --build \"" + (origOutDir / "_build").toString() + '"';
+      AltaCore::Filesystem::mkdirp(rootBuildDir);
+
+      std::string configureCommand = "cmake \"" + origOutDir.toString() + '"';
+      std::string compileCommand = "cmake --build \"" + rootBuildDir.toString() + '"';
 
       if (!generatorArg.getValue().empty()) {
         configureCommand += " -G \"" + generatorArg.getValue() + "\"";
       }
 
+      auto currDir = AltaCore::Filesystem::cwd();
+
+      changeDir(rbdAsString.c_str());
       auto configureResult = system(configureCommand.c_str());
+      changeDir(currDir.c_str());
 
       if (configureResult != 0) {
         std::cerr << CLI::COLOR_RED << "Failed to configure the C code for building." << CLI::COLOR_NORMAL << std::endl;

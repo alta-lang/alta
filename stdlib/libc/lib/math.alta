@@ -1,5 +1,9 @@
 @@CTranspiler.include("math.h");
 
+##if platform == "linux"
+@@CTranspiler.link("m");
+##end if
+
 import rawstring, rawconststring from "types"
 
 declare literal export function fabsf(n: float): float
