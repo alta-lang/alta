@@ -177,3 +177,26 @@ declare function printf(message: ptr byte): int
 # correct: Alta produces `printf`
 declare literal function printf(message: ptr byte): int
 ```
+
+## Accessor Functions
+Not all Alta functions have to be explicity called. Case in point: Alta's accessor functions. An accessor function emulates either reading or writing to a variable. From a user's point of view, accessor functions are just regular variables. However, from the API developer's point of view, an accessor function can do whatever it wants with the data provided.
+
+> Note: currently, only read accessors are implemented. Write accessors will be supported in a future release
+
+Read accessors must return a non-void value and take no parameters. Write accessors must return nothing (i.e. `void`) and take one parameter. If a read and a write accessor are both given the same name, the return type of the read accessor must match the type of the write accessor's single parameter.
+
+```alta
+@read function foo(): int {
+  secretCode()
+  hehe()
+  let mySecretValue = imSoSneaky()
+  mySecretValue += 9
+  return mySecretValue
+}
+
+@write function foo(value: int): void {
+  moreSecretCode()
+  shh(value)
+  messAroundWithIt(value)
+}
+```
