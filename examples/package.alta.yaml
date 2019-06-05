@@ -13,3 +13,6 @@ targets:
 - name: var-params
   main: var-params.alta
   type: exe
+- name: read-file
+  main: read-file.alta
+  type: exe
