@@ -1,11 +1,27 @@
 # Alta
 The modern alternative to C++
 
+This repository is home to both the language documentation and Alta's compiler CLI (command line interface).
+
+## Goals
 Alta is a modern alternative to C++, particularly aimed at improving simplicity, readability, and flexibility. At its core, Alta is very similar to C++: both aim to make it easier to directly express intent, and both aim to make it easier for programmers to write safe code and catch errors *at compile-time*. However, where C++ is restricted by an ISO standards committee and a large userbase, Alta is a new language that can take those goals to a new level.
 
 Alta was mainly created to make up for the deficiencies of C++ (primarily modules), but it also tries to make it easier to get into systems programming. The goal is that, with Alta, programming low-level code should be as simple as programming high-level code (while still being safe). With Alta, things should Just Work&trade;.
 
-This repository is home to both the language documentation and Alta's compiler CLI (command line interface).
+For example, parsing some JSON should be as simple as 1, 2, 3:
+  1. Download a JSON parsing package (like [Jason](https://github.com/alta-lang/jason)) to an `alta-packages` folder
+  2. Import it in your code: `import "jason" as jason`
+  3. Use it! Parse a simple string:
+```alta
+import "jason" as jason
+
+literal function main(): int {
+  let object: jason.Object = jason.parse("{\"hi\": \"hola!\"}")
+  object.get("hi") # returns "hola!"
+  return 0
+}
+```
+Alta packages should do one thing and do it right (much like Node.js packages), and this contributes to the simplicity of Alta. Just find the package that does what you need and stop worrying about implementation details.
 
 ## Getting Started
 > :construction:
