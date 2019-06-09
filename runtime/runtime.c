@@ -373,3 +373,23 @@ _Alta_runtime_export _Alta_basic_class* _Alta_get_real_version(_Alta_basic_class
   // besides, this is perfectly readable
   return (klass->_Alta_class_info_struct.realOffset < PTRDIFF_MAX) ? (_Alta_basic_class*)((char*)klass - klass->_Alta_class_info_struct.realOffset) : klass;
 };
+
+_Alta_runtime_export void _Alta_reset_error() {
+  _Alta_error_container* err = &_Alta_global_runtime.lastError;
+  if (
+    err->typeName &&
+    err->value &&
+    strlen(err->typeName) > 0
+  ) {
+    if (!err->isNative) {
+      _Alta_basic_class* klass = err->value;
+      if (klass->_Alta_class_info_struct.destructor) {
+        klass->_Alta_class_info_struct.destructor(klass, _Alta_bool_false);
+      }
+    }
+    free(err->value);
+    err->isNative = _Alta_bool_true;
+    err->typeName = "";
+    err->value = NULL;
+  }
+};

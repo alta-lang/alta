@@ -127,6 +127,12 @@ typedef struct __Alta_generic_stack {
 } _Alta_generic_stack;
 // </generic-stack>
 
+typedef struct __Alta_error_container {
+  _Alta_bool isNative;
+  const char* typeName;
+  void* value;
+} _Alta_error_container;
+
 typedef struct __Alta_global_runtime_type {
   _Alta_bool inited;
 
@@ -138,6 +144,8 @@ typedef struct __Alta_global_runtime_type {
 
   // memory stack for other persistent values
   _Alta_generic_stack otherPersistent;
+
+  _Alta_error_container lastError;
 } _Alta_global_runtime_type;
 
 extern _Alta_global_runtime_type _Alta_global_runtime;
@@ -159,9 +167,11 @@ _Alta_runtime_export void _Alta_generic_stack_pop();
 _Alta_runtime_export void _Alta_generic_stack_cherry_pick(void* memory);
 _Alta_runtime_export void _Alta_generic_stack_unwind(size_t count, _Alta_bool isPosition);
 
-void _Alta_common_dtor(_Alta_basic_class* klass, _Alta_bool isPersistent);
+_Alta_runtime_export void _Alta_common_dtor(_Alta_basic_class* klass, _Alta_bool isPersistent);
 
-_Alta_basic_class* _Alta_get_child(_Alta_basic_class* klass, size_t count, ...);
-_Alta_basic_class* _Alta_get_real_version(_Alta_basic_class* klass);
+_Alta_runtime_export _Alta_basic_class* _Alta_get_child(_Alta_basic_class* klass, size_t count, ...);
+_Alta_runtime_export _Alta_basic_class* _Alta_get_real_version(_Alta_basic_class* klass);
+
+_Alta_runtime_export void _Alta_reset_error();
 
 #endif /* _ALTA_RUNTIME_COMMON_H */

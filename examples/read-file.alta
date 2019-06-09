@@ -1,32 +1,22 @@
 # this program reads the file it's given  and writes out the data to stdout, one character at a time
-import {
-  File,
-  fopen,
-  fgetc,
-  fclose,
-  fprintf,
-  stderr,
-  EOF,
-} from "libc/lib/stdio"
 import rawstring, Size from "types"
-import printf from "io"
+import printf, printError, File from "io"
 
 literal function main(argc: int, argv: ptr rawstring): int {
   if argc < 2 {
-    fprintf(stderr, "I need a file argument!\n")
+    printError("I need a file argument!")
     return 1
   }
 
-  let path = argv[1]
-  let file = fopen(path, "r")
+  let file = new File(argv[1], "r")
 
-  if !file {
-    fprintf(stderr, "Failed to open the file\n")
+  if !file.valid {
+    printError("Failed to open the file")
     return 2
   }
 
-  let char: int = EOF
-  while (char = fgetc(file)) != EOF {
+  let char: byte = '\0'
+  while char = file.read() {
     printf("%c", char)
   }
 

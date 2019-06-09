@@ -1,6 +1,6 @@
 import malloc, realloc, free from "memory"
 import Size, rawstring, rawconststring from "types"
-import printf from "io"
+import printf from "libc/lib/stdio"
 import strlen from "libc/lib/string"
 
 ##define STRING_DEBUG false
@@ -74,6 +74,19 @@ export class String {
     }
 
     this._data[this._length] = '\0'
+
+##if STRING_DEBUG
+    printf("constructed a new String (%llu)\n", this.uuid)
+##end if
+  }
+
+  public constructor(length: Size) {
+    this._length = length
+    this._data = malloc(this._length + 1) as rawstring
+
+    for i: Size in 0...this._length {
+      this._data[i] = '\0'
+    }
 
 ##if STRING_DEBUG
     printf("constructed a new String (%llu)\n", this.uuid)

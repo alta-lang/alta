@@ -1,3 +1,95 @@
 import "libc/lib/stdio" as stdio
+import NULL from "libc/lib/stddef"
+import String, rawstringLength from "string"
+import rawstring, Size from "types"
 
 export stdio.printf as printf
+
+export class File {
+  private var handle: ptr stdio.FILE = NULL as ptr stdio.FILE
+  private var path = new String
+  private var mode = new String
+
+  public constructor() {}
+  public constructor(path: rawstring) {
+    this.open(path, "r")
+  }
+  public constructor(path: String) {
+    this.open(path.data, "r")
+  }
+  public constructor(path: rawstring, mode: rawstring) {
+    this.open(path, mode)
+  }
+  public constructor(path: String, mode: rawstring) {
+    this.open(path.data, mode)
+  }
+
+  public @copy constructor(other: ref File) {
+    this.open(other.path.data, other.mode.data)
+  }
+
+  public function open(path: rawstring, mode: rawstring): bool {
+    this.handle = stdio.fopen(path, mode)
+    if !this.handle {
+      this.handle = NULL as ptr stdio.FILE
+      return false
+    }
+    this.path = new String(path)
+    this.mode = new String(mode)
+    return true
+  }
+
+  public function close(): bool {
+    if this.handle {
+      let result = true
+      if stdio.fclose(this.handle) result = false
+      this.handle = NULL as ptr stdio.FILE
+      return result
+    }
+    return false
+  }
+
+  public function read(): byte {
+    let char = stdio.fgetc(this.handle)
+    if char == stdio.EOF return '\0'
+    return char as byte
+  }
+
+  public function read(count: Size): String {
+    let str = new String(count)
+    if !stdio.fgets(str.data, count, this.handle) {
+      # TODO: maybe throw an error
+      return new String
+    }
+    return str.substring(0, length: rawstringLength(str.data))
+  }
+
+  public @read function valid(): bool {
+    return this.handle != NULL as ptr stdio.FILE
+  }
+
+  public @read function file(): ptr stdio.FILE {
+    return this.handle
+  }
+}
+
+export function print(message: rawstring): void {
+  stdio.printf("%s", message)
+}
+export function print(message: String): void {
+  print(message.data)
+}
+
+export function printLine(message: rawstring): void {
+  stdio.printf("%s\n", message)
+}
+export function printLine(message: String): void {
+  printLine(message.data)
+}
+
+export function printError(message: rawstring): void {
+  stdio.fprintf(stdio.stderr, "%s\n", message)
+}
+export function printError(message: String): void {
+  printError(message.data)
+}
