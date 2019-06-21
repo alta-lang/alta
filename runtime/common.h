@@ -127,10 +127,17 @@ typedef struct __Alta_generic_stack {
 } _Alta_generic_stack;
 // </generic-stack>
 
+typedef struct __Alta_error_handler_node {
+  const char* typeName;
+  struct __Alta_error_handler_node* next;
+} _Alta_error_handler_node;
+
 typedef struct __Alta_error_container {
   _Alta_bool isNative;
   const char* typeName;
   void* value;
+  _Alta_error_handler_node* handlerStack;
+  size_t handlerStackSize;
 } _Alta_error_container;
 
 typedef struct __Alta_global_runtime_type {
@@ -172,6 +179,8 @@ _Alta_runtime_export void _Alta_common_dtor(_Alta_basic_class* klass, _Alta_bool
 _Alta_runtime_export _Alta_basic_class* _Alta_get_child(_Alta_basic_class* klass, size_t count, ...);
 _Alta_runtime_export _Alta_basic_class* _Alta_get_real_version(_Alta_basic_class* klass);
 
-_Alta_runtime_export void _Alta_reset_error();
+_Alta_runtime_export void _Alta_reset_error(size_t index);
+_Alta_runtime_export size_t _Alta_push_error_handler(const char* type);
+_Alta_runtime_export size_t _Alta_pop_error_handler();
 
 #endif /* _ALTA_RUNTIME_COMMON_H */

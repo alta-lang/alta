@@ -7,6 +7,12 @@ _Alta_runtime_export void _Alta_init_global_runtime() {
   _Alta_object_stack_init(&_Alta_global_runtime.local);
   _Alta_object_stack_init(&_Alta_global_runtime.persistent);
 
+  _Alta_global_runtime.lastError.value = NULL;
+  _Alta_global_runtime.lastError.handlerStack = NULL;
+  _Alta_global_runtime.lastError.handlerStackSize = 0;
+  _Alta_global_runtime.lastError.isNative = _Alta_bool_true;
+  _Alta_global_runtime.lastError.typeName = "";
+
   _Alta_global_runtime.inited = _Alta_bool_true;
 };
 
@@ -374,7 +380,7 @@ _Alta_runtime_export _Alta_basic_class* _Alta_get_real_version(_Alta_basic_class
   return (klass->_Alta_class_info_struct.realOffset < PTRDIFF_MAX) ? (_Alta_basic_class*)((char*)klass - klass->_Alta_class_info_struct.realOffset) : klass;
 };
 
-_Alta_runtime_export void _Alta_reset_error() {
+_Alta_runtime_export void _Alta_reset_error(size_t index) {
   _Alta_error_container* err = &_Alta_global_runtime.lastError;
   if (
     err->typeName &&
@@ -383,13 +389,44 @@ _Alta_runtime_export void _Alta_reset_error() {
   ) {
     if (!err->isNative) {
       _Alta_basic_class* klass = err->value;
+      _Alta_basic_class* baseClass = (_Alta_basic_class*)(((char*)klass) - (klass->_Alta_class_info_struct.baseOffset));
       if (klass->_Alta_class_info_struct.destructor) {
-        klass->_Alta_class_info_struct.destructor(klass, _Alta_bool_false);
+        klass->_Alta_class_info_struct.destructor(baseClass, _Alta_bool_false);
       }
+      free(baseClass);
+    } else {
+      free(err->value);
     }
-    free(err->value);
     err->isNative = _Alta_bool_true;
     err->typeName = "";
     err->value = NULL;
   }
+
+  while (err->handlerStackSize > index) {
+    _Alta_pop_error_handler();
+  }
+};
+
+_Alta_runtime_export size_t _Alta_push_error_handler(const char* type) {
+  _Alta_error_container* err = &_Alta_global_runtime.lastError;
+
+  _Alta_error_handler_node* node = malloc(sizeof(_Alta_error_handler_node));
+  node->typeName = type;
+  node->next = err->handlerStack;
+  err->handlerStack = node;
+
+  return err->handlerStackSize;
+};
+
+_Alta_runtime_export size_t _Alta_pop_error_handler() {
+  _Alta_error_container* err = &_Alta_global_runtime.lastError;
+
+  if (err->handlerStack) {
+    _Alta_error_handler_node* node = err->handlerStack;
+    err->handlerStack = node->next;
+    free(node);
+    --err->handlerStackSize;
+  }
+  
+  return err->handlerStackSize;
 };
