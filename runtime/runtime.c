@@ -413,6 +413,7 @@ _Alta_runtime_export jmp_buf* _Alta_push_error_handler(const char* type) {
   _Alta_error_handler_node* node = malloc(sizeof(_Alta_error_handler_node));
   node->typeName = type;
   node->next = err->handlerStack;
+  node->state = _Alta_save_state();
   err->handlerStack = node;
 
   return &node->jumpPoint;
@@ -429,4 +430,18 @@ _Alta_runtime_export size_t _Alta_pop_error_handler() {
   }
   
   return err->handlerStackSize;
+};
+
+_Alta_runtime_export _Alta_runtime_state _Alta_save_state() {
+  return (_Alta_runtime_state) {
+    .localIndex = _Alta_global_runtime.local.nodeCount,
+    .persistentIndex = _Alta_global_runtime.persistent.nodeCount,
+    .otherIndex = _Alta_global_runtime.otherPersistent.nodeCount,
+  };
+};
+
+_Alta_runtime_export void _Alta_restore_state(const _Alta_runtime_state state) {
+  _Alta_object_stack_unwind(&_Alta_global_runtime.local, state.localIndex, _Alta_bool_true);
+  _Alta_object_stack_unwind(&_Alta_global_runtime.persistent, state.persistentIndex, _Alta_bool_true);
+  _Alta_generic_stack_unwind(state.otherIndex, _Alta_bool_true);
 };

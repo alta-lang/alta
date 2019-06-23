@@ -127,9 +127,16 @@ typedef struct __Alta_generic_stack {
 } _Alta_generic_stack;
 // </generic-stack>
 
+typedef struct __Alta_runtime_state {
+  size_t localIndex;
+  size_t persistentIndex;
+  size_t otherIndex;
+} _Alta_runtime_state;
+
 typedef struct __Alta_error_handler_node {
   const char* typeName;
   jmp_buf jumpPoint;
+  _Alta_runtime_state state;
   struct __Alta_error_handler_node* next;
 } _Alta_error_handler_node;
 
@@ -183,5 +190,8 @@ _Alta_runtime_export _Alta_basic_class* _Alta_get_real_version(_Alta_basic_class
 _Alta_runtime_export void _Alta_reset_error(size_t index);
 _Alta_runtime_export jmp_buf* _Alta_push_error_handler(const char* type);
 _Alta_runtime_export size_t _Alta_pop_error_handler();
+
+_Alta_runtime_export _Alta_runtime_state _Alta_save_state();
+_Alta_runtime_export void _Alta_restore_state(const _Alta_runtime_state state);
 
 #endif /* _ALTA_RUNTIME_COMMON_H */
