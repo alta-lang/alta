@@ -24,93 +24,22 @@ _Alta_runtime_export void _Alta_unwind_global_runtime() {
   _Alta_generic_stack_deinit();
 };
 
-// <private-object-stack-methods>
-void _Alta_object_stack_free(_Alta_object_stack* stack, _Alta_object_stack_node* node) {
-  if (stack->freeCount >= stack->freeSize) {
-    size_t newSize = stack->freeSize + 10;
-    _Alta_object_stack_node** tmp = realloc(stack->freeList, newSize * sizeof(_Alta_object_stack_node*));
-    if (tmp == NULL) {
-      newSize = stack->freeSize + 1;
-      tmp = realloc(stack->freeList, newSize * sizeof(_Alta_object_stack_node*));
-      if (tmp == NULL) {
-        // what are we supposed to do here?
-        // aborting is probably the best idea
-        // since by now there is something seriously wrong
-        abort();
-        // TODO: figure out if there's an alternative to aborting.
-        //       of course, there's always the option to waste memory
-        //       by not reusing the node, but that's a bad idea
-      }
-    }
-    stack->freeList = tmp;
-    stack->freeSize = newSize;
-  }
-
-  node->object = NULL;
-  node->prev = NULL;
-
-  stack->freeList[stack->freeCount] = node;
-  stack->freeCount++;
-
-  stack->nodeCount--;
-};
-
-void _Alta_object_stack_expand(_Alta_object_stack* stack) {
-  size_t newSize = stack->blockSize + 10;
-  _Alta_object_stack_node* tmp = realloc(stack->nodeBlock, newSize * sizeof(_Alta_object_stack_node));
-  if (tmp == NULL) {
-    newSize = stack->blockSize + 1;
-    _Alta_object_stack_node* tmp = realloc(stack->nodeBlock, newSize * sizeof(_Alta_object_stack_node));
-    if (tmp == NULL) {
-      // same reasoning as the `abort()` call in `_Alta_object_stack_free()`
-      abort();
-    }
-  }
-
-  size_t oldSize = stack->blockSize;
-  stack->blockSize = newSize;
-
-  size_t i;
-  for (i = oldSize; i < stack->blockSize; i++) {
-    _Alta_object_stack_node* node = &(stack->nodeBlock[i]);
-    _Alta_object_stack_free(stack, node);
-  }
-};
-// </private-object-stack-methods>
-
 _Alta_runtime_export void _Alta_object_stack_init(_Alta_object_stack* stack) {
   stack->nodeList = NULL;
-  stack->nodeCount = 10;
-  stack->blockSize = 10;
-  stack->nodeBlock = malloc(stack->blockSize * sizeof(_Alta_object_stack_node));
-  stack->freeList = malloc(stack->blockSize * sizeof(_Alta_object_stack_node*));
-  stack->freeSize = stack->blockSize;
-  stack->freeCount = 0;
-
-  size_t i;
-  for (i = 0; i < stack->blockSize; i++) {
-    _Alta_object_stack_free(stack, &(stack->nodeBlock[i]));
-  }
+  stack->nodeCount = 0;
 };
 
 _Alta_runtime_export void _Alta_object_stack_deinit(_Alta_object_stack* stack) {
-  _Alta_object_stack_unwind(stack, SIZE_MAX, _Alta_bool_false); // effectively unwinds the entire stack
-  free(stack->freeList);
-  free(stack->nodeBlock);
+  _Alta_object_stack_unwind(stack, SIZE_MAX, _Alta_bool_false); // effectively unwinds the entire sta
 };
 
 _Alta_runtime_export void _Alta_object_stack_push(_Alta_object_stack* stack, _Alta_basic_class* object) {
-  if (stack->freeCount == 0) {
-    _Alta_object_stack_expand(stack);
-  }
-
-  _Alta_object_stack_node* node = stack->freeList[stack->freeCount - 1];
-  stack->freeCount--;
+  _Alta_object_stack_node* node = malloc(sizeof(_Alta_object_stack_node));
 
   node->object = object;
   node->prev = stack->nodeList;
   stack->nodeList = node;
-  stack->nodeCount++;
+  ++stack->nodeCount;
 };
 
 _Alta_runtime_export void _Alta_object_stack_pop(_Alta_object_stack* stack) {
@@ -124,7 +53,8 @@ _Alta_runtime_export void _Alta_object_stack_pop(_Alta_object_stack* stack) {
   }
 
   stack->nodeList = node->prev;
-  _Alta_object_stack_free(stack, node);
+  --stack->nodeCount;
+  free(node);
 };
 
 _Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stack* stack, _Alta_basic_class* object) {
@@ -145,7 +75,8 @@ _Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stac
         stack->nodeList = node->prev;
       }
 
-      _Alta_object_stack_free(stack, node);
+      --stack->nodeCount;
+      free(node);
 
       return _Alta_bool_true;
     }
@@ -172,105 +103,29 @@ _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, s
   }
 };
 
-// <private-generic-stack-methods>
-void _Alta_generic_stack_free(_Alta_generic_stack_node* node) {
-  _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
-
-  if (stack->freeCount >= stack->freeSize) {
-    size_t newSize = stack->freeSize + 10;
-    _Alta_generic_stack_node** tmp = realloc(stack->freeList, newSize * sizeof(_Alta_generic_stack_node*));
-    if (tmp == NULL) {
-      newSize = stack->freeSize + 1;
-      tmp = realloc(stack->freeList, newSize * sizeof(_Alta_generic_stack_node*));
-      if (tmp == NULL) {
-        // what are we supposed to do here?
-        // aborting is probably the best idea
-        // since by now there is something seriously wrong
-        abort();
-        // TODO: figure out if there's an alternative to aborting.
-        //       of course, there's always the option to waste memory
-        //       by not reusing the node, but that's a bad idea
-      }
-    }
-    stack->freeList = tmp;
-    stack->freeSize = newSize;
-  }
-
-  node->memory = NULL;
-  node->dtor = NULL;
-  node->prev = NULL;
-
-  stack->freeList[stack->freeCount] = node;
-  stack->freeCount++;
-
-  stack->nodeCount--;
-};
-
-void _Alta_generic_stack_expand() {
-  _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
-
-  size_t newSize = stack->blockSize + 10;
-  _Alta_generic_stack_node* tmp = realloc(stack->nodeBlock, newSize * sizeof(_Alta_generic_stack_node));
-  if (tmp == NULL) {
-    newSize = stack->blockSize + 1;
-    _Alta_generic_stack_node* tmp = realloc(stack->nodeBlock, newSize * sizeof(_Alta_generic_stack_node));
-    if (tmp == NULL) {
-      // same reasoning as the `abort()` call in `_Alta_generic_stack_free()`
-      abort();
-    }
-  }
-
-  size_t oldSize = stack->blockSize;
-  stack->blockSize = newSize;
-
-  size_t i;
-  for (i = oldSize; i < stack->blockSize; i++) {
-    _Alta_generic_stack_node* node = &(stack->nodeBlock[i]);
-    _Alta_generic_stack_free(node);
-  }
-};
-// </private-generic-stack-methods>
-
 _Alta_runtime_export void _Alta_generic_stack_init() {
   _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
 
   stack->nodeList = NULL;
-  stack->nodeCount = 10;
-  stack->blockSize = 10;
-  stack->nodeBlock = malloc(stack->blockSize * sizeof(_Alta_generic_stack_node));
-  stack->freeList = malloc(stack->blockSize * sizeof(_Alta_generic_stack_node*));
-  stack->freeSize = stack->blockSize;
-  stack->freeCount = 0;
-
-  size_t i;
-  for (i = 0; i < stack->blockSize; i++) {
-    _Alta_generic_stack_free(&(stack->nodeBlock[i]));
-  }
+  stack->nodeCount = 0;
 };
 
 _Alta_runtime_export void _Alta_generic_stack_deinit() {
   _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
 
   _Alta_generic_stack_unwind(SIZE_MAX, _Alta_bool_false); // effectively unwinds the entire stack
-  free(stack->freeList);
-  free(stack->nodeBlock);
 };
 
 _Alta_runtime_export void _Alta_generic_stack_push(void* object, _Alta_memory_destructor dtor) {
   _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
 
-  if (stack->freeCount == 0) {
-    _Alta_generic_stack_expand();
-  }
-
-  _Alta_generic_stack_node* node = stack->freeList[stack->freeCount - 1];
-  stack->freeCount--;
+  _Alta_generic_stack_node* node = malloc(sizeof(_Alta_generic_stack_node));
 
   node->memory = object;
   node->dtor = dtor;
   node->prev = stack->nodeList;
   stack->nodeList = node;
-  stack->nodeCount++;
+  ++stack->nodeCount;
 };
 
 _Alta_runtime_export void _Alta_generic_stack_pop() {
@@ -288,7 +143,8 @@ _Alta_runtime_export void _Alta_generic_stack_pop() {
   }
 
   stack->nodeList = node->prev;
-  _Alta_generic_stack_free(node);
+  --stack->nodeCount;
+  free(node);
 };
 
 _Alta_runtime_export void _Alta_generic_stack_cherry_pick(void* object) {
@@ -313,7 +169,8 @@ _Alta_runtime_export void _Alta_generic_stack_cherry_pick(void* object) {
         stack->nodeList = node->prev;
       }
 
-      _Alta_generic_stack_free(node);
+      --stack->nodeCount;
+      free(node);
 
       break;
     }

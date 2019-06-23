@@ -24,6 +24,7 @@
 #include <setjmp.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 /**
  * a little hack to grab the containing struct of another struct
@@ -83,29 +84,6 @@ typedef struct __Alta_object_stack {
 
   // the number of nodes currently in use
   size_t nodeCount;
-
-  // our array of free linked list nodes
-  _Alta_object_stack_node** freeList;
-
-  // the size of the freeList
-  size_t freeSize;
-
-  // the number of free nodes in the freeList
-  size_t freeCount;
-
-  // the memory block allocated to linked list nodes
-  //
-  // why not just `malloc` each node individually?
-  // because, often, `malloc` sucks at handling many
-  // small allocations and it usually wastes more memory
-  // keeping track of each individual allocation
-  //
-  // this way, we manage our own node memory efficiently
-  // (since we also use a free list in order to reuse nodes)
-  _Alta_object_stack_node* nodeBlock;
-
-  // the size of the memory block allocated to linked list nodes
-  size_t blockSize;
 } _Alta_object_stack;
 // </object-stack>
 
@@ -119,11 +97,6 @@ typedef struct __Alta_generic_stack_node {
 typedef struct __Alta_generic_stack {
   _Alta_generic_stack_node* nodeList;
   size_t nodeCount;
-  _Alta_generic_stack_node** freeList;
-  size_t freeSize;
-  size_t freeCount;
-  _Alta_generic_stack_node* nodeBlock;
-  size_t blockSize;
 } _Alta_generic_stack;
 // </generic-stack>
 

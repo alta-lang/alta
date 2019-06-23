@@ -718,7 +718,7 @@ int main(int argc, char** argv) {
         }
 
         for (auto& generic: genericsUsed[packageName]) {
-          cmakeLists << "  " << Talta::mangleName(generic.get()) << '-' << target.name << '\n';
+          cmakeLists << "  " << Talta::mangleName(generic->parentScope.lock()->parentModule.lock().get()) << '-' << generic->moduleIndex << '-' << target.name << '\n';
         }
 
         for (auto& lib: libsToLink[packageName]) {
@@ -740,7 +740,7 @@ int main(int argc, char** argv) {
           auto gOut = base + "-" + std::to_string(i) + ".c";
           auto cOut = base + ".c";
           auto& gItem = gItems[i];
-          auto targetName = Talta::mangleName(gItem.get()) + '-' + target.name;
+          auto targetName = Talta::mangleName(gItem->parentScope.lock()->parentModule.lock().get()) + '-' + std::to_string(gItem->moduleIndex) + '-' + target.name;
 
           for (auto& item: mod->genericDependencies[gItem->id]) {
             auto& name = item->packageInfo.name;
