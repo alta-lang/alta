@@ -1,23 +1,26 @@
-import malloc, free, realloc from "memory"
+import allocate, free, reallocate from "memory"
 import Size from "types"
+import Exception from "exceptions"
+
+export class ResizeFailure extends Exception {}
 
 export generic class Vector<T> {
-  private var _data: ptr T = (0 as ptr T)
+  private var _data: ptr T = nullptr
   private var _length: Size = 0
   private var _size: Size = 0
 
   public constructor() {
-    this._data = malloc(0) as ptr T
+    this._data = allocate<T>(0)
   }
   public constructor(length: Size) {
     this._size = length
     this._length = this._size
-    this._data = malloc(length * sizeof T) as ptr T
+    this._data = allocate<T>(length)
   }
   public @copy constructor(other: ref Vector<T>) {
     this._size = other._size
     this._length = other._length
-    this._data = malloc(other._size * sizeof T) as ptr T
+    this._data = allocate<T>(other._size)
 
     for i: Size in 0..this._length {
       this._data[i] @strict = other._data[i]
@@ -25,7 +28,7 @@ export generic class Vector<T> {
   }
 
   public destructor() {
-    free(this._data as ptr void)
+    free<T>(this._data)
   }
 
   public @read function length(): Size {
@@ -50,12 +53,10 @@ export generic class Vector<T> {
 
   private function ensureSize(desiredSize: Size): void {
     if this._size < desiredSize {
-      let tmp = realloc(this._data as ptr void, desiredSize * sizeof T) as ptr T
+      let tmp = reallocate<T>(this._data, desiredSize)
 
       if tmp == 0 {
-        # welp, something happened
-        # TODO: throw an error
-        return
+        throw new ResizeFailure
       }
 
       this._data = tmp
@@ -65,6 +66,7 @@ export generic class Vector<T> {
 
   public function push(): ref T {
     this.ensureSize(++this._length)
+    # TODO: default construct a `T` value
     return this.last
   }
   public function push(value: T): ref T {

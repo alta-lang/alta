@@ -1,12 +1,16 @@
 import "libc/lib/stdio" as stdio
-import NULL from "libc/lib/stddef"
 import String, rawstringLength from "string"
 import rawstring, Size from "types"
+import Exception from "exceptions"
 
 export stdio.printf as printf
 
+export class OpenFailure extends Exception {}
+export class CloseFailure extends Exception {}
+export class ReadFailure extends Exception {}
+
 export class File {
-  private var handle: ptr stdio.FILE = NULL as ptr stdio.FILE
+  private var handle: ptr stdio.FILE = nullptr
   private var path = new String
   private var mode = new String
 
@@ -28,25 +32,23 @@ export class File {
     this.open(other.path.data, other.mode.data)
   }
 
-  public function open(path: rawstring, mode: rawstring): bool {
+  public function open(path: rawstring, mode: rawstring): void {
     this.handle = stdio.fopen(path, mode)
     if !this.handle {
-      this.handle = NULL as ptr stdio.FILE
-      return false
+      this.handle = nullptr
+      throw new OpenFailure
     }
     this.path = new String(path)
     this.mode = new String(mode)
-    return true
   }
 
-  public function close(): bool {
+  public function close(): void {
     if this.handle {
-      let result = true
-      if stdio.fclose(this.handle) result = false
-      this.handle = NULL as ptr stdio.FILE
-      return result
+      if stdio.fclose(this.handle) {
+        throw new CloseFailure
+      }
+      this.handle = nullptr
     }
-    return false
   }
 
   public function read(): byte {
@@ -58,14 +60,13 @@ export class File {
   public function read(count: Size): String {
     let str = new String(count)
     if !stdio.fgets(str.data, count, this.handle) {
-      # TODO: maybe throw an error
-      return new String
+      throw new ReadFailure
     }
     return str.substring(0, length: rawstringLength(str.data))
   }
 
   public @read function valid(): bool {
-    return this.handle != NULL as ptr stdio.FILE
+    return this.handle != nullptr
   }
 
   public @read function file(): ptr stdio.FILE {

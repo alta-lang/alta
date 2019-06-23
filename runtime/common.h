@@ -129,6 +129,7 @@ typedef struct __Alta_generic_stack {
 
 typedef struct __Alta_error_handler_node {
   const char* typeName;
+  jmp_buf jumpPoint;
   struct __Alta_error_handler_node* next;
 } _Alta_error_handler_node;
 
@@ -180,7 +181,7 @@ _Alta_runtime_export _Alta_basic_class* _Alta_get_child(_Alta_basic_class* klass
 _Alta_runtime_export _Alta_basic_class* _Alta_get_real_version(_Alta_basic_class* klass);
 
 _Alta_runtime_export void _Alta_reset_error(size_t index);
-_Alta_runtime_export size_t _Alta_push_error_handler(const char* type);
+_Alta_runtime_export jmp_buf* _Alta_push_error_handler(const char* type);
 _Alta_runtime_export size_t _Alta_pop_error_handler();
 
 #endif /* _ALTA_RUNTIME_COMMON_H */

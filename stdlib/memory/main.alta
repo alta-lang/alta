@@ -1,1 +1,39 @@
-export malloc, calloc, free, realloc from "libc/lib/stdlib"
+import "libc/lib/stdlib" as stdlib
+import Size from "types"
+import Exception from "exceptions"
+
+export stdlib.malloc as unsafeAllocate
+export stdlib.calloc as unsafeZeroAllocate
+export stdlib.free as unsafeFree
+export stdlib.realloc as unsafeRealloc
+
+export class MemoryAllocationFailure extends Exception {}
+
+export generic function allocate<T>(count: Size): ptr T {
+  let result = stdlib.malloc(count * sizeof T) as ptr T
+  # some implementations return a null pointer when `count` is zero
+  if count > 0 && !result {
+    throw new MemoryAllocationFailure
+  }
+  return result
+}
+
+export generic function zeroAllocate<T>(count: Size): ptr T {
+  let result = stdlib.calloc(count, sizeof T) as ptr T
+  if count > 0 && !result {
+    throw new MemoryAllocationFailure
+  }
+  return result
+}
+
+export generic function free<T>(data: ptr T): void {
+  stdlib.free(data as ptr void)
+}
+
+export generic function reallocate<T>(data: ptr T, count: Size): ptr T {
+  let result = stdlib.realloc(data as ptr void, count * sizeof T) as ptr T
+  if count > 0 && !result {
+    throw new MemoryAllocationFailure
+  }
+  return result
+}

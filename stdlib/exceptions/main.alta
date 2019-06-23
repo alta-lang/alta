@@ -1,0 +1,8 @@
+# basic exception class
+# all exceptions should inherit from this class
+export class Exception {}
+
+# common exceptions
+export class NullPointerAccess extends Exception {}
+export class InvalidArgument extends Exception {}
+export class IndexOutOfBoundsException extends Exception {}

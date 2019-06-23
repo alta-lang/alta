@@ -1,4 +1,3 @@
-import malloc, realloc, free from "memory"
 import Size from "types"
 import Vector from "vector"
 
