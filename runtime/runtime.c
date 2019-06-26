@@ -37,6 +37,17 @@ _Alta_runtime_export void _Alta_object_stack_push(_Alta_object_stack* stack, _Al
   _Alta_object_stack_node* node = malloc(sizeof(_Alta_object_stack_node));
 
   node->object = object;
+  node->isUnion = _Alta_bool_false;
+  node->prev = stack->nodeList;
+  stack->nodeList = node;
+  ++stack->nodeCount;
+};
+
+_Alta_runtime_export void _Alta_object_stack_push_union(_Alta_object_stack* stack, _Alta_basic_union* object) {
+  _Alta_object_stack_node* node = malloc(sizeof(_Alta_object_stack_node));
+
+  node->object = object;
+  node->isUnion = _Alta_bool_true;
   node->prev = stack->nodeList;
   stack->nodeList = node;
   ++stack->nodeCount;
@@ -48,8 +59,14 @@ _Alta_runtime_export void _Alta_object_stack_pop(_Alta_object_stack* stack) {
   }
 
   _Alta_object_stack_node* node = stack->nodeList;
-  if (!node->object->_Alta_class_info_struct.destroyed && node->object->_Alta_class_info_struct.destructor != NULL) {
-    node->object->_Alta_class_info_struct.destructor(node->object, _Alta_bool_false);
+  if (node->isUnion) {
+    _Alta_basic_union* uni = node->object;
+    uni->destructor(uni);
+  } else {
+    _Alta_basic_class* obj = node->object;
+    if (!obj->_Alta_class_info_struct.destroyed && obj->_Alta_class_info_struct.destructor != NULL) {
+      obj->_Alta_class_info_struct.destructor(obj, _Alta_bool_false);
+    }
   }
 
   stack->nodeList = node->prev;
@@ -65,8 +82,9 @@ _Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stac
   _Alta_object_stack_node* node = stack->nodeList;
   while (node != NULL) {
     if (node->object == object) {
-      if (!node->object->_Alta_class_info_struct.destroyed && node->object->_Alta_class_info_struct.destructor != NULL) {
-        node->object->_Alta_class_info_struct.destructor(node->object, _Alta_bool_false);
+      _Alta_basic_class* obj = node->object;
+      if (!obj->_Alta_class_info_struct.destroyed && obj->_Alta_class_info_struct.destructor != NULL) {
+        obj->_Alta_class_info_struct.destructor(obj, _Alta_bool_false);
       }
 
       if (previousNode != NULL) {

@@ -64,9 +64,17 @@ struct __Alta_basic_class {
   _Alta_class_info _Alta_class_info_struct;
 };
 
+typedef struct __Alta_basic_union _Alta_basic_union;
+typedef void (*_Alta_union_destructor)(_Alta_basic_union*);
+struct __Alta_basic_union {
+  char* typeName;
+  _Alta_union_destructor destructor;
+};
+
 // <object-stack>
 typedef struct __Alta_object_stack_node {
-  _Alta_basic_class* object;
+  _Alta_bool isUnion;
+  void* object;
   
   // named "prev" because it technically points to an older node,
   // but it actually points to the "next" item in the linked list
@@ -144,6 +152,7 @@ _Alta_runtime_export void _Alta_unwind_global_runtime();
 _Alta_runtime_export void _Alta_object_stack_init(_Alta_object_stack* stack);
 _Alta_runtime_export void _Alta_object_stack_deinit(_Alta_object_stack* stack);
 _Alta_runtime_export void _Alta_object_stack_push(_Alta_object_stack* stack, _Alta_basic_class* object);
+_Alta_runtime_export void _Alta_object_stack_push_union(_Alta_object_stack* stack, _Alta_basic_union* object);
 _Alta_runtime_export void _Alta_object_stack_pop(_Alta_object_stack* stack);
 _Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stack* stack, _Alta_basic_class* object);
 _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, size_t count, _Alta_bool isPosition);
