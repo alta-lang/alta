@@ -1,7 +1,8 @@
 import "libc/lib/stdio" as stdio
 import String, rawstringLength from "string"
 import rawstring, Size from "types"
-import Exception from "exceptions"
+import Exception, InvalidArgument from "exceptions"
+import numberToString, floatingPointToString from "util"
 
 export stdio.printf as printf
 
@@ -74,11 +75,26 @@ export class File {
   }
 }
 
-export function print(message: rawstring): void {
-  stdio.printf("%s", message)
-}
-export function print(message: String): void {
-  print(message.data)
+export function print(data: (String | rawstring | double | int | char)...): void {
+  let result: String
+  for i: Size in 0..data.length {
+    let item = data[i]
+    if item instanceof String {
+      result.append(item as String)
+    } else if item instanceof rawstring {
+      result.append(item as rawstring)
+    } else if item instanceof double {
+      result.append(floatingPointToString<double>(item as double))
+    } else if item instanceof char {
+      result.append(item as char)
+    } else if item instanceof int {
+      result.append(numberToString<int>(item as int))
+    } else {
+      # this is literally impossible, but just in case...
+      throw new InvalidArgument
+    }
+  }
+  stdio.printf("%s", result.data)
 }
 
 export function printLine(message: rawstring): void {
