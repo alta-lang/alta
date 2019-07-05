@@ -15,6 +15,7 @@ add_executable(altac
 target_include_directories(altac
   PRIVATE "${PROJECT_SOURCE_DIR}/include"
   PRIVATE "${PROJECT_SOURCE_DIR}/deps/tclap/include"
+  PRIVATE "${PROJECT_SOURCE_DIR}/deps/jsoncpp"
 )
 
 target_link_libraries(altac PUBLIC altacore talta crossguid)

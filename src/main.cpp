@@ -10,6 +10,7 @@
 #include "../include/cli.hpp"
 #include <crossguid/guid.hpp>
 #include <tclap/CmdLine.h>
+#include <json.hpp>
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <Windows.h>
@@ -152,18 +153,64 @@ AltaCore::Filesystem::Path findProgramPath(const std::string arg) {
   return Path();
 };
 
+nlohmann::json targetInfoToJSON(const AltaCore::Modules::TargetInfo info) {
+  return {
+    {"name", info.name},
+    {"main", info.main.absolutify().normalize().toString()},
+    {"type", info.type == AltaCore::Modules::OutputBinaryType::Library ? "library" : "executable"},
+  };
+};
+
+nlohmann::json versionToJSON(const semver_t version) {
+  nlohmann::json result = {
+    {"major", version.major},
+    {"minor", version.minor},
+    {"patch", version.patch},
+  };
+  if (version.metadata) {
+    result["metadata"] = version.metadata;
+  }
+  if (version.prerelease) {
+    result["prerelease"] = version.prerelease;
+  }
+  return result;
+};
+
+nlohmann::json packageInfoToJSON(const AltaCore::Modules::PackageInfo info) {
+  nlohmann::json result = {
+    {"name", info.name},
+    {"version", versionToJSON(info.version)},
+    {"root", info.root.absolutify().normalize().toString()},
+    {"main", info.main.absolutify().normalize().toString()},
+    {"type", info.outputBinary == AltaCore::Modules::OutputBinaryType::Library ? "library" : "executable"},
+    {"entry", info.isEntryPackage}
+  };
+
+  for (size_t i = 0; i < info.targets.size(); i++) {
+    result["targets"][i] = targetInfoToJSON(info.targets[i]);
+  }
+
+  return result;
+};
+
 int main(int argc, char** argv) {
+  using json = nlohmann::json;
+
   try {
     auto defaultOutDir = "alta-build";
 
     TCLAP::CmdLine cmd("altac, a C transpiler for the Alta language", ' ', "0.3.1");
 
     TCLAP::SwitchArg compileSwitch("c", "compile", "Whether to compile the generated C code with CMake after transpilation");
-    TCLAP::ValueArg<std::string> generatorArg("g", "cmake-generator", "The generator to use with CMake when compiling code. Only has meaning when `-c` is specificed", false, "", "cmake-generator");
+    TCLAP::ValueArg<std::string> generatorArg("g", "cmake-generator", "The generator to use with CMake when compiling code. Only has meaning when `-c` is specified", false, "", "CMake Generator ID string");
     TCLAP::SwitchArg verboseSwitch("v", "verbose", "Whether to output extra information");
-    TCLAP::ValueArg<std::string> outdirPath("o", "out-dir", "The directory in which to put the generated C files. Will be created if it doesn't exist", false, defaultOutDir, "folder");
-    TCLAP::UnlabeledValueArg<std::string> filenameString("module-or-package-path", "A path to a file (for modules) or folder (for packages)", true, "", "file-or-folder");
+    TCLAP::ValueArg<std::string> outdirPath("o", "out-dir", "The directory in which to put the generated C files. Will be created if it doesn't exist", false, defaultOutDir, "Folder path");
+    TCLAP::UnlabeledValueArg<std::string> filenameString("module-or-package-path", "A path to a file (for modules) or folder (for packages)", false, ".", "File or folder path");
     TCLAP::SwitchArg benchmarkSwitch("", "benchmark", "Whether to time each section of code processing and report the result");
+    TCLAP::ValueArg<std::string> runtimeInitializer("", "runtime-init", "A module to use to setup the environment necessary for the runtime", false, "", "Alta module import path");
+    TCLAP::SwitchArg freestandingSwitch("", "freestanding", "Indicates that the runtime shouldn't try to use the C standard library");
+    TCLAP::MultiArg<std::string> searchFlag("s", "search", "Adds an additional path to search when looking for modules", false, "Folder path");
+    TCLAP::MultiArg<std::string> prioritySearchFlag("", "priority-search", "Adds an additional path to search when looking for modules. This will take precendence over other paths (including the standard library)", false, "Folder path");
 
     cmd.add(generatorArg);
     cmd.add(compileSwitch);
@@ -171,16 +218,27 @@ int main(int argc, char** argv) {
     cmd.add(benchmarkSwitch);
     cmd.add(outdirPath);
     cmd.add(filenameString);
+    cmd.add(runtimeInitializer);
+    cmd.add(freestandingSwitch);
+    cmd.add(searchFlag);
+    cmd.add(prioritySearchFlag);
     cmd.parse(argc, argv);
 
     bool isVerbose = verboseSwitch.getValue();
     bool doTime = benchmarkSwitch.getValue() || isVerbose;
+    std::string runtimeInit = runtimeInitializer.getValue();
+    bool freestanding = freestandingSwitch.getValue();
+    auto searchDirs = searchFlag.getValue();
+    auto prioritySearchDirs = prioritySearchFlag.getValue();
 
     auto programPath = findProgramPath(argv[0]);
     if (!programPath) {
       std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to determine the path of this executable" << std::endl;
       return 14;
     }
+
+    AltaCore::Modules::searchPaths.insert(AltaCore::Modules::searchPaths.end(), searchDirs.begin(), searchDirs.end());
+    AltaCore::Modules::prioritySearchPaths.insert(AltaCore::Modules::prioritySearchPaths.end(), prioritySearchDirs.begin(), prioritySearchDirs.end());
 
     // set our standard library path
 #ifndef NDEBUG
@@ -234,6 +292,26 @@ int main(int argc, char** argv) {
     auto outDir = AltaCore::Filesystem::Path(outdirPath.getValue()).absolutify();
     auto origOutDir = outDir;
     std::vector<AltaCore::Modules::TargetInfo> targets;
+    AltaCore::Filesystem::Path runtimeInitPath;
+    AltaCore::Modules::PackageInfo runtimeInitInfo;
+    json manifest;
+
+    if (!runtimeInit.empty()) {
+      AltaCore::Filesystem::Path modPath(runtimeInit);
+      runtimeInitPath = AltaCore::Modules::resolve(runtimeInit, fn.isDirectory() ? fn / "main.alta" : fn).absolutify().normalize();
+      runtimeInitInfo = AltaCore::Modules::getInfo(runtimeInitPath);
+      AltaCore::Modules::TargetInfo info;
+      AltaCore::Filesystem::Path modFile;
+      if (modPath.isDirectory()) {
+        modFile = info.main;
+      } else {
+        modFile = runtimeInitInfo.root / (modPath.extname() == "alta" ? modPath : modPath + ".alta");
+      }
+      info.main = modFile.absolutify().normalize();
+      info.type = AltaCore::Modules::OutputBinaryType::Library;
+      info.name = "_runtime_init";
+      targets.push_back(info);
+    }
 
     if (!fn.exists()) {
       std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to find the given file/folder" << std::endl;
@@ -262,7 +340,14 @@ int main(int argc, char** argv) {
           mainPackageModulePath = fn / "main.alta";
           std::cout << CLI::COLOR_YELLOW << "Warning" << CLI::COLOR_NORMAL << ": failed to find a main module for \"" << fn.toString() << "\". Using default main of \"" << mainPackageModulePath.toString() << '"' << std::endl;
         }
-        targets = modInfo.targets;
+        if (modInfo.targets.size() == 0) {
+          AltaCore::Modules::TargetInfo targetInfo;
+          targetInfo.main = modInfo.main;
+          targetInfo.name = modInfo.main.filename();
+          targets.push_back(targetInfo);
+        } else {
+          targets.insert(targets.end(), modInfo.targets.begin(), modInfo.targets.end());
+        }
       } catch (AltaCore::Modules::ModuleError&) {
         mainPackageModulePath = fn / "main.alta";
         AltaCore::Modules::TargetInfo targetInfo;
@@ -301,25 +386,49 @@ int main(int argc, char** argv) {
       }
     }
 
-    AltaCore::registerGlobalAttributes();
-
     AltaCore::Filesystem::mkdirp(outDir);
 
     auto outdirRuntime = outDir / "_runtime";
     AltaCore::Filesystem::copyDirectory(runtimePath, outdirRuntime);
 
+    manifest["runtime"] = {
+      {"path", outdirRuntime.absolutify().normalize().toString()},
+      {"initializer", nullptr},
+    };
+
+    if (!runtimeInit.empty()) {
+      manifest["runtime"]["initializer"] = packageInfoToJSON(runtimeInitInfo);
+    }
+
     std::ofstream runtimeCmakeLists((outDir / "_runtime" / "CMakeLists.txt").absolutify().toString());
     runtimeCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
     runtimeCmakeLists << "project(alta-global-runtime)\n";
+    if (!runtimeInit.empty()) {
+      runtimeCmakeLists << "if (NOT TARGET alta-dummy-target-" << runtimeInitInfo.name << "-_runtime_init)\n";
+      runtimeCmakeLists << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../_runtime_init/" << runtimeInitInfo.name << "\" \"${PROJECT_BINARY_DIR}/_runtime_init/" << runtimeInitInfo.name << "\")\n";
+      runtimeCmakeLists << "endif()\n";
+    }
     runtimeCmakeLists << "if (NOT TARGET alta-global-runtime)\n";
     runtimeCmakeLists << "  add_library(alta-global-runtime\n";
     auto runtimeFiles = AltaCore::Filesystem::getDirectoryListing(outdirRuntime, true);
     for (auto& runtimeFile: runtimeFiles) {
       if (runtimeFile.extname() == "c") {
         runtimeCmakeLists << "    \"${PROJECT_SOURCE_DIR}/" << runtimeFile.relativeTo(outdirRuntime).toString('/') << "\"\n";
+        manifest["runtime"]["sources"].push_back(runtimeFile.absolutify().normalize().toString());
       }
     }
     runtimeCmakeLists << "  )\n";
+    if (!runtimeInit.empty()) {
+      auto rel = targets[0].main.relativeTo(runtimeInitInfo.root);
+      auto baseModPath = outDir / targets[0].name / runtimeInitInfo.name / rel.dirname() / rel.filename();
+      runtimeCmakeLists << "  target_link_libraries(alta-global-runtime PUBLIC " << runtimeInitInfo.name << "-_runtime_init)\n";
+      runtimeCmakeLists << "  target_compile_definitions(alta-global-runtime PUBLIC ALTA_RUNTIME_INITIALIZER=\"";
+      runtimeCmakeLists << (baseModPath + ".h").absolutify().normalize().toString('/');
+      runtimeCmakeLists << "\")\n";
+    }
+    if (freestanding) {
+      runtimeCmakeLists << "  target_compile_definitions(alta-global-runtime PUBLIC ALTA_RUNTIME_FREESTANDING)\n";
+    }
     runtimeCmakeLists << "endif()\n";
     runtimeCmakeLists.close();
 
@@ -344,6 +453,8 @@ int main(int argc, char** argv) {
     for (auto& target: targets) {
       fn = target.main;
       outDir = origOutDir / target.name;
+
+      manifest["target-infos"].push_back(targetInfoToJSON(target));
 
       if (!fn.exists()) {
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": main module (\"" << fn.toString() << "\") for target \"" << target.name << "\" not found" << std::endl;
@@ -391,6 +502,7 @@ int main(int argc, char** argv) {
 
       AltaCore::Modules::parsingDefinitions = &defs;
 
+      AltaCore::registerGlobalAttributes();
       registerAttributes(fn);
       Talta::registerAttributes(fn);
 
@@ -437,7 +549,7 @@ int main(int argc, char** argv) {
         if (e.position.file) {
           std::ifstream fileSource(e.position.file.toString());
           // seek to the beginning of the line
-          fileSource.seekg(e.position.filePosition - e.position.column);
+          fileSource.seekg(e.position.filePosition - e.position.column + 1);
           std::string line;
           std::getline(fileSource, line);
           std::cerr << line << std::endl;
@@ -445,7 +557,8 @@ int main(int argc, char** argv) {
             std::cerr << ' ';
           }
           std::cerr << '^' << std::endl;
-          for (size_t i = 1; i < e.position.column; i++) {
+          std::cerr << '>';
+          for (size_t i = 2; i < e.position.column; i++) {
             std::cerr << ' ';
           }
         }
@@ -455,14 +568,44 @@ int main(int argc, char** argv) {
       ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::AST::RootNode>> importCache;
 
       auto defaultParseModule = AltaCore::Modules::parseModule;
-      AltaCore::Modules::parseModule = [&](std::string importRequest, AltaCore::Filesystem::Path requestingPath) -> std::shared_ptr<AltaCore::AST::RootNode> {
-        auto path = AltaCore::Modules::resolve(importRequest, requestingPath);
+      AltaCore::Modules::parseModule = [&](std::string importRequest, AltaCore::Filesystem::Path requestingModulePath) -> std::shared_ptr<AltaCore::AST::RootNode> {
+        auto path = AltaCore::Modules::resolve(importRequest, requestingModulePath);
 
         registerAttributes(path);
         Talta::registerAttributes(path);
 
         try {
-          return defaultParseModule(importRequest, requestingPath);
+          using namespace AltaCore;
+          using namespace AltaCore::Modules;
+          auto modPath = resolve(importRequest, requestingModulePath);
+          if (importCache.find(modPath.absolutify().toString()) != importCache.end()) {
+            return importCache[modPath.absolutify().toString()];
+          }
+          std::ifstream file(modPath.absolutify().toString());
+          std::string line;
+          Lexer::Lexer lexer(modPath);
+
+          if (!file.is_open()) {
+            throw std::runtime_error("oh no.");
+          }
+
+          while (std::getline(file, line)) {
+            if (file.peek() != EOF) {
+              line += "\n";
+            }
+            lexer.feed(line);
+          }
+
+          file.close();
+
+          Parser::Parser parser(lexer.tokens, *parsingDefinitions, modPath);
+          parser.parse();
+          auto root = std::dynamic_pointer_cast<AST::RootNode>(*parser.root);
+          //root->detail(modPath);
+
+          importCache[modPath.absolutify().toString()] = root;
+
+          return root;
         } catch (AltaCore::Errors::Error& e) {
           logError(e);
           exit(13);
@@ -504,6 +647,7 @@ int main(int argc, char** argv) {
       try {
         root->detail(fn);
         root->info->module->packageInfo.isEntryPackage = true;
+        manifest["target-infos"].back()["package"] = root->info->module->packageInfo.name;
       } catch (AltaCore::Errors::DetailingError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed detailing" << CLI::COLOR_NORMAL << std::endl;
         logError(e);
@@ -587,7 +731,9 @@ int main(int argc, char** argv) {
       // setup root cmakelists
       generalCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
       generalCmakeLists << "project(" << indexUUID << ")\n";
-      generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/../_runtime\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/_runtime\")\n";
+      if (target.name != "_runtime_init") {
+        generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/../_runtime\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/_runtime\")\n";
+      }
       generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/" << root->info->module->packageInfo.name << "\")\n";
       generalCmakeLists.close();
 
@@ -619,6 +765,9 @@ int main(int argc, char** argv) {
         auto dOut = base + ".d.h";
         std::vector<AltaCore::Filesystem::Path> gOuts;
         auto cmakeOut = modOutDir / "CMakeLists.txt";
+
+        manifest["targets"][target.name][mod->packageInfo.name]["module-names"].push_back(mod->name);
+        manifest["targets"][target.name][mod->packageInfo.name]["original-sources"].push_back(mod->path.absolutify().normalize().toString());
 
         auto ok = AltaCore::Filesystem::mkdirp(base.dirname());
         if (!ok) {
@@ -653,6 +802,8 @@ int main(int argc, char** argv) {
           }
 
           lists << "add_library(" << mod->packageInfo.name << "-core-" << target.name << "\n";
+
+          manifest["targets"][target.name][mod->packageInfo.name]["info"] = packageInfoToJSON(mod->packageInfo);
         }
 
         auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
@@ -677,6 +828,7 @@ int main(int argc, char** argv) {
 
         // include the Alta common runtime header
         outfileH << "#define _ALTA_RUNTIME_COMMON_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/common.h\"\n";
+        outfileH << "#define _ALTA_RUNTIME_DEFINITIONS_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/definitions.h\"\n";
 
         // define the definition header include path
         outfileH << "#define _ALTA_DEF_HEADER_" << mangledModuleName << " \"" << dOut.relativeTo(hOut).toString('/') << "\"\n";
@@ -687,6 +839,9 @@ int main(int argc, char** argv) {
         outfileH << hRoot->toString();
 
         outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << cOut.relativeTo(modOutDir).toString('/') << "\"\n";
+        manifest["targets"][target.name][mod->packageInfo.name]["sources"].push_back(cOut.absolutify().normalize().toString());
+        manifest["targets"][target.name][mod->packageInfo.name]["headers"].push_back(hOut.absolutify().normalize().toString());
+        manifest["targets"][target.name][mod->packageInfo.name]["definition-headers"].push_back(dOut.absolutify().normalize().toString());
 
         outfileD << dRoot->toString();
         outfileD.close();
@@ -709,23 +864,42 @@ int main(int argc, char** argv) {
         cmakeLists << "  C_STANDARD 99\n";
         cmakeLists << ")\n";
 
-        cmakeLists << "target_link_libraries(" << packageName << "-core-" << target.name << " PUBLIC\n";
+        if (
+          target.name != "_runtime_init"      ||
+          packageDependencies.size() > 0 ||
+          genericsUsed.size() > 0        ||
+          libsToLink.size() > 0
+        ) {
+          cmakeLists << "target_link_libraries(" << packageName << "-core-" << target.name << " PUBLIC\n";
 
-        cmakeLists << "  alta-global-runtime" << '\n';
+          manifest["targets"][target.name][packageName]["uses-runtime"] = target.name != "_runtime_init";
 
-        for (auto& dep: packageDependencies[packageName]) {
-          cmakeLists << "  " << dep << '-' << target.name << '\n';
+          if (target.name != "_runtime_init") {
+            cmakeLists << "  alta-global-runtime" << '\n';
+          }
+
+          for (auto& dep: packageDependencies[packageName]) {
+            cmakeLists << "  " << dep << '-' << target.name << '\n';
+            manifest["targets"][target.name][packageName]["dependencies"].push_back(dep);
+          }
+
+          for (auto& generic: genericsUsed[packageName]) {
+            auto genMod = generic->parentScope.lock()->parentModule.lock();
+            auto pkgName = Talta::mangleName(genMod.get());
+            cmakeLists << "  " << pkgName << '-' << generic->moduleIndex << '-' << target.name << '\n';
+            manifest["targets"][target.name][packageName]["generics-used"].push_back({
+              {"module", genMod->name},
+              {"id", std::to_string(generic->moduleIndex)},
+            });
+          }
+
+          for (auto& lib: libsToLink[packageName]) {
+            cmakeLists << "  " << lib << '\n';
+            manifest["targets"][target.name][packageName]["extra-links"].push_back(lib);
+          }
+
+          cmakeLists << ")\n";
         }
-
-        for (auto& generic: genericsUsed[packageName]) {
-          cmakeLists << "  " << Talta::mangleName(generic->parentScope.lock()->parentModule.lock().get()) << '-' << generic->moduleIndex << '-' << target.name << '\n';
-        }
-
-        for (auto& lib: libsToLink[packageName]) {
-          cmakeLists << "  " << lib << '\n';
-        }
-
-        cmakeLists << ")\n";
       }
 
       for (auto& [moduleName, info]: transpiledModules) {
@@ -741,17 +915,22 @@ int main(int argc, char** argv) {
           auto cOut = base + ".c";
           auto& gItem = gItems[i];
           auto targetName = Talta::mangleName(gItem->parentScope.lock()->parentModule.lock().get()) + '-' + std::to_string(gItem->moduleIndex) + '-' + target.name;
+          auto& genEntry = manifest["targets"][target.name][mod->packageInfo.name]["generics"][i];
+          genEntry["id"] = gItem->moduleIndex;
 
           for (auto& item: mod->genericDependencies[gItem->id]) {
             auto& name = item->packageInfo.name;
             auto mangledImportName = Talta::mangleName(item.get());
             auto depBase = outDir / item->name;
             auto depHOut = depBase + ".h";
+            genEntry["generic-dependencies"].push_back(item->name);
             outfileCmake << "if (NOT TARGET alta-dummy-target-" << name << '-' << target.name << ")\n";
             outfileCmake << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << name << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << name << "\")\n";
             outfileCmake << "endif()\n";
             outfileIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledImportName << " \"" << depHOut.relativeTo(cOut).toString('/') << "\"\n";
           }
+
+          genEntry["source"] = gOut.absolutify().normalize().toString();
 
           outfileCmake << "add_library(" << targetName << '\n';
           if (!gItem->instantiatedFromSamePackage) {
@@ -770,6 +949,7 @@ int main(int argc, char** argv) {
             outfileCmake << "target_sources(" << mod->packageInfo.name << "-core-" << target.name << " PUBLIC\n";
             outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << gOut.relativeTo(modOutDir).toString('/') << "\"\n";
             outfileCmake << ")\n";
+            genEntry["used-in-core"] = true;
           }
           outfileCmake << "target_link_libraries(" << targetName << " PUBLIC\n";
           if (gItem->instantiatedFromSamePackage || !mod->packageInfo.isEntryPackage || (mod->packageInfo.isEntryPackage && target.type != AltaCore::Modules::OutputBinaryType::Exectuable)) {
@@ -790,6 +970,10 @@ int main(int argc, char** argv) {
               if (generic->klass && generic->klass->genericParameterCount > 0) {
                 auto genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
                 outfileCmake << "  " << Talta::mangleName(genMod.get()) << '-' << generic->klass->moduleIndex << '-' << target.name << '\n';
+                genEntry["generic-arguments"].push_back({
+                  {"info", packageInfoToJSON(genMod->packageInfo)},
+                  {"id", generic->klass->moduleIndex},
+                });
               }
             }
           } else if (auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(gItem)) {
@@ -797,6 +981,10 @@ int main(int argc, char** argv) {
               if (generic->klass && generic->klass->genericParameterCount > 0) {
                 auto genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
                 outfileCmake << "  " << Talta::mangleName(genMod.get()) << '-' << generic->klass->moduleIndex << '-' << target.name << '\n';
+                genEntry["generic-arguments"].push_back({
+                  {"info", packageInfoToJSON(genMod->packageInfo)},
+                  {"id", generic->klass->moduleIndex},
+                });
               }
             }
           } else {
@@ -861,6 +1049,11 @@ int main(int argc, char** argv) {
     }
 
     rootCmakeLists.close();
+
+    auto manifestOutpath = origOutDir / "manifest.json";
+    std::ofstream manifestOutfile(manifestOutpath.toString());
+    manifestOutfile << manifest;
+    manifestOutfile.close();
 
     std::cout << CLI::COLOR_GREEN << "Successfully transpiled input!" << CLI::COLOR_NORMAL << std::endl;
 

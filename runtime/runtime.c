@@ -320,3 +320,12 @@ _Alta_runtime_export void _Alta_restore_state(const _Alta_runtime_state state) {
   _Alta_object_stack_unwind(&_Alta_global_runtime.persistent, state.persistentIndex, _Alta_bool_true);
   _Alta_generic_stack_unwind(state.otherIndex, _Alta_bool_true);
 };
+
+_Alta_runtime_export void _Alta_uncaught_error(const char* typeName) {
+#ifdef ALTA_FINAL_ERROR_HANDLER
+  return ALTA_FINAL_ERROR_HANDLER(typeName);
+#else
+  printf("uncaught error thrown in Alta (with type \"%s\")\n", typeName);
+  abort();
+#endif
+};
