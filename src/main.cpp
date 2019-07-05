@@ -808,7 +808,7 @@ int main(int argc, char** argv) {
 
         auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
 
-        outfileC << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
+        //outfileC << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
         outfileC << "#include \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
         outfileC << cRoot->toString();
 
@@ -818,7 +818,7 @@ int main(int argc, char** argv) {
           auto& gOut = gOuts[i];
           auto& gItem = gItems[i];
           auto gName = Talta::headerMangle(gItem.get());
-          outfileG << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
+          //outfileG << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
           outfileG << "#define " + gName + "\n";
           outfileG << "#include \"" << hOut.relativeTo(gOut).toString('/') << "\"\n";
           outfileG << gRoot->toString();
