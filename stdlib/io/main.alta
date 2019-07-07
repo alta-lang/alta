@@ -75,7 +75,7 @@ export class File {
   }
 }
 
-export function print(data: (String | rawstring | double | int | char)...): void {
+export function print(data: (String | rawstring | double | int | char | bool)...): void {
   let result: String
   for i: Size in 0..data.length {
     let item = data[i]
@@ -89,12 +89,21 @@ export function print(data: (String | rawstring | double | int | char)...): void
       result.append(item as char)
     } else if item instanceof int {
       result.append(numberToString<int>(item as int))
+    } else if item instanceof bool {
+      result.append("true" if (item as bool) else "false")
     } else {
       # this is literally impossible, but just in case...
       throw new InvalidArgument
     }
   }
   stdio.printf("%s", result.data)
+}
+
+export function printLine(data: (String | rawstring | double | int | char | bool)...): void {
+  for i: Size in 0..data.length {
+    print(data[i])
+  }
+  stdio.printf("\n")
 }
 
 export function printLine(message: rawstring): void {
