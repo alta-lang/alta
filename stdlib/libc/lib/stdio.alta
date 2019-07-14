@@ -38,7 +38,7 @@ declare literal export function vsprintf(buffer: rawstring, format: rawconststri
 declare literal export function vsscanf(source: rawconststring, format: rawconststring, data: va_list): int
 
 declare literal export function fgetc(stream: ptr FILE): int
-declare literal export function fgets(buffer: rawstring, size: size_t, stream: ptr FILE): rawstring
+declare literal export function fgets(buffer: rawstring, count: int, stream: ptr FILE): rawstring
 declare literal export function fputc(character: int, stream: ptr FILE): int
 declare literal export function fputs(source: rawconststring, stream: ptr FILE): int
 declare literal export function getc(stream: ptr FILE): int

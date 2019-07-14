@@ -9,7 +9,6 @@
 
 #include "../include/cli.hpp"
 #include <crossguid/guid.hpp>
-#include <tclap/CmdLine.h>
 #include <json.hpp>
 
 #if defined(_WIN32) || defined(_WIN64)
@@ -195,41 +194,93 @@ nlohmann::json packageInfoToJSON(const AltaCore::Modules::PackageInfo info) {
 
 int main(int argc, char** argv) {
   using json = nlohmann::json;
+  using Option = CLI::Option;
 
   try {
     auto defaultOutDir = "alta-build";
 
-    TCLAP::CmdLine cmd("altac, a C transpiler for the Alta language", ' ', "0.3.1");
+    CLI::Parser parser("altac", "The Alta compiler", "0.3.1");
 
-    TCLAP::SwitchArg compileSwitch("c", "compile", "Whether to compile the generated C code with CMake after transpilation");
-    TCLAP::ValueArg<std::string> generatorArg("g", "cmake-generator", "The generator to use with CMake when compiling code. Only has meaning when `-c` is specified", false, "", "CMake Generator ID string");
-    TCLAP::SwitchArg verboseSwitch("v", "verbose", "Whether to output extra information");
-    TCLAP::ValueArg<std::string> outdirPath("o", "out-dir", "The directory in which to put the generated C files. Will be created if it doesn't exist", false, defaultOutDir, "Folder path");
-    TCLAP::UnlabeledValueArg<std::string> filenameString("module-or-package-path", "A path to a file (for modules) or folder (for packages)", false, ".", "File or folder path");
-    TCLAP::SwitchArg benchmarkSwitch("", "benchmark", "Whether to time each section of code processing and report the result");
-    TCLAP::ValueArg<std::string> runtimeInitializer("", "runtime-init", "A module to use to setup the environment necessary for the runtime", false, "", "Alta module import path");
-    TCLAP::SwitchArg freestandingSwitch("", "freestanding", "Indicates that the runtime shouldn't try to use the C standard library");
-    TCLAP::MultiArg<std::string> searchFlag("s", "search", "Adds an additional path to search when looking for modules", false, "Folder path");
-    TCLAP::MultiArg<std::string> prioritySearchFlag("", "priority-search", "Adds an additional path to search when looking for modules. This will take precendence over other paths (including the standard library)", false, "Folder path");
+    auto compileSwitch = Option()
+      .shortID('c')
+      .longID("compile")
+      .description("Whether to compile the generated C code with CMake after transpilation")
+      ;
+    auto generatorArg = Option()
+      .shortID('g')
+      .longID("cmake-generator")
+      .description("The generator to use with CMake when compiling code. Only has meaning when `-c` is specified")
+      .valueDescription("CMake Generator ID string")
+      .defaultValue("")
+      ;
+    auto verboseSwitch = Option()
+      .shortID('v')
+      .longID("verbose")
+      .description("Whether to output extra information")
+      ;
+    auto outdirPath = Option()
+      .shortID('o')
+      .longID("out-dir")
+      .description("The directory in which to put the generated C files. Will be created if it doesn't exist")
+      .valueDescription("Folder path")
+      .defaultValue(defaultOutDir)
+      ;
+    auto filenameString = Option()
+      .description("A path to a file (for modules) or folder (for packages)")
+      .valueDescription("File or folder path")
+      .defaultValue(".")
+      ;
+    auto benchmarkSwitch = Option()
+      .shortID("bm")
+      .longID("benchmark")
+      .description("Whether to time each section of code processing and report the result")
+      ;
+    auto runtimeInitializer = Option()
+      .shortID("ri")
+      .longID("runtime-init")
+      .description("A module to use to setup the environment necessary for the runtime")
+      .valueDescription("Alta module import path")
+      ;
+    auto freestandingSwitch = Option()
+      .shortID("fs")
+      .longID("freestanding")
+      .description("Indicates that the runtime shouldn't try to use the C standard library")
+      ;
+    auto searchFlag = Option()
+      .shortID('s')
+      .longID("search")
+      .description("Adds an additional path to search when looking for modules")
+      .valueDescription("Folder path")
+      .canRepeat(true)
+      ;
+    auto prioritySearchFlag = Option()
+      .shortID("ps")
+      .longID("priority-search")
+      .description("Adds an additional path to search when looking for modules. This will take precendence over other paths (including the standard library)")
+      .valueDescription("Folder path")
+      .canRepeat(true)
+      ;
 
-    cmd.add(generatorArg);
-    cmd.add(compileSwitch);
-    cmd.add(verboseSwitch);
-    cmd.add(benchmarkSwitch);
-    cmd.add(outdirPath);
-    cmd.add(filenameString);
-    cmd.add(runtimeInitializer);
-    cmd.add(freestandingSwitch);
-    cmd.add(searchFlag);
-    cmd.add(prioritySearchFlag);
-    cmd.parse(argc, argv);
+    parser
+      .add(compileSwitch)
+      .add(generatorArg)
+      .add(verboseSwitch)
+      .add(outdirPath)
+      .add(filenameString)
+      .add(benchmarkSwitch)
+      .add(runtimeInitializer)
+      .add(freestandingSwitch)
+      .add(searchFlag)
+      .add(prioritySearchFlag)
+      .parse(argc, argv)
+      ;
 
-    bool isVerbose = verboseSwitch.getValue();
-    bool doTime = benchmarkSwitch.getValue() || isVerbose;
-    std::string runtimeInit = runtimeInitializer.getValue();
-    bool freestanding = freestandingSwitch.getValue();
-    auto searchDirs = searchFlag.getValue();
-    auto prioritySearchDirs = prioritySearchFlag.getValue();
+    bool isVerbose = verboseSwitch;
+    bool doTime = benchmarkSwitch || isVerbose;
+    std::string runtimeInit = runtimeInitializer.value();
+    bool freestanding = freestandingSwitch;
+    auto searchDirs = searchFlag.values();
+    auto prioritySearchDirs = prioritySearchFlag.values();
 
     auto programPath = findProgramPath(argv[0]);
     if (!programPath) {
@@ -286,10 +337,10 @@ int main(int argc, char** argv) {
 #endif
 
     bool givenPackage = false;
-    std::string filename = filenameString.getValue();
+    std::string filename = filenameString.value();
     auto fn = AltaCore::Filesystem::Path(filename).absolutify();
     auto origFn = fn;
-    auto outDir = AltaCore::Filesystem::Path(outdirPath.getValue()).absolutify();
+    auto outDir = AltaCore::Filesystem::Path(outdirPath.value()).absolutify();
     auto origOutDir = outDir;
     std::vector<AltaCore::Modules::TargetInfo> targets;
     AltaCore::Filesystem::Path runtimeInitPath;
@@ -450,6 +501,9 @@ int main(int argc, char** argv) {
     rootCmakeLists << "endif()\n";
     rootCmakeLists << "project(ALTA_TOPLEVEL_PROJECT-" << fn.dirname().basename() << ")\n";
 
+    // silence MSVC warnings about insecure C functions
+    rootCmakeLists << "add_compile_definitions(_CRT_SECURE_NO_WARNINGS=1)\n";
+
     for (auto& target: targets) {
       fn = target.main;
       outDir = origOutDir / target.name;
@@ -528,7 +582,7 @@ int main(int argc, char** argv) {
         std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": lexed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
       }
 
-      if (verboseSwitch.getValue()) {
+      if (verboseSwitch) {
         printf("%sTokens:%s\n", CLI::COLOR_BLUE, CLI::COLOR_NORMAL);
         for (const auto& token: lexer.tokens) {
           printf(
@@ -630,7 +684,7 @@ int main(int argc, char** argv) {
         std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": preprocessed and parsed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
       }
 
-      if (verboseSwitch.getValue()) {
+      if (verboseSwitch) {
         /*
         printf("\n%sAST:%s\n", CLI::COLOR_BLUE, CLI::COLOR_NORMAL);
         CLI::Printers::printAST(parser.root);
@@ -669,7 +723,7 @@ int main(int argc, char** argv) {
 
       auto entryPackageInfo = root->info->module->packageInfo;
 
-      if (verboseSwitch.getValue()) {
+      if (verboseSwitch) {
         /*
         printf("\n%sDET:%s\n", CLI::COLOR_BLUE, CLI::COLOR_NORMAL);
         CLI::Printers::printDET(parser.root->$module);
@@ -1057,7 +1111,7 @@ int main(int argc, char** argv) {
 
     std::cout << CLI::COLOR_GREEN << "Successfully transpiled input!" << CLI::COLOR_NORMAL << std::endl;
 
-    if (compileSwitch.getValue()) {
+    if (compileSwitch) {
       if (system(NULL) == 0) {
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to compile the C code - no command processor is available." << std::endl;
         return 11;
@@ -1071,8 +1125,8 @@ int main(int argc, char** argv) {
       std::string configureCommand = "cmake \"" + origOutDir.toString() + '"';
       std::string compileCommand = "cmake --build \"" + rootBuildDir.toString() + '"';
 
-      if (!generatorArg.getValue().empty()) {
-        configureCommand += " -G \"" + generatorArg.getValue() + "\"";
+      if (!generatorArg.value().empty()) {
+        configureCommand += " -G \"" + generatorArg.value() + "\"";
       }
 
       auto currDir = AltaCore::Filesystem::cwd();
@@ -1101,10 +1155,6 @@ int main(int argc, char** argv) {
     }
 
     return 0;
-  } catch (TCLAP::ArgException& e) {
-    std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": " << e.error() << " for argument \"" << e.argId() << "\"" << std::endl;
-
-    return 1;
   } catch (std::exception& e) {
     std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": " << e.what() << std::endl;
     return 100;

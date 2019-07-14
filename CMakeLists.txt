@@ -11,10 +11,10 @@ add_subdirectory("${PROJECT_SOURCE_DIR}/deps/talta" EXCLUDE_FROM_ALL)
 add_executable(altac
   "${PROJECT_SOURCE_DIR}/src/main.cpp"
   "${PROJECT_SOURCE_DIR}/src/printers.cpp"
+  "${PROJECT_SOURCE_DIR}/src/cli-parser.cpp"
 )
 target_include_directories(altac
   PRIVATE "${PROJECT_SOURCE_DIR}/include"
-  PRIVATE "${PROJECT_SOURCE_DIR}/deps/tclap/include"
   PRIVATE "${PROJECT_SOURCE_DIR}/deps/jsoncpp"
 )
 

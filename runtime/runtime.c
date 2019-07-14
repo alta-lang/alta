@@ -296,7 +296,7 @@ _Alta_runtime_export void _Alta_reset_error(size_t index) {
 };
 
 _Alta_runtime_export jmp_buf* _Alta_push_error_handler(const char* type) {
-  if (!_Alta_global_runtime.inited) return;
+  if (!_Alta_global_runtime.inited) return NULL;
   _Alta_error_container* err = &_Alta_global_runtime.lastError;
 
   _Alta_error_handler_node* node = malloc(sizeof(_Alta_error_handler_node));
@@ -309,7 +309,7 @@ _Alta_runtime_export jmp_buf* _Alta_push_error_handler(const char* type) {
 };
 
 _Alta_runtime_export size_t _Alta_pop_error_handler() {
-  if (!_Alta_global_runtime.inited) return;
+  if (!_Alta_global_runtime.inited) return 0;
   _Alta_error_container* err = &_Alta_global_runtime.lastError;
 
   if (err->handlerStack) {

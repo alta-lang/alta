@@ -3,6 +3,7 @@ import String, rawstringLength from "string"
 import rawstring, Size from "types"
 import Exception, InvalidArgument from "exceptions"
 import numberToString, floatingPointToString from "util"
+import INT_MAX from "libc/lib/limits"
 
 export stdio.printf as printf
 
@@ -60,7 +61,14 @@ export class File {
 
   public function read(count: Size): String {
     let str = new String(count)
-    if !stdio.fgets(str.data, count, this.handle) {
+    while count > INT_MAX {
+      if !stdio.fgets(str.data, INT_MAX, this.handle) {
+        throw new ReadFailure
+      }
+      count -= INT_MAX
+    }
+    # `as int` isn't necessary, but it's used to silence a compiler warning
+    if !stdio.fgets(str.data, count as int, this.handle) {
       throw new ReadFailure
     }
     return str.substring(0, length: rawstringLength(str.data))
