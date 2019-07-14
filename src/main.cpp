@@ -260,6 +260,13 @@ int main(int argc, char** argv) {
       .valueDescription("Folder path")
       .canRepeat(true)
       ;
+    auto hideWarningFlag = Option()
+      .shortID("nw")
+      .longID("no-warn")
+      .description("Disable the specified compiler warning")
+      .valueDescription("Warning ID")
+      .canRepeat(true)
+      ;
 
     parser
       .add(compileSwitch)
@@ -272,6 +279,7 @@ int main(int argc, char** argv) {
       .add(freestandingSwitch)
       .add(searchFlag)
       .add(prioritySearchFlag)
+      .add(hideWarningFlag)
       .parse(argc, argv)
       ;
 
@@ -281,6 +289,13 @@ int main(int argc, char** argv) {
     bool freestanding = freestandingSwitch;
     auto searchDirs = searchFlag.values();
     auto prioritySearchDirs = prioritySearchFlag.values();
+    auto hiddenWarnings = hideWarningFlag.values();
+
+    for (auto warning: hiddenWarnings) {
+      if (std::find(CLI::knownWarnings, CLI::knownWarnings + CLI::knownWarnings_count, warning) == CLI::knownWarnings + CLI::knownWarnings_count) {
+        std::cout << CLI::COLOR_YELLOW << "Warning" << CLI::COLOR_NORMAL << ": unknown compiler warning \"" << warning << '"' << std::endl;
+      }
+    }
 
     auto programPath = findProgramPath(argv[0]);
     if (!programPath) {
@@ -501,8 +516,10 @@ int main(int argc, char** argv) {
     rootCmakeLists << "endif()\n";
     rootCmakeLists << "project(ALTA_TOPLEVEL_PROJECT-" << fn.dirname().basename() << ")\n";
 
-    // silence MSVC warnings about insecure C functions
-    rootCmakeLists << "add_compile_definitions(_CRT_SECURE_NO_WARNINGS=1)\n";
+    if (std::find(hiddenWarnings.begin(), hiddenWarnings.end(), "msvc-crt-secure") != hiddenWarnings.end()) {
+      // silence MSVC warnings about insecure C functions
+      rootCmakeLists << "add_compile_definitions(_CRT_SECURE_NO_WARNINGS=1)\n";
+    }
 
     for (auto& target: targets) {
       fn = target.main;
