@@ -267,6 +267,18 @@ int main(int argc, char** argv) {
       .valueDescription("Warning ID")
       .canRepeat(true)
       ;
+    auto runtimeOverride = Option()
+      .shortID("ro")
+      .longID("runtime-override")
+      .description("Specifies a custom runtime directory to use when building modules")
+      .valueDescription("Folder path")
+      ;
+    auto stdlibOverride = Option()
+      .shortID("so")
+      .longID("stdlib-override")
+      .description("Specifies a custom standard library directory to use when building modules")
+      .valueDescription("Folder path")
+      ;
 
     parser
       .add(compileSwitch)
@@ -280,6 +292,8 @@ int main(int argc, char** argv) {
       .add(searchFlag)
       .add(prioritySearchFlag)
       .add(hideWarningFlag)
+      .add(runtimeOverride)
+      .add(stdlibOverride)
       .parse(argc, argv)
       ;
 
@@ -329,6 +343,11 @@ int main(int argc, char** argv) {
 #endif
 #endif
 
+    if (stdlibOverride) {
+      AltaCore::Modules::standardLibraryPath = stdlibOverride.value();
+      AltaCore::Modules::standardLibraryPath = AltaCore::Modules::standardLibraryPath.absolutify().normalize();
+    }
+
     // set our runtime path
     AltaCore::Filesystem::Path runtimePath;
 #ifndef NDEBUG
@@ -350,6 +369,11 @@ int main(int argc, char** argv) {
     runtimePath = programPath.dirname().dirname() / "lib" / "alta-runtime";
 #endif
 #endif
+
+    if (runtimeOverride) {
+      runtimePath = runtimeOverride.value();
+      runtimePath = runtimePath.absolutify().normalize();
+    }
 
     bool givenPackage = false;
     std::string filename = filenameString.value();
@@ -409,7 +433,8 @@ int main(int argc, char** argv) {
         if (modInfo.targets.size() == 0) {
           AltaCore::Modules::TargetInfo targetInfo;
           targetInfo.main = modInfo.main;
-          targetInfo.name = modInfo.main.filename();
+          targetInfo.name = modInfo.name;
+          targetInfo.type = modInfo.outputBinary;
           targets.push_back(targetInfo);
         } else {
           targets.insert(targets.end(), modInfo.targets.begin(), modInfo.targets.end());

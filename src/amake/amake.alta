@@ -1,0 +1,14 @@
+import rawstring from "types"
+import Vector from "vector"
+import String from "string"
+
+
+literal function main(argc: int, argv: ptr rawstring): int {
+  # make arguments easier to work with
+  let args = new Vector<String>
+  for i: int in 0..argc {
+    args.push(new String(argv[i]))
+  }
+
+  return 0
+}
