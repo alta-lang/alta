@@ -81,6 +81,10 @@ export class File {
   public @read function file(): ptr stdio.FILE {
     return this.handle
   }
+
+  public @read function ended(): bool {
+    return !!stdio.feof(this.handle)
+  }
 }
 
 export function print(data: (String | rawstring | double | int | char | bool)...): void {

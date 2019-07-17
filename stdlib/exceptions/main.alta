@@ -6,3 +6,6 @@ export class Exception {}
 export class NullPointerAccess extends Exception {}
 export class InvalidArgument extends Exception {}
 export class IndexOutOfBoundsException extends Exception {}
+
+# less common, but still worthy to be placed here
+export class UnsupportedPlatform extends Exception {}

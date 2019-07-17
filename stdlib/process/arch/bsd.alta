@@ -1,0 +1,70 @@
+@@CTranspiler.include("sys/types.h");
+@@CTranspiler.include("sys/sysctl.h");
+@@CTranspiler.include("process.h")
+
+import rawstring, Size from "types"
+import allocate, free from "memory"
+import Exception from "exceptions"
+import memcpy from "libc/lib/string"
+import String from "string"
+import Vector from "Vector"
+
+export class SysctlError extends Exception {}
+
+declare literal var CTL_KERN: const int
+declare literal var KERN_ARGMAX: const int
+
+declare literal function sysctl(name: ptr int, nameLength: unsigned int, oldBuffer: ptr void, oldLength: ptr Size, newBuffer: ptr void, newLength: ptr Size)
+declare literal function getpid(): int
+
+export function rawArgs(): Vector<String> {
+  # mib = Management Information Base
+  let mib = allocate<int>(3)
+
+  mib[0] = CTL_KERN
+  mib[1] = KERN_ARGMAX
+
+  let maxArgSize: int = 0
+  let inputSize: Size = sizeof int
+
+  if sysctl(mib, 2, &maxArgSize as ptr void, &inputSize, nullptr, 0) == -1
+    throw new SysctlError
+
+  mib[0] = CTL_KERN
+  mib[1] = KERN_PROCARGS2
+  mib[2] = getpid()
+
+  let processArguments = allocate<byte>(maxArgSize)
+  inputSize = maxArgSize
+
+  if sysctl(mib, 3, &processArguments as ptr void, &inputSize, nullptr, 0) == -1
+    throw new SysctlError
+
+  memcpy(&argc as ptr void, processArguments as ptr void, sizeof int)
+  let argPtr: ptr byte = processArguments + sizeof int
+
+  let exe = new String(argPtr)
+  argPtr += exe.length
+
+  if argPtr == &processArguments[inputSize]
+    throw new SysctlError
+
+  # skip null terminators
+  while argPtr < &processArguments[inputSize] {
+    if *argPtr != '\0'
+      break
+    ;++argPtr
+  }
+
+  let argv = new Vector<String>
+  for i: Size in 0..argc {
+    let str = new String(argPtr)
+    argv.push(str)
+    argPtr += str.size
+  }
+
+  free<byte>(processArguments)
+  free<int>(mib)
+
+  return argv
+}

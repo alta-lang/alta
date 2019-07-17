@@ -1,0 +1,42 @@
+import String from "string"
+import rawstring, rawconststring from "types"
+import Exception, UnsupportedPlatform from "exceptions"
+import Vector from "vector"
+import getenv from "libc/lib/stdlib"
+import printLine from "io"
+
+export class InvalidKey extends Exception {}
+
+# this *could* be made its own module and then just
+# exported as a namespace, but this is better because
+# it'll allow users to do `environment[key]` when operator
+# overloads are added (which will only be available on classes)
+class Environment {
+  public function get(key: String): String {
+    let tmp = getenv(key.data)
+    if !tmp
+      throw new InvalidKey
+    return new String(tmp)
+  }
+}
+
+let environment: Environment = new Environment
+export environment
+
+##if platform == "darwin" || platform == "bsd"
+import rawArgs from "./arch/bsd.alta"
+##else if platform == "windows"
+import rawArgs from "./arch/windows.alta"
+##else if platform == "linux"
+import rawArgs from "./arch/linux.alta"
+##else
+##define UNSUPPORTED_PLATFORM__PROCESS true
+##end if
+
+export @read function arguments(): Vector<String> {
+##if not defined(UNSUPPORTED_PLATFORM__PROCESS)
+  return rawArgs()
+##else
+  throw new UnsupportedPlatform
+##end if
+}

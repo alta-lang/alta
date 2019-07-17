@@ -1,0 +1,61 @@
+@@CTranspiler.include("windows.h")
+@@CTranspiler.include("processenv.h")
+
+import Vector from "vector"
+import String from "string"
+import unsafeAllocate, unsafeFree from "memory"
+import Size from "types"
+
+type LPWSTR = any
+type LPCWSTR = any
+type UINT = any
+type DWORD = any
+type LPCCH = any
+type LPSTR = any
+type LPCWCH = any
+type LPBOOL = any
+type WCHAR = any
+type SIZE_T = any
+type HLOCAL = any
+type BOOL = any
+
+declare literal var CP_ACP: const UINT
+declare literal var MB_ERR_INVALID_CHARS: const DWORD
+declare literal var LMEM_FIXED: const UINT
+
+declare literal function GetCommandLineA(): LPSTR
+declare literal function CommandLineToArgvW(lpCmdLine: LPCWSTR, pNumArgs: ptr int): ptr LPWSTR
+declare literal function MultiByteToWideChar(CodePage: UINT, dwFlags: DWORD, lpMultiByteStr: LPCCH, cbMultiByte: int, lpWideCharStr: LPWSTR, cchWideChar: int): int
+declare literal function WideCharToMultiByte(CodePage: UINT, dwFlags: DWORD, lpWideCharStr: LPCWCH, cchWideChar: int, lpMultiByteStr: LPSTR, cbMultiByte: int, lpDefaultChar: LPCCH, lpUsedDefaultChar: LPBOOL): int
+declare literal function LocalFree(hMem: HLOCAL): HLOCAL
+
+export function rawArgs(): Vector<String> {
+  # translated into Alta and adapted from https://stackoverflow.com/a/4023686
+  let lpCmdLine = GetCommandLineA()
+  let requiredStringSize = MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, lpCmdLine, -1, nullptr, 0)
+  let lpWideCharStr = unsafeAllocate(requiredStringSize * sizeof WCHAR) as LPWSTR
+  MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, lpCmdLine, -1, lpWideCharStr, requiredStringSize)
+  let numArgs: int = 0
+  let args = CommandLineToArgvW(lpWideCharStr, &numArgs)
+  unsafeFree(lpWideCharStr as ptr void)
+  let sizes = new Vector<Size>
+  # do NOT use Alta's `bool` type for `lpUsedDefaultChar`
+  # Windows's BOOL type is a different size, and using
+  # Alta's bool with WideCharToMultiByte will corrupt the stack
+  for i: Size in 0..numArgs {
+    let lpUsedDefaultChar: BOOL = false
+    sizes.push(WideCharToMultiByte(CP_ACP, 0, args[i], -1, nullptr, 0, nullptr, &lpUsedDefaultChar as LPBOOL))
+  }
+  let result = new Vector<String>
+  for i: Size in 0..numArgs {
+    let lpUsedDefaultChar: BOOL = false
+    let bufLen = sizes.get(i)
+    let buffer = unsafeAllocate(bufLen) as LPSTR
+    let extra = WideCharToMultiByte(CP_ACP, 0, args[i], -1, buffer, bufLen, nullptr, &lpUsedDefaultChar as LPBOOL)
+    result.push(new String(buffer as ptr byte))
+  }
+
+  LocalFree(args as HLOCAL)
+
+  return result
+}
