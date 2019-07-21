@@ -304,6 +304,7 @@ _Alta_runtime_export jmp_buf* _Alta_push_error_handler(const char* type) {
   node->next = err->handlerStack;
   node->state = _Alta_save_state();
   err->handlerStack = node;
+  ++err->handlerStackSize;
 
   return &node->jumpPoint;
 };
