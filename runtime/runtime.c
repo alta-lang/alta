@@ -35,23 +35,11 @@ _Alta_runtime_export void _Alta_object_stack_deinit(_Alta_object_stack* stack) {
   _Alta_object_stack_unwind(stack, SIZE_MAX, _Alta_bool_false); // effectively unwinds the entire stack
 };
 
-_Alta_runtime_export void _Alta_object_stack_push(_Alta_object_stack* stack, _Alta_basic_class* object) {
+_Alta_runtime_export void _Alta_object_stack_push(_Alta_object_stack* stack, _Alta_object* object) {
   if (!_Alta_global_runtime.inited) return;
   _Alta_object_stack_node* node = malloc(sizeof(_Alta_object_stack_node));
 
   node->object = object;
-  node->isUnion = _Alta_bool_false;
-  node->prev = stack->nodeList;
-  stack->nodeList = node;
-  ++stack->nodeCount;
-};
-
-_Alta_runtime_export void _Alta_object_stack_push_union(_Alta_object_stack* stack, _Alta_basic_union* object) {
-  if (!_Alta_global_runtime.inited) return;
-  _Alta_object_stack_node* node = malloc(sizeof(_Alta_object_stack_node));
-
-  node->object = object;
-  node->isUnion = _Alta_bool_true;
   node->prev = stack->nodeList;
   stack->nodeList = node;
   ++stack->nodeCount;
@@ -64,22 +52,14 @@ _Alta_runtime_export void _Alta_object_stack_pop(_Alta_object_stack* stack) {
   }
 
   _Alta_object_stack_node* node = stack->nodeList;
-  if (node->isUnion) {
-    _Alta_basic_union* uni = node->object;
-    uni->destructor(uni);
-  } else {
-    _Alta_basic_class* obj = node->object;
-    if (!obj->_Alta_class_info_struct.destroyed && obj->_Alta_class_info_struct.destructor != NULL) {
-      obj->_Alta_class_info_struct.destructor(obj, _Alta_bool_false);
-    }
-  }
+  _Alta_object_destroy(node->object);
 
   stack->nodeList = node->prev;
   --stack->nodeCount;
   free(node);
 };
 
-_Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stack* stack, _Alta_basic_class* object) {
+_Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stack* stack, _Alta_object* object) {
   if (!_Alta_global_runtime.inited) return _Alta_bool_false;
   // this is the node that comes before the current node
   // in the linked list, NOT the node that corresponds to the
@@ -88,10 +68,9 @@ _Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stac
   _Alta_object_stack_node* node = stack->nodeList;
   while (node != NULL) {
     if (node->object == object) {
-      _Alta_basic_class* obj = node->object;
-      if (!obj->_Alta_class_info_struct.destroyed && obj->_Alta_class_info_struct.destructor != NULL) {
-        obj->_Alta_class_info_struct.destructor(obj, _Alta_bool_false);
-      }
+      _Alta_object* obj = node->object;
+
+      _Alta_object_destroy(obj);
 
       if (previousNode != NULL) {
         previousNode->prev = node->prev;
@@ -125,6 +104,23 @@ _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, s
       _Alta_object_stack_pop(stack);
       if (stack->nodeList == NULL) break;
     }
+  }
+};
+
+_Alta_runtime_export void _Alta_object_destroy(_Alta_object* object) {
+  if (object->objectType == _Alta_object_type_class) {
+    _Alta_basic_class* klass = (_Alta_basic_class*)object;
+    if (!klass->_Alta_class_info_struct.destroyed && klass->_Alta_class_info_struct.destructor != NULL) {
+      klass->_Alta_class_info_struct.destructor(klass, _Alta_bool_false);
+    }
+  } else if (object->objectType == _Alta_object_type_union) {
+    _Alta_basic_union* uni = (_Alta_basic_union*)object;
+    uni->destructor(uni);
+  } else if (object->objectType == _Alta_object_type_optional) {
+    _Alta_basic_optional* opt = (_Alta_basic_optional*)object;
+    opt->destructor(opt);
+  } else {
+    abort();
   }
 };
 

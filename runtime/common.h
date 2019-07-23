@@ -71,11 +71,11 @@ _Alta_runtime_export void _Alta_unwind_global_runtime();
 
 _Alta_runtime_export void _Alta_object_stack_init(_Alta_object_stack* stack);
 _Alta_runtime_export void _Alta_object_stack_deinit(_Alta_object_stack* stack);
-_Alta_runtime_export void _Alta_object_stack_push(_Alta_object_stack* stack, _Alta_basic_class* object);
-_Alta_runtime_export void _Alta_object_stack_push_union(_Alta_object_stack* stack, _Alta_basic_union* object);
+_Alta_runtime_export void _Alta_object_stack_push(_Alta_object_stack* stack, _Alta_object* object);
 _Alta_runtime_export void _Alta_object_stack_pop(_Alta_object_stack* stack);
-_Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stack* stack, _Alta_basic_class* object);
+_Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stack* stack, _Alta_object* object);
 _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, size_t count, _Alta_bool isPosition);
+_Alta_runtime_export void _Alta_object_destroy(_Alta_object* object);
 
 _Alta_runtime_export void _Alta_generic_stack_init();
 _Alta_runtime_export void _Alta_generic_stack_deinit();

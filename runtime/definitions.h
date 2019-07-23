@@ -23,6 +23,16 @@ enum _Alta_bool_value {
   _Alta_bool_true = 1
 };
 
+typedef enum __Alta_object_type {
+  _Alta_object_type_class = 0,
+  _Alta_object_type_union = 1,
+  _Alta_object_type_optional = 2,
+} _Alta_object_type;
+
+typedef struct __Alta_object {
+  _Alta_object_type objectType;
+} _Alta_object;
+
 typedef struct __Alta_basic_class _Alta_basic_class;
 
 typedef void (*_Alta_destructor)(_Alta_basic_class*, _Alta_bool);
@@ -42,19 +52,29 @@ typedef struct __Alta_class_info {
 } _Alta_class_info;
 
 struct __Alta_basic_class {
+  _Alta_object_type objectType;
   _Alta_class_info _Alta_class_info_struct;
+};
+
+typedef struct __Alta_basic_optional _Alta_basic_optional;
+typedef void (*_Alta_optional_destructor)(_Alta_basic_optional*);
+
+struct __Alta_basic_optional {
+  _Alta_object_type objectType;
+  _Alta_bool present;
+  _Alta_optional_destructor destructor;
 };
 
 typedef struct __Alta_basic_union _Alta_basic_union;
 typedef void (*_Alta_union_destructor)(_Alta_basic_union*);
 struct __Alta_basic_union {
+  _Alta_object_type objectType;
   char* typeName;
   _Alta_union_destructor destructor;
 };
 
 // <object-stack>
 typedef struct __Alta_object_stack_node {
-  _Alta_bool isUnion;
   void* object;
   
   // named "prev" because it technically points to an older node,
