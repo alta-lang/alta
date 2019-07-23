@@ -24,18 +24,44 @@ let environment: Environment = new Environment
 export environment
 
 ##if platform == "darwin" || platform == "bsd"
-import rawArgs from "./arch/bsd.alta"
+import "./arch/bsd.alta" as native
 ##else if platform == "windows"
-import rawArgs from "./arch/windows.alta"
+import "./arch/windows.alta" as native
 ##else if platform == "linux"
-import rawArgs from "./arch/linux.alta"
+import "./arch/linux.alta" as native
 ##else
 ##define UNSUPPORTED_PLATFORM__PROCESS true
 ##end if
 
-export @read function arguments(): Vector<String> {
 ##if not defined(UNSUPPORTED_PLATFORM__PROCESS)
-  return rawArgs()
+export native.Stream
+export native.Process
+using Stream = native.Stream
+using Process = native.Process
+##else
+export class Stream {
+  public constructor() {
+    throw new UnsupportedPlatform
+  }
+}
+export class Process {
+  public constructor() {
+    throw new UnsupportedPlatform
+  }
+}
+##end if
+
+export function arguments(): Vector<String> {
+##if not defined(UNSUPPORTED_PLATFORM__PROCESS)
+  return native.rawArgs()
+##else
+  throw new UnsupportedPlatform
+##end if
+}
+
+export function spawn(program: String, args: Vector<String>): Process {
+##if not defined(UNSUPPORTED_PLATFORM__PROCESS)
+  return native.spawn(program, args)
 ##else
   throw new UnsupportedPlatform
 ##end if

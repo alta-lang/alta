@@ -81,4 +81,20 @@ export generic class Vector<T> {
     ;--this._length
     return value
   }
+
+  public function from(index: Size): Vector<T> {
+    let other = new Vector<T>(this._length - index)
+    for i: Size in 0..other._length {
+      other._data[i] @strict = this._data[i + index]
+    }
+    return other
+  }
+
+  public function to(index: Size): Vector<T> {
+    let other = new Vector<T>(index + 1)
+    for i: Size in 0..other._length {
+      other._data[i] @strict = this._data[i]
+    }
+    return other
+  }
 }

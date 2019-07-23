@@ -24,3 +24,5 @@ export function rawArgs(): Vector<String> {
   }
   return result
 }
+
+export * from "./posix.alta"

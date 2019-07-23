@@ -270,4 +270,15 @@ export class String {
   public function prepend(data: byte): ref String {
     return this.prepend(&data, 1)
   }
+
+  public function includes(data: byte...): bool {
+    for i: Size in 0..this._length {
+      for j: Size in 0..data.length {
+        if this._data[i] == data[j] {
+          return true
+        }
+      }
+    }
+    return false
+  }
 }

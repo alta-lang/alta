@@ -3,8 +3,20 @@
 
 import Vector from "vector"
 import String from "string"
-import unsafeAllocate, unsafeFree from "memory"
+import unsafeAllocate, unsafeFree, allocate, free from "memory"
 import Size from "types"
+import Exception from "exceptions"
+import Map from "map"
+
+export class PipeCreationFailure extends Exception {}
+export class StreamAttributeAssignmentFailure extends Exception {}
+export class ProcessCreationFailure extends Exception {}
+export class HandleDestructionFailure extends Exception {}
+export class WrongStreamType extends Exception {}
+export class StreamFlushFailure extends Exception {}
+export class ReadFailure extends Exception {}
+export class WriteFailure extends Exception {}
+export class InvalidHandle extends Exception {}
 
 type LPWSTR = any
 type LPCWSTR = any
@@ -18,6 +30,45 @@ type WCHAR = any
 type SIZE_T = any
 type HLOCAL = any
 type BOOL = any
+type LPVOID = any
+type HANDLE = any
+type LPBYTE = any
+type WORD = any
+type LPCSTR = any
+
+@external @typed literal struct SECURITY_ATTRIBUTES {
+  nLength: DWORD;
+  lpSecurityDescriptor: LPVOID;
+  bInheritHandle: BOOL;
+}
+
+@external @typed literal struct STARTUPINFOA {
+  cb: DWORD;
+  lpReserved: LPSTR;
+  lpDesktop: LPSTR;
+  lpTitle: LPSTR;
+  dwX: DWORD;
+  dwY: DWORD;
+  dwXSize: DWORD;
+  dwYSize: DWORD;
+  dwXCountChars: DWORD;
+  dwYCountChars: DWORD;
+  dwFillAttribute: DWORD;
+  dwFlags: DWORD;
+  wShowWindow: WORD;
+  cbReserved2: WORD;
+  lpReserved2: LPBYTE;
+  hStdInput: HANDLE;
+  hStdOutput: HANDLE;
+  hStdError: HANDLE;
+}
+
+@external @typed literal struct PROCESS_INFORMATION {
+  hProcess: HANDLE;
+  hThread: HANDLE;
+  dwProcessId: DWORD;
+  dwThreadId: DWORD;
+}
 
 declare literal var CP_ACP: const UINT
 declare literal var MB_ERR_INVALID_CHARS: const DWORD
@@ -58,4 +109,308 @@ export function rawArgs(): Vector<String> {
   LocalFree(args as HLOCAL)
 
   return result
+}
+
+declare literal function CreatePipe(hReadPipe: ptr HANDLE, hWritePipe: ptr HANDLE, lpPipeAttributes: ptr SECURITY_ATTRIBUTES, nSize: DWORD): BOOL
+declare literal function SetHandleInformation(hObject: HANDLE, dwMask: DWORD, dwFlags: DWORD): BOOL
+declare literal function CreateProcessA(
+  lpApplicationName: LPCSTR,
+  lpCommandLine: LPSTR,
+  lpProcessAttributes: ptr SECURITY_ATTRIBUTES,
+  lpThreadAttributes: ptr SECURITY_ATTRIBUTES,
+  bInheritHandles: BOOL,
+  dwCreationFlags: DWORD,
+  lpEnvironment: LPVOID,
+  lpCurrentDirectory: LPCSTR,
+  lpStartupInfo: ptr STARTUPINFOA,
+  lpProcessInformation: ptr PROCESS_INFORMATION
+): BOOL
+declare literal function CloseHandle(handle: HANDLE): BOOL
+declare literal function FlushFileBuffers(hFile: HANDLE): BOOL
+declare literal function ReadFile(
+  hFile: HANDLE,
+  lpBuffer: LPVOID,
+  nNumberOfBytesToRead: DWORD,
+  lpNumberOfBytesRead: ptr DWORD,
+  lpOverlapped: ptr void
+): BOOL
+declare literal function WriteFile(
+  hFile: HANDLE,
+  lpBuffer: LPVOID,
+  nNumberOfBytesToWrite: DWORD,
+  lpNumberOfBytesWritten: ptr DWORD,
+  lpOverlapped: ptr void
+): BOOL
+declare literal function WaitForSingleObject(
+  hHandle: HANDLE,
+  dwMilliseconds: DWORD
+): DWORD
+declare literal function PeekNamedPipe(
+  hNamedPipe: HANDLE,
+  lpBuffer: LPVOID,
+  nBufferSize: DWORD,
+  lpBytesRead: ptr DWORD,
+  lpTotalBytesAvail: ptr DWORD,
+  lpBytesLeftThisMessage: ptr DWORD
+): BOOL
+
+declare literal var HANDLE_FLAG_INHERIT: const DWORD
+declare literal var STARTF_USESTDHANDLES: const DWORD
+declare literal var INFINITE: const DWORD
+
+let streamTable: Map<ptr void, Size> = new Map<ptr void, Size>
+
+export class Stream {
+  private var handle = nullptr as HANDLE
+  private var uselessHandle = nullptr as HANDLE
+  private var isRead = false
+
+  public constructor() {}
+  public constructor(readHandle: HANDLE, writeHandle: HANDLE, isRead: bool) {
+    this.handle = readHandle if isRead else writeHandle
+    this.isRead = isRead
+    ++streamTable.get(this.handle as ptr void)
+  }
+  public @copy constructor(other: ref Stream) {
+    ++streamTable.get(this.handle as ptr void)
+    this.handle = other.handle
+    this.uselessHandle = other.uselessHandle
+    this.isRead = other.isRead
+  }
+  public destructor() {
+    if this.handle != nullptr as HANDLE {
+      this.close()
+    }
+  }
+
+  private function ensureHandle(): void {
+    if this.handle == nullptr as HANDLE {
+      throw new InvalidHandle
+    }
+  }
+
+  public function flush(): void {
+    this.ensureHandle()
+
+    if this.isRead {
+      throw new WrongStreamType
+    }
+
+    if !FlushFileBuffers(this.handle) {
+      throw new StreamFlushFailure
+    }
+  }
+
+  public function bytesAvailable(): Size {
+    this.ensureHandle()
+
+    if !this.isRead {
+      throw new WrongStreamType
+    }
+
+    let bytesAvailable = 0 as DWORD
+
+    if !PeekNamedPipe(this.handle, nullptr as LPVOID, 0, nullptr, &bytesAvailable, nullptr) {
+      throw new ReadFailure
+    }
+
+    return bytesAvailable as Size
+  }
+
+  public function read(count: Size): String {
+    this.ensureHandle()
+
+    if !this.isRead {
+      throw new WrongStreamType
+    }
+
+    let buffer = allocate<byte>(count)
+    let bytesRead = 0 as DWORD
+
+    if !ReadFile(this.handle, buffer as LPVOID, count as DWORD, &bytesRead, nullptr) {
+      throw new ReadFailure
+    }
+
+    let str = new String(buffer, bytesRead as Size)
+
+    free<byte>(buffer)
+
+    return str
+  }
+
+  public function write(input: String): void {
+    this.ensureHandle()
+
+    if this.isRead {
+      throw new WrongStreamType
+    }
+
+    let bytesWritten = 0 as DWORD
+
+    if !WriteFile(this.handle, input.data as LPVOID, input.length as DWORD, &bytesWritten, nullptr) {
+      throw new WriteFailure
+    }
+  }
+
+  public function close(): void {
+    this.ensureHandle()
+
+    ;--streamTable.get(this.handle as ptr void)
+
+    if streamTable.get(this.handle as ptr void) == 0 {
+      if !CloseHandle(this.handle) {
+        throw new HandleDestructionFailure
+      }
+
+      if this.uselessHandle {
+        if !CloseHandle(this.uselessHandle) {
+          throw new HandleDestructionFailure
+        }
+      }
+    }
+  }
+}
+
+function createPipe(read: ref HANDLE, write: ref HANDLE): void {
+  let securityAttrs = new SECURITY_ATTRIBUTES
+  securityAttrs.nLength = sizeof SECURITY_ATTRIBUTES
+  securityAttrs.bInheritHandle = true as BOOL
+  securityAttrs.lpSecurityDescriptor = nullptr as LPVOID
+
+  if !CreatePipe(&read, &write, &securityAttrs, 0 as DWORD) {
+    throw new PipeCreationFailure
+  }
+}
+
+function makeUninheritable(stream: ref HANDLE): void {
+  if !SetHandleInformation(stream, HANDLE_FLAG_INHERIT, 0 as DWORD) {
+    throw new StreamAttributeAssignmentFailure
+  }
+}
+
+function escapeForCommandLine(arg: String): String {
+  if !arg.includes(' ', '\t', '\n', '\v', '"')
+    return arg
+  let result = new String("\"")
+  for i: Size in 0..arg.length {
+    let backlashes: Size = 0
+
+    while i < arg.length && arg.charAt(i) == '\\' {
+      ++i
+      ;++backlashes
+    }
+
+    if i == arg.length {
+      for j: Size in 0..backlashes * 2 {
+        result.append('\\')
+      }
+      break
+    } else {
+      if arg.charAt(i) == '"' {
+        for j: Size in 0..backlashes * 2 + 1 {
+          result.append('\\')
+        }
+      } else {
+        for j: Size in 0..backlashes {
+          result.append('\\')
+        }
+      }
+      result.append(arg.charAt(i))
+    }
+  }
+  result.append('"')
+  return result
+}
+
+let processTable: Map<ptr void, Size> = new Map<ptr void, Size>
+
+export class Process {
+  private var processInformation = new PROCESS_INFORMATION
+  private var _stdin: Stream
+  private var _stdout: Stream
+  private var _stderr: Stream
+
+  public constructor(processInformation: PROCESS_INFORMATION, stdin: Stream, stdout: Stream, stderr: Stream) {
+    ++processTable.get(processInformation.hProcess as ptr void)
+    this.processInformation = processInformation
+    this._stdin = stdin
+    this._stdout = stdout
+    this._stderr = stderr
+  }
+  public @copy constructor(other: ref Process) {
+    ++processTable.get(other.processInformation.hProcess as ptr void)
+    this.processInformation = other.processInformation
+    this._stdin = other.stdin
+    this._stdout = other.stdout
+    this._stderr = other.stderr
+  }
+  public destructor() {
+    --processTable.get(this.processInformation.hProcess as ptr void)
+
+    if processTable.get(this.processInformation.hProcess as ptr void) == 0 {
+      if !CloseHandle(this.processInformation.hProcess) {
+        throw new HandleDestructionFailure
+      }
+      if !CloseHandle(this.processInformation.hThread) {
+        throw new HandleDestructionFailure
+      }
+    }
+  }
+
+  public @read function stdin(): Stream {
+    return this._stdin
+  }
+  public @read function stdout(): Stream {
+    return this._stdout
+  }
+  public @read function stderr(): Stream {
+    return this._stderr
+  }
+
+  public function waitForExit(): void {
+    WaitForSingleObject(this.processInformation.hProcess, INFINITE)
+  }
+}
+
+export function spawn(programPath: String, args: Vector<String>): Process {
+  let stdinRead = nullptr as HANDLE
+  let stdinWrite = nullptr as HANDLE
+
+  let stdoutRead = nullptr as HANDLE
+  let stdoutWrite = nullptr as HANDLE
+
+  let stderrRead = nullptr as HANDLE
+  let stderrWrite = nullptr as HANDLE
+
+  createPipe(stdinRead, stdinWrite)
+  createPipe(stdoutRead, stdoutWrite)
+  createPipe(stderrRead, stderrWrite)
+
+  makeUninheritable(stdinWrite)
+  makeUninheritable(stdoutRead)
+  makeUninheritable(stderrRead)
+
+  let cmdline = new String
+
+  cmdline.append(escapeForCommandLine(programPath))
+
+  for i: Size in 0..args.length {
+    cmdline.append(' ')
+    cmdline.append(escapeForCommandLine(args.get(i)))
+  }
+
+  let procInfo = new PROCESS_INFORMATION
+  let startInfo = new STARTUPINFOA
+
+  startInfo.cb = sizeof STARTUPINFOA
+  startInfo.hStdError = stderrWrite
+  startInfo.hStdOutput = stdoutWrite
+  startInfo.hStdInput = stdinRead
+  startInfo.dwFlags |= STARTF_USESTDHANDLES
+
+  if !CreateProcessA(programPath.data as LPCSTR, cmdline.data as LPSTR, nullptr, nullptr, true as BOOL, 0 as DWORD, nullptr, nullptr, &startInfo, &procInfo) {
+    throw new ProcessCreationFailure
+  }
+
+  return new Process(procInfo, new Stream(stdinRead, stdinWrite, false), new Stream(stdoutRead, stdoutWrite, true), new Stream(stderrRead, stderrWrite, true))
 }
