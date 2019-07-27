@@ -110,6 +110,7 @@ _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, s
 _Alta_runtime_export void _Alta_object_destroy(_Alta_object* object) {
   if (object->objectType == _Alta_object_type_class) {
     _Alta_basic_class* klass = (_Alta_basic_class*)object;
+    klass = (_Alta_basic_class*)(((char*)klass) - (klass->_Alta_class_info_struct.baseOffset));
     if (!klass->_Alta_class_info_struct.destroyed && klass->_Alta_class_info_struct.destructor != NULL) {
       klass->_Alta_class_info_struct.destructor(klass, _Alta_bool_false);
     }
@@ -119,6 +120,37 @@ _Alta_runtime_export void _Alta_object_destroy(_Alta_object* object) {
   } else if (object->objectType == _Alta_object_type_optional) {
     _Alta_basic_optional* opt = (_Alta_basic_optional*)object;
     opt->destructor(opt);
+  } else if (object->objectType == _Alta_object_type_wrapper) {
+    _Alta_wrapper* wrapper = (_Alta_wrapper*)object;
+    if (wrapper->destructor) {
+      wrapper->destructor(wrapper);
+    }
+    free(wrapper->value);
+  } else if (object->objectType == _Alta_object_type_function) {
+    _Alta_basic_function* func = (_Alta_basic_function*)object;
+    if (func->state.referenceCount) {
+      --*func->state.referenceCount;
+      if (*func->state.referenceCount == 0) {
+        if (func->state.copies) {
+          size_t i;
+          for (i = 0; i < func->state.copyCount; i++) {
+            _Alta_object_destroy(func->state.copies[i]);
+            free(func->state.copies[i]);
+          }
+          free(func->state.copies);
+        }
+        if (func->state.references) {
+          free(func->state.references);
+        }
+        free(func->state.referenceCount);
+      }
+      func->state.copies = NULL;
+      func->state.references = NULL;
+      func->state.referenceCount = NULL;
+      func->plain = NULL;
+      func->lambda = NULL;
+      func->proxy = NULL;
+    }
   } else {
     abort();
   }
@@ -272,12 +304,7 @@ _Alta_runtime_export void _Alta_reset_error(size_t index) {
     strlen(err->typeName) > 0
   ) {
     if (!err->isNative) {
-      _Alta_basic_class* klass = err->value;
-      _Alta_basic_class* baseClass = (_Alta_basic_class*)(((char*)klass) - (klass->_Alta_class_info_struct.baseOffset));
-      if (klass->_Alta_class_info_struct.destructor) {
-        klass->_Alta_class_info_struct.destructor(baseClass, _Alta_bool_false);
-      }
-      free(baseClass);
+      _Alta_object_destroy((_Alta_object*)err->value);
     } else {
       free(err->value);
     }

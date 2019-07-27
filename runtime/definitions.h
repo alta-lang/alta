@@ -27,6 +27,8 @@ typedef enum __Alta_object_type {
   _Alta_object_type_class = 0,
   _Alta_object_type_union = 1,
   _Alta_object_type_optional = 2,
+  _Alta_object_type_wrapper = 3,
+  _Alta_object_type_function = 4,
 } _Alta_object_type;
 
 typedef struct __Alta_object {
@@ -72,6 +74,42 @@ struct __Alta_basic_union {
   char* typeName;
   _Alta_union_destructor destructor;
 };
+
+typedef struct __Alta_wrapper _Alta_wrapper;
+typedef void (*_Alta_wrapper_destructor)(_Alta_wrapper*);
+struct __Alta_wrapper {
+  _Alta_object_type objectType;
+  void* value;
+  _Alta_wrapper_destructor destructor;
+};
+
+typedef struct __Alta_lambda_state {
+  // pointer to heap-allocated counter of how many references to this state object are currently stored
+  size_t* referenceCount;
+
+  // number of objects in `copies`
+  size_t copyCount;
+
+  // number of pointers stored in the `references` array/block
+  size_t referenceBlockCount;
+
+  // array of pointers to heap-allocated copies of objects from the lambda's creation point
+  _Alta_object** copies;
+
+  // array/block of pointers to variables in the lambda's creation point
+  void** references;
+} _Alta_lambda_state;
+
+typedef void (*_Alta_basic_plain_function)();
+typedef void (*_Alta_basic_lambda_function)(_Alta_lambda_state);
+
+typedef struct __Alta_basic_function {
+  _Alta_object_type objectType;
+  _Alta_lambda_state state;
+  void* plain;
+  void* lambda;
+  void* proxy;
+} _Alta_basic_function;
 
 // <object-stack>
 typedef struct __Alta_object_stack_node {
