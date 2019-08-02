@@ -1,0 +1,220 @@
+@@CTranspiler.include("spawn.h");
+@@CTranspiler.include("unistd.h");
+@@CTranspiler.include("sys/ioctl.h");
+@@CTranspiler.include("sys/wait.h");
+
+import Size, rawstring from "types"
+import String from "string"
+import allocate from "memory"
+import Exception from "exceptions"
+import Vector from "vector"
+import Map from "map"
+
+export class PipeCreationFailure extends Exception {}
+export class ProcessCreationFailure extends Exception {}
+export class InvalidHandle extends Exception {}
+export class WrongStreamType extends Exception {}
+export class IOCTLFailure extends Exception {}
+export class ReadFailure extends Exception {}
+export class WriteFailure extends Exception {}
+export class HandleDestructionFailure extends Exception {}
+
+type posix_spawn_file_actions_t = any
+type posix_spawnattr_t = any
+type mode_t = any
+type pid_t = any
+type ssize_t = any
+
+declare literal function pipe(pipefd: ptr int): int
+declare literal function posix_spawn(pid: ptr pid_t, path: ptr const byte, file_actions: ptr const posix_spawn_file_actions_t, attrp: ptr const posix_spawnattr_t, argv: ptr const ptr byte, envp: ptr const ptr byte): int
+declare literal function close(fd: int): int
+declare literal function ioctl(fd: int, request: unsigned long int, @CTranspiler.vararg data: any...): int
+declare literal function read(fd: int, buf: ptr void, count: Size): ssize_t
+declare literal function write(fd: int, buf: ptr const void, count: Size): ssize_t
+
+declare literal function posix_spawn_file_actions_init(file_actions: ptr posix_spawn_file_actions_t): int
+declare literal function posix_spawn_file_actions_destroy(file_actions: ptr posix_spawn_file_actions_t): int
+declare literal function posix_spawn_file_actions_addopen(file_actions: ptr posix_spawn_file_actions_t, fildes: int, path: ptr const byte, oflag: int, mode: mode_t): int
+declare literal function posix_spawn_file_actions_addclose(file_actions: ptr posix_spawn_file_actions_t, fildes: int): int
+declare literal function posix_spawn_file_actions_adddup2(file_actions: ptr posix_spawn_file_actions_t, fildes: int, newfildes: int): int
+
+declare literal function waitpid(pid: pid_t, wstatus: ptr int, options: int): pid_t
+
+declare literal var FIONREAD: const unsigned long int
+
+# alias the functions, since Stream has methods
+# with the same names that need to use them
+using posixRead = read
+using posixWrite = write
+using posixClose = close
+
+let streamTable: Map<int, Size> = new Map<int, Size>
+
+export class Stream {
+  private var handle: int = -1
+  private var isRead = false
+
+  public constructor() {}
+  public constructor(handle: int, isRead: bool) {
+    this.handle = handle
+    this.isRead = isRead
+    ;++streamTable.get(this.handle)
+  }
+  public @copy constructor(other: ref Stream) {
+    this.handle = other.handle
+    this.isRead = other.isRead
+    ;++streamTable.get(this.handle)
+  }
+  public destructor() {
+    if this.handle != -1 {
+      this.close()
+    }
+  }
+
+  private function ensureHandle(): void {
+    if this.handle == -1 {
+      throw new InvalidHandle
+    }
+  }
+
+  private function ensureRead(): void {
+    if !this.isRead {
+      throw new WrongStreamType
+    }
+  }
+  private function ensureWrite(): void {
+    if this.isRead {
+      throw new WrongStreamType
+    }
+  }
+
+  public function flush(): void {
+    this.ensureHandle()
+    this.ensureWrite()
+  }
+  public function bytesAvailable(): Size {
+    this.ensureHandle()
+    this.ensureRead()
+
+    let bytes: int = 0
+
+    if ioctl(this.handle, FIONREAD, &bytes)
+      throw new IOCTLFailure
+
+    return bytes
+  }
+  public function read(count: Size): String {
+    this.ensureHandle()
+    this.ensureRead()
+
+    let buffer = new Vector<byte>(count)
+
+    let bytesRead = posixRead(this.handle, buffer.data as ptr void, count)
+
+    if bytesRead < 0
+      throw new ReadFailure
+
+    return new String(buffer.data, bytesRead)
+  }
+  public function write(input: String): void {
+    this.ensureHandle()
+    this.ensureWrite()
+
+    let bytesWritten = posixWrite(this.handle, input.data as ptr void, input.length)
+
+    if bytesWritten < 0
+      throw new WriteFailure
+  }
+  public function close(): void {
+    this.ensureHandle()
+
+    ;--streamTable.get(this.handle)
+
+    if streamTable.get(this.handle) == 0 {
+      if posixClose(this.handle) {
+        throw new HandleDestructionFailure
+      }
+    }
+  }
+}
+
+export class Process {
+  private var handle: pid_t
+  private var _stdin: Stream
+  private var _stdout: Stream
+  private var _stderr: Stream
+
+  public constructor(pid: pid_t, stdin: Stream, stdout: Stream, stderr: Stream) {
+    this.handle = pid
+    this._stdin = stdin
+    this._stdout = stdout
+    this._stderr = stderr
+  }
+
+  public @read function stdin(): Stream {
+    return this._stdin
+  }
+  public @read function stdout(): Stream {
+    return this._stdout
+  }
+  public @read function stderr(): Stream {
+    return this._stderr
+  }
+  public function waitForExit(): void {
+    let exitCode: int = 0
+    waitpid(this.handle, &exitCode, 0)
+  }
+}
+
+export function spawn(programPath: String, args: Vector<String>): Process {
+  let inPipe = new Vector<int>(2)
+  let outPipe = new Vector<int>(2)
+  let errPipe = new Vector<int>(2)
+  let spawnActions: posix_spawn_file_actions_t
+
+  if pipe(inPipe.data) || pipe(outPipe.data) || pipe(errPipe.data)
+    throw new PipeCreationFailure
+
+  posix_spawn_file_actions_init(&spawnActions)
+
+  # close the write end of the stdin pipe
+  posix_spawn_file_actions_addclose(&spawnActions, inPipe.data[1])
+
+  # close the read ends of the stdout and stderr pipes
+  posix_spawn_file_actions_addclose(&spawnActions, outPipe.data[0])
+  posix_spawn_file_actions_addclose(&spawnActions, errPipe.data[0])
+
+  # duplicate the read end of the stdin pipe
+  posix_spawn_file_actions_adddup2(&spawnActions, inPipe.data[0], 0)
+
+  # duplicate the write ends of the stdout and stderr pipes
+  posix_spawn_file_actions_adddup2(&spawnActions, outPipe.data[1], 1)
+  posix_spawn_file_actions_adddup2(&spawnActions, errPipe.data[1], 2)
+
+  # close the remaining pipe ends in the child
+  posix_spawn_file_actions_addclose(&spawnActions, inPipe.data[0])
+  posix_spawn_file_actions_addclose(&spawnActions, outPipe.data[1])
+  posix_spawn_file_actions_addclose(&spawnActions, errPipe.data[1])
+
+  let envArray = new Vector<rawstring>
+  envArray.push(nullptr)
+
+  let argArray = new Vector<rawstring>
+  argArray.push(programPath.data as rawstring)
+  for i: Size in 0..args.length {
+    argArray.push(args.data as rawstring)
+  }
+  argArray.push(nullptr)
+
+  let pid: pid_t
+
+  if posix_spawn(&pid, programPath.data, &spawnActions, nullptr, argArray.data, envArray.data)
+    throw new ProcessCreationFailure
+
+  # close child-facing pipe ends
+  close(inPipe.data[0])
+  close(outPipe.data[1])
+  close(errPipe.data[1])
+
+  return new Process(pid, new Stream(inPipe.data[1], false), new Stream(outPipe.data[0], true), new Stream(errPipe.data[0], true))
+}

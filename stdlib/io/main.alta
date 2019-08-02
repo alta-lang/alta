@@ -102,7 +102,7 @@ export function print(data: (String | rawstring | double | int | char | bool)...
     } else if item instanceof int {
       result.append(numberToString<int>(item as int))
     } else if item instanceof bool {
-      result.append("true" if (item as bool) else "false")
+      result.append((item as bool) ? "true" : "false")
     } else {
       # this is literally impossible, but just in case...
       throw new InvalidArgument

@@ -198,9 +198,9 @@ declare literal export function ldexpf(n: float, exponent: int): float
 declare literal export function ldexp(n: double, exponent: int): double
 declare literal export function ldexpl(n: long double, exponent: int): long double
 
-declare literal export function modff(n: float, integral: ptr int): float
-declare literal export function modf(n: double, integral: ptr int): double
-declare literal export function modfl(n: long double, integral: ptr int): long double
+declare literal export function modff(n: float, integral: ptr float): float
+declare literal export function modf(n: double, integral: ptr double): double
+declare literal export function modfl(n: long double, integral: ptr long double): long double
 
 declare literal export function scalbnf(n: float, exponent: int): float
 declare literal export function scalbn(n: double, exponent: int): double

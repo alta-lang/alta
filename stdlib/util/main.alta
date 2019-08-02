@@ -21,7 +21,7 @@ export function parseNumber<T>(string: rawstring, length: Size): T {
     result += digit * power<T>(10, length - (i + 1))
   }
 
-  return -result if negate else result
+  return negate ? -result : result
 }
 
 export function parseNumber<T>(string: rawstring): T {

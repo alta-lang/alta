@@ -1,5 +1,5 @@
-@@CTranspiler.include("windows.h")
-@@CTranspiler.include("processenv.h")
+@@CTranspiler.include("windows.h");
+@@CTranspiler.include("processenv.h");
 
 import Vector from "vector"
 import String from "string"
@@ -167,15 +167,15 @@ export class Stream {
 
   public constructor() {}
   public constructor(readHandle: HANDLE, writeHandle: HANDLE, isRead: bool) {
-    this.handle = readHandle if isRead else writeHandle
+    this.handle = isRead ? readHandle : writeHandle
     this.isRead = isRead
-    ++streamTable.get(this.handle as ptr void)
+    ;++streamTable.get(this.handle as ptr void)
   }
   public @copy constructor(other: ref Stream) {
-    ++streamTable.get(this.handle as ptr void)
     this.handle = other.handle
     this.uselessHandle = other.uselessHandle
     this.isRead = other.isRead
+    ;++streamTable.get(this.handle as ptr void)
   }
   public destructor() {
     if this.handle != nullptr as HANDLE {

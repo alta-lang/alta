@@ -1,6 +1,6 @@
 @@CTranspiler.include("sys/types.h");
 @@CTranspiler.include("sys/sysctl.h");
-@@CTranspiler.include("process.h")
+@@CTranspiler.include("process.h");
 
 import rawstring, Size from "types"
 import allocate, free from "memory"
