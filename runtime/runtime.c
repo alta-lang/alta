@@ -369,3 +369,14 @@ _Alta_runtime_export void _Alta_uncaught_error(const char* typeName) {
   abort();
 #endif
 };
+
+_Alta_runtime_export void _Alta_bad_cast(const char* from, const char* to) {
+#if defined(ALTA_BAD_CAST_HANDLER)
+  return ALTA_BAD_CAST_HANDLER(from, to);
+#elif defined(ALTA_RUNTIME_FREESTANDING)
+  return _Alta_uncaught_error("@BadCast@");
+#else
+  printf("bad cast from %s to %s\n", from, to);
+  abort();
+#endif
+};

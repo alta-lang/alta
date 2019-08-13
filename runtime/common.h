@@ -96,6 +96,7 @@ _Alta_runtime_export size_t _Alta_pop_error_handler();
 _Alta_runtime_export _Alta_runtime_state _Alta_save_state();
 _Alta_runtime_export void _Alta_restore_state(const _Alta_runtime_state state);
 
-_Alta_runtime_export void _Alta_uncaught_error(const char* typeName); 
+_Alta_runtime_export void _Alta_uncaught_error(const char* typeName);
+_Alta_runtime_export void _Alta_bad_cast(const char* from, const char* to);
 
 #endif /* _ALTA_RUNTIME_COMMON_H */

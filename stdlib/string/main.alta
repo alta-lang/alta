@@ -48,7 +48,7 @@ export class String {
   # @param data The rawstring to us
   # @note The length will be determined automatically
   #       using `rawstringLength(data)`
-  public constructor(data: rawstring) {
+  public @from constructor(data: rawconststring) {
     this._length = rawstringLength(data)
     this._data = allocate<byte>(this._length + 1)
 
@@ -68,7 +68,7 @@ export class String {
   # @param data   The rawstring to use
   # @param length The length of the rawstring, *excluding* the null
   #               terminator (i.e. length of "hi" equals 2, not 3)
-  public constructor(data: rawstring, length: Size) {
+  public constructor(data: rawconststring, length: Size) {
     this._length = length
     this._data = allocate<byte>(this._length + 1)
 
@@ -138,9 +138,9 @@ export class String {
     return this._data[i]
   }
 
-  # The pointer to the rawconststring (ptr const byte) contained
+  # The pointer to the rawstring (ptr byte) contained
   # by this String
-  public @read function data(): rawconststring {
+  public @read function data(): rawstring {
     return this._data
   }
 
@@ -158,6 +158,10 @@ export class String {
   # i.e. the *size* of "hi" is 3, not 2
   public @read function size(): Size {
     return this.length + 1
+  }
+
+  public to rawstring {
+    return this._data
   }
 
   private function resize(length: Size): ref String {
@@ -181,7 +185,7 @@ export class String {
   # @param data The string to append
   # @param length The length of the string to append
   # @returns A reference to this String, to allow call chaining
-  public function append(data: rawstring, length: Size): ref String {
+  public function append(data: rawconststring, length: Size): ref String {
     let oldLen = this._length
 
     this.resize(this._length + length)
@@ -201,7 +205,7 @@ export class String {
   # @returns A reference to this String, to allow call chaining
   # @note The length will be determined automatically
   #       using `rawstringLength(data)`
-  public function append(data: rawstring): ref String {
+  public function append(data: rawconststring): ref String {
     return this.append(data, rawstringLength(data))
   }
 
@@ -241,7 +245,7 @@ export class String {
     return this.substring(0, length: length)
   }
 
-  public function prepend(data: rawstring, length: Size): ref String {
+  public function prepend(data: rawconststring, length: Size): ref String {
     let oldLen = this._length
 
     this.resize(this._length + length)
@@ -259,7 +263,7 @@ export class String {
     return this
   }
 
-  public function prepend(data: rawstring): ref String {
+  public function prepend(data: rawconststring): ref String {
     return this.prepend(data, rawstringLength(data))
   }
 

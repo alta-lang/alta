@@ -44,7 +44,11 @@ export generic class Vector<T> {
   }
 
   public @read function last(): ref T {
-    return  this._data[this._length - 1]
+    return this._data[this._length - 1]
+  }
+
+  public to ptr T {
+    return this._data
   }
 
   public function get(index: Size): ref T {

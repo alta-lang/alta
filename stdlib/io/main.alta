@@ -1,6 +1,6 @@
 import "libc/lib/stdio" as stdio
 import String, rawstringLength from "string"
-import rawstring, Size from "types"
+import rawstring, rawconststring, Size from "types"
 import Exception, InvalidArgument from "exceptions"
 import numberToString, floatingPointToString from "util"
 import INT_MAX from "libc/lib/limits"
@@ -17,24 +17,18 @@ export class File {
   private var mode = new String
 
   public constructor() {}
-  public constructor(path: rawstring) {
+  public constructor(path: rawconststring) {
     this.open(path, "r")
   }
-  public constructor(path: String) {
-    this.open(path.data, "r")
-  }
-  public constructor(path: rawstring, mode: rawstring) {
+  public constructor(path: rawconststring, mode: rawconststring) {
     this.open(path, mode)
-  }
-  public constructor(path: String, mode: rawstring) {
-    this.open(path.data, mode)
   }
 
   public @copy constructor(other: ref File) {
     this.open(other.path.data, other.mode.data)
   }
 
-  public function open(path: rawstring, mode: rawstring): void {
+  public function open(path: rawconststring, mode: rawconststring): void {
     this.handle = stdio.fopen(path, mode)
     if !this.handle {
       this.handle = nullptr
@@ -85,16 +79,18 @@ export class File {
   public @read function ended(): bool {
     return !!stdio.feof(this.handle)
   }
+
+  public to ptr stdio.FILE {
+    return this.handle
+  }
 }
 
-export function print(data: (String | rawstring | double | int | char | bool)...): void {
+export function print(data: (double | int | char | bool | String)...): void {
   let result: String
   for i: Size in 0..data.length {
     let item = data[i]
     if item instanceof String {
       result.append(item as String)
-    } else if item instanceof rawstring {
-      result.append(item as rawstring)
     } else if item instanceof double {
       result.append(floatingPointToString<double>(item as double))
     } else if item instanceof char {
@@ -111,23 +107,17 @@ export function print(data: (String | rawstring | double | int | char | bool)...
   stdio.printf("%s", result.data)
 }
 
-export function printLine(data: (String | rawstring | double | int | char | bool)...): void {
+export function printLine(data: (double | int | char | bool | String)...): void {
   for i: Size in 0..data.length {
     print(data[i])
   }
   stdio.printf("\n")
 }
 
-export function printLine(message: rawstring): void {
+export function printLine(message: rawconststring): void {
   stdio.printf("%s\n", message)
 }
-export function printLine(message: String): void {
-  printLine(message.data)
-}
 
-export function printError(message: rawstring): void {
+export function printError(message: rawconststring): void {
   stdio.fprintf(stdio.stderr, "%s\n", message)
-}
-export function printError(message: String): void {
-  printError(message.data)
 }

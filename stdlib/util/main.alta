@@ -1,9 +1,9 @@
-import rawstring, Size from "types"
+import rawconststring, Size from "types"
 import power from "math"
 import rawstringLength, String from "string"
 import fmod, modf from "libc/lib/math"
 
-export function parseNumber<T>(string: rawstring, length: Size): T {
+export function parseNumber<T>(string: rawconststring, length: Size): T {
   let result: T = 0
   let negate = false
 
@@ -24,12 +24,8 @@ export function parseNumber<T>(string: rawstring, length: Size): T {
   return negate ? -result : result
 }
 
-export function parseNumber<T>(string: rawstring): T {
+export function parseNumber<T>(string: rawconststring): T {
   return parseNumber<T>(string, rawstringLength(string))
-}
-
-export function parseNumber<T>(string: String): T {
-  return parseNumber<T>(string.data, string.length)
 }
 
 export generic class Pair<T1, T2> {
@@ -115,12 +111,8 @@ export function parseFloatingPoint<T>(string: String): T {
   }
 }
 
-export function parseFloatingPoint<T>(string: rawstring, length: Size): T {
+export function parseFloatingPoint<T>(string: rawconststring, length: Size): T {
   return parseFloatingPoint<T>(new String(string, length))
-}
-
-export function parseFloatingPoint<T>(string: rawstring): T {
-  return parseFloatingPoint<T>(new String(string))
 }
 
 export function numberToString<T>(number: T): String {
