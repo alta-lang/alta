@@ -116,6 +116,12 @@ export function parseFloatingPoint<T>(string: rawconststring, length: Size): T {
 }
 
 export function numberToString<T>(number: T): String {
+  let negate = false
+  if number < 0 {
+    negate = true
+    number = -number
+  }
+
   let result = new String
   let iteration = 1
   while number >= 1 {
@@ -130,12 +136,22 @@ export function numberToString<T>(number: T): String {
     ;++iteration
   }
 
-  if result.length == 0 result.append("0")
+  if result.length == 0
+    result.append("0")
+
+  if negate
+    result.prepend("-")
 
   return result
 }
 
 export function floatingPointToString<T>(number: T): String {
+  let negate = false
+  if number < 0 {
+    negate = true
+    number = -number
+  }
+
   let whole: T = 0
   let frac = modf(number, &whole)
 
@@ -185,6 +201,9 @@ export function floatingPointToString<T>(number: T): String {
     }
     result = result.substring(length: result.length - 1)
   }
+
+  if negate
+    result.prepend("-")
 
   return result
 }
