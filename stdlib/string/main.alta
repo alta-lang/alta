@@ -285,4 +285,10 @@ export class String {
     }
     return false
   }
+
+  public this + String: String {
+    let other = new String(this)
+    other.append($)
+    return other
+  }
 }
