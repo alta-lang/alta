@@ -26,7 +26,7 @@ export class File {
   }
 
   public @copy constructor(other: ref File) {
-    this.open(other.path.data, other.mode.data)
+    this.open(other.path, other.mode)
   }
 
   public function open(path: rawconststring, mode: rawconststring): void {
@@ -35,8 +35,8 @@ export class File {
       this.handle = nullptr
       throw new OpenFailure
     }
-    this.path = new String(path)
-    this.mode = new String(mode)
+    this.path = path
+    this.mode = mode
   }
 
   public function close(): void {
@@ -58,16 +58,16 @@ export class File {
   public function read(count: Size): String {
     let str = new String(count)
     while count > INT_MAX {
-      if !stdio.fgets(str.data, INT_MAX, this.handle) {
+      if !stdio.fgets(str, INT_MAX, this.handle) {
         throw new ReadFailure
       }
       count -= INT_MAX
     }
     # `as int` isn't necessary, but it's used to silence a compiler warning
-    if !stdio.fgets(str.data, count as int, this.handle) {
+    if !stdio.fgets(str, count as int, this.handle) {
       throw new ReadFailure
     }
-    return str.substring(0, length: rawstringLength(str.data))
+    return str.substring(0, length: str.length)
   }
 
   public @read function valid(): bool {
@@ -91,29 +91,32 @@ export class File {
   }
 }
 
-export function print(data: (double | int | char | bool | String)...): void {
-  let result: String
-  for i: Size in 0..data.length {
-    let item = data[i]
-    if item instanceof String {
-      result.append(item as String)
-    } else if item instanceof double {
-      result.append(floatingPointToString<double>(item as double))
-    } else if item instanceof char {
-      result.append(item as char)
-    } else if item instanceof int {
-      result.append(numberToString<int>(item as int))
-    } else if item instanceof bool {
-      result.append((item as bool) ? "true" : "false")
-    } else {
-      # this is literally impossible, but just in case...
-      throw new InvalidArgument
-    }
+export type ConsoleData = double | int | char | bool | String
+
+function toString(data: ConsoleData): String {
+  if data instanceof String {
+    return data as String
+  } else if data instanceof double {
+    return floatingPointToString<double>(data as double)
+  } else if data instanceof char {
+    let char = data as char
+    return new String(&char, 1)
+  } else if data instanceof int {
+    return numberToString<int>(data as int)
+  } else if data instanceof bool {
+    return (data as bool) ? "true" : "false"
   }
-  stdio.printf("%s", result.data)
+  # this is literally impossible, but just in case...
+  throw new InvalidArgument
 }
 
-export function printLine(data: (double | int | char | bool | String)...): void {
+export function print(data: ConsoleData...): void {
+  for i: Size in 0..data.length {
+    stdio.printf("%s", toString(data[i]).data)
+  }
+}
+
+export function printLine(data: ConsoleData...): void {
   for i: Size in 0..data.length {
     print(data[i])
   }
@@ -122,6 +125,13 @@ export function printLine(data: (double | int | char | bool | String)...): void 
 
 export function printLine(message: rawconststring): void {
   stdio.printf("%s\n", message)
+}
+
+export function printError(data: ConsoleData...): void {
+  for i: Size in 0..data.length {
+    stdio.fprintf(stdio.stderr, "%s", toString(data[i]).data)
+  }
+  stdio.fprintf(stdio.stderr, "\n")
 }
 
 export function printError(message: rawconststring): void {

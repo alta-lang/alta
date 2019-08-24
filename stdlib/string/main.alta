@@ -304,6 +304,10 @@ export class String {
     return this.prepend($)
   }
 
+  public this ^= byte: ref String {
+    return this.prepend($)
+  }
+
   public this[Size]: ref byte {
     return this.charAt($)
   }

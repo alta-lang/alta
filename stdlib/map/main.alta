@@ -15,7 +15,7 @@ export generic class Map<K, V> {
   # @returns a reference to the value
   public function get(key: K): ref V {
     for i: Size in 0..this.keys.length {
-      if this.keys.get(i) == key {
+      if this.keys[i] == key {
         return this.values.get(i)
       }
     }
@@ -28,7 +28,7 @@ export generic class Map<K, V> {
   # @returns `true` if the key is present, `false` otherwise
   public function has(key: K): bool {
     for i: Size in 0..this.keys.length {
-      if this.keys.get(i) == key {
+      if this.keys[i] == key {
         return true
       }
     }
