@@ -39,25 +39,28 @@ export generic class Pair<T1, T2> {
 }
 
 export function parseFloatingPoint<T>(string: String): T {
-  if string.length < 1 return 0
+  if string.length < 1
+    return 0
   let first: Size = 0
   for i: Size in 0...string.length {
     if i == string.length {
       first = string.length
       break
     }
-    let char = string.charAt(i)
+    let char = string[i]
     if !(char >= '0' && char <= '9') {
       first = i
       break
     }
   }
-  if first == 0 && string.charAt(0) != '.' return 0
+  if first == 0 && string[0] != '.'
+    return 0
   let whole = parseNumber<T>(string.substring(0, to: first))
-  if first == string.length return whole
+  if first == string.length
+    return whole
 
   let isExponent = false
-  let charThere = string.charAt(first)
+  let charThere = string[first]
   if charThere == '.' {
     isExponent = false
   } else if charThere == 'e' || charThere == 'E' {
@@ -73,13 +76,14 @@ export function parseFloatingPoint<T>(string: String): T {
       second = string.length
       break
     }
-    let char = string.charAt(i)
+    let char = string[i]
     if !(char >= '0' && char <= '9') {
       second = i
       break
     }
   }
-  if second == first return whole
+  if second == first
+    return whole
 
   let secondPart = parseNumber<T>(string.substring(first, to: second))
 
@@ -87,8 +91,10 @@ export function parseFloatingPoint<T>(string: String): T {
     return whole * power<T>(10, secondPart)
   } else {
     let decimal = whole + (secondPart / power<T>(10, second - first))
-    if second == string.length return decimal
-    if string.charAt(second) != 'e' && string.charAt(second) != 'E' return decimal
+    if second == string.length
+      return decimal
+    if string[second] != 'e' && string[second] != 'E'
+      return decimal
 
     let third: Size = 0
     ;++second
@@ -97,13 +103,14 @@ export function parseFloatingPoint<T>(string: String): T {
         third = string.length
         break
       }
-      let char = string.charAt(i)
+      let char = string[i]
       if !(char >= '0' && char <= '9') {
         third = i
         break
       }
     }
-    if third == second return decimal
+    if third == second
+      return decimal
 
     let thirdPart = parseNumber<T>(string.substring(second, to: third))
 
@@ -129,7 +136,7 @@ export function numberToString<T>(number: T): String {
     let num = number % mod
     let digit: byte = num * 10 / mod
 
-    result.prepend(digit + '0')
+    result ^= digit + '0'
 
     number -= num
 
@@ -137,10 +144,10 @@ export function numberToString<T>(number: T): String {
   }
 
   if result.length == 0
-    result.append("0")
+    result += '0'
 
   if negate
-    result.prepend("-")
+    result += '-'
 
   return result
 }
@@ -162,14 +169,14 @@ export function floatingPointToString<T>(number: T): String {
     let num = fmod(whole, mod)
     let digit: byte = num * 10 / mod
 
-    result.prepend(digit + '0')
+    result ^= digit + '0'
 
     whole -= num
 
     ;++iteration
   }
 
-  result.append('.')
+  result += '.'
   iteration = 1
 
   while frac > 0 {
@@ -177,7 +184,7 @@ export function floatingPointToString<T>(number: T): String {
     let num = fmod(frac, mod)
     let digit: byte = (frac - num) / mod
 
-    result.append(digit + '0')
+    result += digit + '0'
 
     frac = num
     ;++iteration
@@ -189,10 +196,11 @@ export function floatingPointToString<T>(number: T): String {
     }
   }
 
-  if result.length == 0 || result.charAt(result.length - 1) == '.' result.append("0")
+  if result.length == 0 || result[result.length - 1] == '.'
+    result += '0'
 
   for i: Size in result.length::0 {
-    let char = result.charAt(i - 1)
+    let char = result[i - 1]
     if char != '0' {
       if char == '.' {
         result = result.substring(length: result.length - 1)
@@ -203,7 +211,7 @@ export function floatingPointToString<T>(number: T): String {
   }
 
   if negate
-    result.prepend("-")
+    result ^= '-'
 
   return result
 }

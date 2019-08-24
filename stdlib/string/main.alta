@@ -285,4 +285,30 @@ export class String {
     }
     return false
   }
+
+  public this + String: String {
+    let other = new String(this)
+    other.append($)
+    return other
+  }
+
+  public this += String: ref String {
+    return this.append($)
+  }
+
+  public this += byte: ref String {
+    return this.append($)
+  }
+
+  public this ^= String: ref String {
+    return this.prepend($)
+  }
+
+  public this ^= byte: ref String {
+    return this.prepend($)
+  }
+
+  public this[Size]: ref byte {
+    return this.charAt($)
+  }
 }

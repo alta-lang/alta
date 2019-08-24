@@ -101,4 +101,8 @@ export generic class Vector<T> {
     }
     return other
   }
+
+  public this[Size]: ref T {
+    return this.get($)
+  }
 }

@@ -18,6 +18,10 @@ class Environment {
       throw new InvalidKey
     return new String(tmp)
   }
+
+  public this[String]: String {
+    return this.get($)
+  }
 }
 
 let environment: Environment = new Environment
