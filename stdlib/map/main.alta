@@ -39,4 +39,8 @@ export generic class Map<K, V> {
   public function getKeys(): Vector<K> {
     return this.keys
   }
+
+  public this[K]: ref V {
+    return this.get($)
+  }
 }

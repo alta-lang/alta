@@ -10,6 +10,7 @@ export stdio.printf as printf
 export class OpenFailure extends Exception {}
 export class CloseFailure extends Exception {}
 export class ReadFailure extends Exception {}
+export class EndOfFile extends Exception {}
 
 export class File {
   private var handle: ptr stdio.FILE = nullptr
@@ -49,7 +50,8 @@ export class File {
 
   public function read(): byte {
     let char = stdio.fgetc(this.handle)
-    if char == stdio.EOF return '\0'
+    if char == stdio.EOF
+      throw new EndOfFile
     return char as byte
   }
 
@@ -82,6 +84,10 @@ export class File {
 
   public to ptr stdio.FILE {
     return this.handle
+  }
+
+  public to bool {
+    return this.valid
   }
 }
 
