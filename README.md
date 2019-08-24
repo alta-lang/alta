@@ -1,7 +1,18 @@
 # Alta
+[![Build Status](https://facekapow.visualstudio.com/alta/_apis/build/status/alta-lang.alta?branchName=master)](https://facekapow.visualstudio.com/alta/_build/latest?definitionId=1&branchName=master)
+[![License](https://img.shields.io/github/license/alta-lang/alta?color=%23428bff)](LICENSE)
+
 The modern alternative to C++
 
 This repository is home to both the language documentation and Alta's compiler CLI (command line interface).
+
+## Build Status
+
+| Platform | Status |
+| -------- | ------ |
+| Windows  | [![Build Status](https://facekapow.visualstudio.com/alta/_apis/build/status/alta-lang.alta?branchName=master&jobName=Windows)](https://facekapow.visualstudio.com/alta/_build/latest?definitionId=1&branchName=master) |
+| Linux    | [![Build Status](https://facekapow.visualstudio.com/alta/_apis/build/status/alta-lang.alta?branchName=master&jobName=Linux)](https://facekapow.visualstudio.com/alta/_build/latest?definitionId=1&branchName=master) |
+| macOS    | [![Build Status](https://facekapow.visualstudio.com/alta/_apis/build/status/alta-lang.alta?branchName=master&jobName=macOS)](https://facekapow.visualstudio.com/alta/_build/latest?definitionId=1&branchName=master) |
 
 ## Goals
 Alta is a modern alternative to C++, particularly aimed at improving simplicity, readability, and flexibility. At its core, Alta is very similar to C++: both aim to make it easier to directly express intent, and both aim to make it easier for programmers to write safe code and catch errors *at compile-time*. However, where C++ is restricted by an ISO standards committee and a large userbase, Alta is a new language that can take those goals to a new level.
