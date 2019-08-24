@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.10)
 
 project(alta)
 
+# don't treat warnings as errors
+# why is this even default behavior in the first place?
+# cmake, stop. just stop.
+string(REPLACE " -Werror" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+string(REPLACE " /WX" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+string(REPLACE " -Werror" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+string(REPLACE " /WX" "" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+
 # we only need to add Talta
 # it'll automatically pull in AltaCore as well
 # btw, we add EXCLUDE_FROM_ALL to prevent the the subdirectories
