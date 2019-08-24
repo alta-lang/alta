@@ -1,7 +1,7 @@
 jobs:
 - job: Linux
   pool:
-    vmImage: "ubuntu-16.04"
+    vmImage: "ubuntu-latest"
   steps:
   # set up GCC 7 (required to build because we use C++17)
   # and install uuid-dev (dependency of crossguid)
@@ -76,7 +76,7 @@ jobs:
 
 - job: Windows
   pool:
-    vmImage: "vs2017-win2016"
+    vmImage: "windows-latest"
   steps:
   # configure it
   - task: CMake@1
@@ -150,7 +150,7 @@ jobs:
 
 - job: macOS
   pool:
-    vmImage: "macOS-10.13"
+    vmImage: "macOS-latest"
   steps:
   # if this is a tagged commit, build for release
   - task: CMake@1
