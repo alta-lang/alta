@@ -14,7 +14,7 @@ export class SysctlError extends Exception {}
 declare literal var CTL_KERN: const int
 declare literal var KERN_ARGMAX: const int
 
-declare literal function sysctl(name: ptr int, nameLength: unsigned int, oldBuffer: ptr void, oldLength: ptr Size, newBuffer: ptr void, newLength: ptr Size)
+declare literal function sysctl(name: ptr int, nameLength: unsigned int, oldBuffer: ptr void, oldLength: ptr Size, newBuffer: ptr void, newLength: ptr Size): int
 declare literal function getpid(): int
 
 export function rawArgs(): Vector<String> {
