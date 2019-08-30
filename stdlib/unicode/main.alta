@@ -1,0 +1,197 @@
+import uint8, uint16, uint32, Size from "types"
+import Exception from "exceptions"
+import Vector from "vector"
+
+export class UnpairedSurrogate extends Exception {}
+
+#
+# @section utilities
+#
+
+export function detectRequiredUTF8Bytes(leadingByte: uint8): uint8 {
+  let bytes: uint8 = 1
+
+  if leadingByte & (1 << 7) {
+    for i: Size in 6:::4 {
+      ;++bytes
+    }
+  }
+
+  return bytes
+}
+
+export function detectRequiredUTF8BytesForUTF32(utf32: uint32): uint8 {
+  if utf32 <= 0x7f {
+    return 1
+  } else if utf32 <= 0x07ff {
+    return 2
+  } else if utf32 <= 0xffff {
+    return 3
+  } else {
+    return 4
+  }
+}
+
+export function isSurrogateLeadingUnit(leadingUnit: uint16): bool {
+  return leadingUnit >= 0xd800 && leadingUnit <= 0xdbff
+}
+
+export function isSurrogateTrailingUnit(trailingUnit: uint16): bool {
+  return trailingUnit >= 0xdc00 && trailingUnit <= 0xdfff
+}
+
+export function needsSurrogatePair(utf32: uint32): bool {
+  return utf32 > 0xffff
+}
+
+export function split(utf16: Vector<uint16>, littleEndian: bool): Vector<uint8> {
+  let result = new Vector<uint8>(utf16.length * 2)
+
+  for i: Size in 0..utf16.length {
+    result[i * 2] = utf16[i] & 0xff00
+    result[i * 2 + 1] = utf16[i] & 0x00ff
+  }
+
+  if littleEndian {
+    for i: Size in 0..utf16.length {
+      let tmp: uint8 = result[i * 2]
+      result[i * 2] = result[i * 2 + 1]
+      result[i * 2 + 1] = tmp
+    }
+  }
+
+  return result
+}
+
+export function split(utf32: uint32, littleEndian: bool): Vector<uint8> {
+  let result = new Vector<uint8>(4)
+
+  result[0] = utf32 & 0xff000000
+  result[1] = utf32 & 0x00ff0000
+  result[2] = utf32 & 0x0000ff00
+  result[3] = utf32 & 0x000000ff
+
+  if littleEndian {
+    let tmp: uint8 = result[0]
+    result[0] = result[3]
+    result[3] = tmp
+
+    tmp = result[1]
+    result[1] = result[2]
+    result[2] = tmp
+  }
+
+  return result
+}
+
+#
+# @end section
+#
+
+export function utf16ToUTF32(utf16: Vector<uint16>): uint32 {
+  let code: uint32 = 0
+
+  if isSurrogateLeadingUnit(utf16[0]) {
+    if utf16.length < 2
+      throw new UnpairedSurrogate
+    code = ((utf16[0] - 0xd800) << 10 | (utf16[1] - 0xdc00)) + 0x10000
+  } else if isSurrogateTrailingUnit(utf16[0]) {
+    throw new UnpairedSurrogate
+  } else {
+    code = utf16[0]
+  }
+
+  return code
+}
+
+bitfield UTF8MultiByte: uint32 {
+  first = 0..6;
+  second = 6..12;
+  third = 12..18;
+  fourth = 18..21;
+}
+
+export function utf32ToUTF8(utf32: uint32): Vector<uint8> {
+  let bytes = detectRequiredUTF8BytesForUTF32(utf32)
+  let result = new Vector<uint8>(bytes)
+
+  result.first = bytes == 1 ? 0 : 0b11110000
+
+  if bytes > 1
+    result.first = result.first << (4 - bytes) as byte
+
+  if bytes == 1 {
+    result.first = utf32 & 0x7f
+  } else {
+    let overlay = utf32 as UTF8MultiByte
+
+    let choose = (i: byte) => byte {
+      return i < 4 ? i < 3 ? i < 2 ? overlay.first : overlay.second : overlay.third : overlay.fourth
+    }
+
+    for i: byte in 1..bytes {
+      result[bytes - i] = 0b10000000 | choose(i)
+    }
+
+    result.first |= choose(bytes)
+  }
+
+  return result
+}
+
+export function utf16ToUTF8(utf16: Vector<uint16>): Vector<uint8> {
+  return utf32ToUTF8(utf16ToUTF32(utf16))
+}
+
+export function utf32ToUTF16(utf32: uint32): Vector<uint16> {
+  let result = new Vector<uint16>
+
+  if needsSurrogatePair(utf32) {
+    let base = utf32 - 0x10000
+    result.push(0xd800 + ((base >> 10) & 0b1111111111)) # high
+    result.push(0xdc00 + (base & 0b1111111111)) # low
+  } else {
+    result.push(utf32)
+  }
+
+  return result
+}
+
+export function utf8ToUTF32(utf8: Vector<uint8>): uint32 {
+  let bytes = detectRequiredUTF8Bytes(utf8[0])
+
+  if bytes == 1
+    return utf8[0]
+
+  let result: UTF8MultiByte = 0
+
+  let assign = (i: byte, val: uint8) => void {
+    if i < 2 {
+      result.first = val
+    } else if i < 3 {
+      result.second = val
+    } else if i < 4 {
+      result.third = val
+    } else {
+      result.fourth = val
+    }
+  }
+
+  for i: byte in 1..bytes {
+    assign(i, utf8[bytes - i] & 0b00111111)
+  }
+
+  let mask: uint8 = 0b01111111
+
+  for i: Size in 1..bytes {
+    mask = mask >> 1
+  }
+
+  assign(bytes, utf8[0] & mask)
+
+  return result
+}
+
+export function utf8ToUTF16(utf8: Vector<uint8>): Vector<uint16> {
+  return utf32ToUTF16(utf8ToUTF32(utf8))
+}

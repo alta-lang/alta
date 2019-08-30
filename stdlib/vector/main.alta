@@ -3,6 +3,7 @@ import Size from "types"
 import Exception from "exceptions"
 
 export class ResizeFailure extends Exception {}
+export class InvalidIndex extends Exception {}
 
 export generic class Vector<T> {
   private var _data: ptr T = nullptr
@@ -52,6 +53,8 @@ export generic class Vector<T> {
   }
 
   public function get(index: Size): ref T {
+    if index >= this._length
+      throw new InvalidIndex
     return this._data[index]
   }
 
