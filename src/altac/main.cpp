@@ -906,7 +906,7 @@ int main(int argc, char** argv) {
 
         //outfileC << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
         outfileC << "#include \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
-        outfileC << cRoot->toString();
+        outfileC << cRoot->toStringWithComments();
 
         for (size_t i = 0; i < gRoots.size(); i++) {
           auto& gRoot = gRoots[i];
@@ -917,7 +917,7 @@ int main(int argc, char** argv) {
           //outfileG << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
           outfileG << "#define " + gName + "\n";
           outfileG << "#include \"" << hOut.relativeTo(gOut).toString('/') << "\"\n";
-          outfileG << gRoot->toString();
+          outfileG << gRoot->toStringWithComments();
         }
 
         auto mangledModuleName = Talta::mangleName(mod.get());
@@ -932,14 +932,14 @@ int main(int argc, char** argv) {
         // include the index in the module's header, otherwise we won't be able to find our dependencies
         outfileH << "#include \"" << indexHeaderPath.relativeTo(hOut).toString('/') << "\"\n";
 
-        outfileH << hRoot->toString();
+        outfileH << hRoot->toStringWithComments();
 
         outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << cOut.relativeTo(modOutDir).toString('/') << "\"\n";
         manifest["targets"][target.name][mod->packageInfo.name]["sources"].push_back(cOut.absolutify().normalize().toString());
         manifest["targets"][target.name][mod->packageInfo.name]["headers"].push_back(hOut.absolutify().normalize().toString());
         manifest["targets"][target.name][mod->packageInfo.name]["definition-headers"].push_back(dOut.absolutify().normalize().toString());
 
-        outfileD << dRoot->toString();
+        outfileD << dRoot->toStringWithComments();
         outfileD.close();
 
         // finally, add our header to the index for all our dependents

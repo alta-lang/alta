@@ -7,6 +7,27 @@ import INT_MAX from "libc/lib/limits"
 
 export stdio.printf as printf
 
+##if platform == "windows"
+@@CTranspiler.include("Windows.h");
+
+declare literal function SetConsoleCP(cp: unsigned int): int
+declare literal function SetConsoleOutputCP(cp: unsigned int): int
+
+declare literal var CP_UTF8: const unsigned int
+
+let utf8Set = false
+##end if
+
+function ensureUTF8Output(): void {
+##if platform == "windows"
+  if !utf8Set {
+    utf8Set = true
+    SetConsoleCP(CP_UTF8)
+    SetConsoleOutputCP(CP_UTF8)
+  }
+##end if
+}
+
 export class OpenFailure extends Exception {}
 export class CloseFailure extends Exception {}
 export class ReadFailure extends Exception {}
@@ -111,6 +132,7 @@ function toString(data: ConsoleData): String {
 }
 
 export function print(data: ConsoleData...): void {
+  ensureUTF8Output()
   for i: Size in 0..data.length {
     stdio.printf("%s", toString(data[i]).data)
   }
@@ -124,10 +146,12 @@ export function printLine(data: ConsoleData...): void {
 }
 
 export function printLine(message: rawconststring): void {
+  ensureUTF8Output()
   stdio.printf("%s\n", message)
 }
 
 export function printError(data: ConsoleData...): void {
+  ensureUTF8Output()
   for i: Size in 0..data.length {
     stdio.fprintf(stdio.stderr, "%s", toString(data[i]).data)
   }
@@ -135,5 +159,6 @@ export function printError(data: ConsoleData...): void {
 }
 
 export function printError(message: rawconststring): void {
+  ensureUTF8Output()
   stdio.fprintf(stdio.stderr, "%s\n", message)
 }
