@@ -13,6 +13,10 @@ _Alta_runtime_export void _Alta_init_global_runtime() {
   _Alta_global_runtime.lastError.isNative = _Alta_bool_true;
   _Alta_global_runtime.lastError.typeName = "";
 
+  _Alta_global_runtime.functionTable.keys = malloc(0);
+  _Alta_global_runtime.functionTable.entries = malloc(0);
+  _Alta_global_runtime.functionTable.count = 0;
+
   _Alta_global_runtime.inited = _Alta_bool_true;
 };
 
@@ -295,6 +299,10 @@ _Alta_runtime_export _Alta_basic_class* _Alta_get_real_version(_Alta_basic_class
   return (klass->_Alta_class_info_struct.realOffset < PTRDIFF_MAX) ? (_Alta_basic_class*)((char*)klass - klass->_Alta_class_info_struct.realOffset) : klass;
 };
 
+_Alta_runtime_export _Alta_basic_class* _Alta_get_root_instance(_Alta_basic_class* klass) {
+  return (_Alta_basic_class*)((char*)klass - klass->_Alta_class_info_struct.baseOffset);
+};
+
 _Alta_runtime_export void _Alta_reset_error(size_t index) {
   if (!_Alta_global_runtime.inited) return;
   _Alta_error_container* err = &_Alta_global_runtime.lastError;
@@ -379,4 +387,48 @@ _Alta_runtime_export void _Alta_bad_cast(const char* from, const char* to) {
   printf("bad cast from %s to %s\n", from, to);
   abort();
 #endif
+};
+
+_Alta_runtime_export void* _Alta_lookup_virtual_function(const char* className, const char* signature) {
+  _Alta_function_table* table = &_Alta_global_runtime.functionTable;
+
+  size_t firstLen = strlen(className);
+  size_t secondLen = strlen(signature);
+  char* key = malloc((firstLen + secondLen + 2) * sizeof (char));
+
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4996)
+#endif // _MSC_VER
+
+  strncpy(key, className, firstLen);
+  strncpy(key + firstLen + 1, signature, secondLen);
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif // _MSC_VER
+
+  key[firstLen] = '$';
+
+  key[firstLen + secondLen + 1] = '\0';
+
+  for (size_t i = 0; i < table->count; ++i) {
+    if (strcmp(table->keys[i], key) == 0) {
+      free(key);
+      return table->entries[i];
+    }
+  }
+
+  free(key);
+  return NULL;
+};
+
+_Alta_runtime_export void _Alta_register_virtual_function(const char* classNameAndSignature, void* functionPointer) {
+  _Alta_function_table* table = &_Alta_global_runtime.functionTable;
+
+  table->keys = realloc(table->keys, (++table->count) * sizeof(const char*));
+  table->entries = realloc(table->entries, table->count * sizeof(void*));
+
+  table->keys[table->count - 1] = classNameAndSignature;
+  table->entries[table->count - 1] = functionPointer;
 };

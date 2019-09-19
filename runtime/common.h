@@ -62,6 +62,9 @@ typedef struct __Alta_global_runtime_type {
   _Alta_generic_stack otherPersistent;
 
   _Alta_error_container lastError;
+
+  // function table used to store virtual function addresses
+  _Alta_function_table functionTable;
 } _Alta_global_runtime_type;
 
 extern _Alta_global_runtime_type _Alta_global_runtime;
@@ -88,6 +91,7 @@ _Alta_runtime_export void _Alta_common_dtor(_Alta_basic_class* klass, _Alta_bool
 
 _Alta_runtime_export _Alta_basic_class* _Alta_get_child(_Alta_basic_class* klass, size_t count, ...);
 _Alta_runtime_export _Alta_basic_class* _Alta_get_real_version(_Alta_basic_class* klass);
+_Alta_runtime_export _Alta_basic_class* _Alta_get_root_instance(_Alta_basic_class* klass);
 
 _Alta_runtime_export void _Alta_reset_error(size_t index);
 _Alta_runtime_export jmp_buf* _Alta_push_error_handler(const char* type);
@@ -98,5 +102,8 @@ _Alta_runtime_export void _Alta_restore_state(const _Alta_runtime_state state);
 
 _Alta_runtime_export void _Alta_uncaught_error(const char* typeName);
 _Alta_runtime_export void _Alta_bad_cast(const char* from, const char* to);
+
+_Alta_runtime_export void* _Alta_lookup_virtual_function(const char* className, const char* signature);
+_Alta_runtime_export void _Alta_register_virtual_function(const char* classNameAndSignature, void* functionPointer);
 
 #endif /* _ALTA_RUNTIME_COMMON_H */

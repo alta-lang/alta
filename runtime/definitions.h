@@ -153,4 +153,10 @@ typedef struct __Alta_runtime_state {
   size_t otherIndex;
 } _Alta_runtime_state;
 
+typedef struct __Alta_function_table {
+  size_t count;
+  const char** keys;
+  void** entries;
+} _Alta_function_table;
+
 #endif // _ALTA_RUNTIME_DEFINITIONS_H
