@@ -426,9 +426,24 @@ _Alta_runtime_export void* _Alta_lookup_virtual_function(const char* className, 
 _Alta_runtime_export void _Alta_register_virtual_function(const char* classNameAndSignature, void* functionPointer) {
   _Alta_function_table* table = &_Alta_global_runtime.functionTable;
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4090)
+#endif // _MSC_VER
+
   table->keys = realloc(table->keys, (++table->count) * sizeof(const char*));
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif // _MSC_VER
+
   table->entries = realloc(table->entries, table->count * sizeof(void*));
 
   table->keys[table->count - 1] = classNameAndSignature;
   table->entries[table->count - 1] = functionPointer;
+};
+
+_Alta_runtime_export void _Alta_invalid_return_value() {
+  printf("ERROR: invalid/absent return value\n");
+  abort();
 };

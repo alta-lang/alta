@@ -106,4 +106,6 @@ _Alta_runtime_export void _Alta_bad_cast(const char* from, const char* to);
 _Alta_runtime_export void* _Alta_lookup_virtual_function(const char* className, const char* signature);
 _Alta_runtime_export void _Alta_register_virtual_function(const char* classNameAndSignature, void* functionPointer);
 
+_Alta_runtime_export void _Alta_invalid_return_value();
+
 #endif /* _ALTA_RUNTIME_COMMON_H */
