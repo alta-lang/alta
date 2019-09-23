@@ -2,30 +2,41 @@ import rawconststring, Size from "types"
 import power from "math"
 import rawstringLength, String from "string"
 import fmod, modf from "libc/lib/math"
+import Exception from "exceptions"
 
-export function parseNumber<T>(string: rawconststring, length: Size): T {
+export class InvalidDigit extends Exception {}
+export class InvalidRadix extends Exception {}
+
+export function parseNumber<T>(string: String, radix: Size): T {
+  if radix > 36
+    throw new InvalidRadix
+
   let result: T = 0
   let negate = false
 
-  for i: Size in 0..length {
+  for i: Size in 0..string.length {
     let digit = 0
 
     if i == 0 && string[i] == '-' {
       negate = true
     } else if string[i] >= '0' && string[i] <= '9' {
       digit = string[i] - '0'
+    } else if string[i] >= 'a' && string[i] <= 'z' {
+      digit = string[i] - 'a' + 10
+    } else if string[i] >= 'A' && string[i] <= 'Z' {
+      digit = string[i] - 'A' + 10
     } else {
-      # TODO: throw an error
+      throw new InvalidDigit
     }
 
-    result += digit * power<T>(10, length - (i + 1))
+    result += digit * power<T>(radix, string.length - (i + 1))
   }
 
   return negate ? -result : result
 }
 
-export function parseNumber<T>(string: rawconststring): T {
-  return parseNumber<T>(string, rawstringLength(string))
+export function parseNumber<T>(string: String): T {
+  return parseNumber<T>(string, 10)
 }
 
 export generic class Pair<T1, T2> {
@@ -38,7 +49,9 @@ export generic class Pair<T1, T2> {
   }
 }
 
-export function parseFloatingPoint<T>(string: String): T {
+export function parseFloatingPoint<T>(string: String, radix: Size): T {
+  if radix > 36
+    throw new InvalidRadix
   if string.length < 1
     return 0
   let first: Size = 0
@@ -48,14 +61,18 @@ export function parseFloatingPoint<T>(string: String): T {
       break
     }
     let char = string[i]
-    if !(char >= '0' && char <= '9') {
+    if !(
+      (char >= '0' && char <= '9') ||
+      (char >= 'a' && char <= 'z') ||
+      (char >= 'A' && char <= 'Z')
+    ) {
       first = i
       break
     }
   }
   if first == 0 && string[0] != '.'
     return 0
-  let whole = parseNumber<T>(string.substring(0, to: first))
+  let whole = parseNumber<T>(string.substring(0, to: first), radix)
   if first == string.length
     return whole
 
@@ -63,7 +80,7 @@ export function parseFloatingPoint<T>(string: String): T {
   let charThere = string[first]
   if charThere == '.' {
     isExponent = false
-  } else if charThere == 'e' || charThere == 'E' {
+  } else if charThere == 'e' || charThere == 'E' || charThere == 'p' || charThere == 'P' {
     isExponent = true
   } else {
     return whole
@@ -77,7 +94,11 @@ export function parseFloatingPoint<T>(string: String): T {
       break
     }
     let char = string[i]
-    if !(char >= '0' && char <= '9') {
+    if !(
+      (char >= '0' && char <= '9') ||
+      (char >= 'a' && char <= 'z') ||
+      (char >= 'A' && char <= 'Z')
+    ) {
       second = i
       break
     }
@@ -85,12 +106,12 @@ export function parseFloatingPoint<T>(string: String): T {
   if second == first
     return whole
 
-  let secondPart = parseNumber<T>(string.substring(first, to: second))
+  let secondPart = parseNumber<T>(string.substring(first, to: second), radix)
 
   if isExponent {
     return whole * power<T>(10, secondPart)
   } else {
-    let decimal = whole + (secondPart / power<T>(10, second - first))
+    let decimal = whole + (secondPart / power<T>(radix, second - first))
     if second == string.length
       return decimal
     if string[second] != 'e' && string[second] != 'E'
@@ -104,7 +125,11 @@ export function parseFloatingPoint<T>(string: String): T {
         break
       }
       let char = string[i]
-      if !(char >= '0' && char <= '9') {
+      if !(
+        (char >= '0' && char <= '9') ||
+        (char >= 'a' && char <= 'z') ||
+        (char >= 'A' && char <= 'Z')
+      ) {
         third = i
         break
       }
@@ -112,17 +137,19 @@ export function parseFloatingPoint<T>(string: String): T {
     if third == second
       return decimal
 
-    let thirdPart = parseNumber<T>(string.substring(second, to: third))
+    let thirdPart = parseNumber<T>(string.substring(second, to: third), radix)
 
     return decimal * power<T>(10, thirdPart)
   }
 }
 
-export function parseFloatingPoint<T>(string: rawconststring, length: Size): T {
-  return parseFloatingPoint<T>(new String(string, length))
+export function parseFloatingPoint<T>(string: String): T {
+  return parseFloatingPoint<T>(string, 10)
 }
 
-export function numberToString<T>(number: T): String {
+export function numberToString<T>(number: T, radix: Size): String {
+  if radix > 36
+    throw new InvalidRadix
   let negate = false
   if number < 0 {
     negate = true
@@ -132,11 +159,15 @@ export function numberToString<T>(number: T): String {
   let result = new String
   let iteration = 1
   while number >= 1 {
-    let mod = power<T>(10, iteration)
+    let mod = power<T>(radix, iteration)
     let num = number % mod
-    let digit: byte = num * 10 / mod
+    let digit: byte = num * radix / mod
 
-    result ^= digit + '0'
+    if digit < 10 {
+      result ^= digit + '0'
+    } else {
+      result ^= digit - 10 + 'a'
+    }
 
     number -= num
 
@@ -147,12 +178,18 @@ export function numberToString<T>(number: T): String {
     result += '0'
 
   if negate
-    result += '-'
+    result ^= '-'
 
   return result
 }
 
-export function floatingPointToString<T>(number: T): String {
+export function numberToString<T>(number: T): String {
+  return numberToString<T>(number, 10)
+}
+
+export function floatingPointToString<T>(number: T, radix: Size): String {
+  if radix > 36
+    throw new InvalidRadix
   let negate = false
   if number < 0 {
     negate = true
@@ -165,11 +202,15 @@ export function floatingPointToString<T>(number: T): String {
   let result = new String
   let iteration = 1
   while whole >= 1 {
-    let mod = power<T>(10, iteration)
+    let mod = power<T>(radix, iteration)
     let num = fmod(whole, mod)
-    let digit: byte = num * 10 / mod
+    let digit: byte = num * radix / mod
 
-    result ^= digit + '0'
+    if digit < 10 {
+      result ^= digit + '0'
+    } else {
+      result ^= digit - 10 + 'a'
+    }
 
     whole -= num
 
@@ -180,11 +221,15 @@ export function floatingPointToString<T>(number: T): String {
   iteration = 1
 
   while frac > 0 {
-    let mod = power<T>(10, -iteration)
+    let mod = power<T>(radix, -iteration)
     let num = fmod(frac, mod)
     let digit: byte = (frac - num) / mod
 
-    result += digit + '0'
+    if digit < 10 {
+      result += digit + '0'
+    } else {
+      result += digit - 10 + 'a'
+    }
 
     frac = num
     ;++iteration
@@ -214,4 +259,8 @@ export function floatingPointToString<T>(number: T): String {
     result ^= '-'
 
   return result
+}
+
+export function floatingPointToString<T>(number: T): String {
+  return floatingPointToString<T>(number, 10)
 }

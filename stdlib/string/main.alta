@@ -156,6 +156,27 @@ export class CodePoint {
   public @read function bytes(): rawconststring {
     return this.data
   }
+
+  public this == CodePoint: bool {
+    if this.byteLength != $.byteLength
+      return false
+
+    let thisByteIndex = this.byteIndex
+    let thatByteIndex = $.byteIndex
+
+    for i: Size in 0..this.byteLength {
+      if this.bytes[thisByteIndex + i] != $.bytes[thatByteIndex + i]
+        return false
+    }
+
+    return true
+  }
+
+  # TODO: automatically create operator methods when corresponding operator methods are provided
+  #       e.g. automatically create `!=` if `==` is provided
+  public this != CodePoint: bool {
+    return !(this == $)
+  }
 }
 
 # A basic, UTF8 string container
@@ -224,6 +245,23 @@ export class String {
     for i: Size in 0...this._length {
       this._data[i] = '\0'
     }
+
+##if STRING_DEBUG
+    printf("constructed a new String (%llu)\n", this.uuid)
+##end if
+  }
+
+  public @from constructor(data: ref CodePoint) {
+    this._length = data.byteLength
+    this._data = allocate<byte>(this._length + 1)
+
+    let thatByteIndex = data.byteIndex
+
+    for i: Size in 0..this._length {
+      this._data[i] = data.bytes[thatByteIndex + i]
+    }
+
+    this._data[this._length] = '\0'
 
 ##if STRING_DEBUG
     printf("constructed a new String (%llu)\n", this.uuid)
@@ -368,7 +406,7 @@ export class String {
   }
 
   public function append(data: CodePoint): ref String {
-    return this.append(data.bytes, data.byteLength)
+    return this.append(data.bytes + data.byteIndex, data.byteLength)
   }
 
   public function substring(from: Size, to: Size): String {
@@ -426,7 +464,7 @@ export class String {
   }
 
   public function prepend(data: CodePoint): ref String {
-    return this.prepend(data.bytes, data.byteLength)
+    return this.prepend(data.bytes + data.byteLength, data.byteLength)
   }
 
   public function includes(data: byte...): bool {
