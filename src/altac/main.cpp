@@ -10,6 +10,7 @@
 #include "../include/cli.hpp"
 #include <crossguid/guid.hpp>
 #include <json.hpp>
+#include <picosha2.h>
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <Windows.h>
@@ -192,6 +193,28 @@ nlohmann::json packageInfoToJSON(const AltaCore::Modules::PackageInfo info) {
   return result;
 };
 
+bool checkHashes(const AltaCore::Filesystem::Path filepath, const std::stringstream& otherContent) {
+  std::string line;
+  std::ifstream file(filepath.toString());
+  picosha2::hash256_one_by_one fileHasher;
+  picosha2::hash256_one_by_one stringHasher;
+
+  while (std::getline(file, line)) {
+    fileHasher.process(line.begin(), line.end());
+  }
+  fileHasher.finish();
+
+  std::string asString = otherContent.str();
+  std::istringstream stringStream(asString);
+
+  while (std::getline(stringStream, line)) {
+    stringHasher.process(line.begin(), line.end());
+  }
+  stringHasher.finish();
+
+  return picosha2::get_hash_hex_string(fileHasher) == picosha2::get_hash_hex_string(stringHasher);
+};
+
 int main(int argc, char** argv) {
   using json = nlohmann::json;
   using Option = CLI::Option;
@@ -279,6 +302,13 @@ int main(int argc, char** argv) {
       .description("Specifies a custom standard library directory to use when building modules")
       .valueDescription("Folder path")
       ;
+    auto outputTypeOption = Option()
+      .shortID("ot")
+      .longID("output-type")
+      .description("Specifies a custom output type (executable, library, etc.) for the target")
+      .valueDescription("Output type (`exe` or `lib`)")
+      .defaultValue("")
+      ;
 
     parser
       .add(compileSwitch)
@@ -294,6 +324,7 @@ int main(int argc, char** argv) {
       .add(hideWarningFlag)
       .add(runtimeOverride)
       .add(stdlibOverride)
+      .add(outputTypeOption)
       .parse(argc, argv)
       ;
 
@@ -304,6 +335,7 @@ int main(int argc, char** argv) {
     auto searchDirs = searchFlag.values();
     auto prioritySearchDirs = prioritySearchFlag.values();
     auto hiddenWarnings = hideWarningFlag.values();
+    auto outputType = outputTypeOption.value();
 
     for (auto warning: hiddenWarnings) {
       if (std::find(CLI::knownWarnings, CLI::knownWarnings + CLI::knownWarnings_count, warning) == CLI::knownWarnings + CLI::knownWarnings_count) {
@@ -475,12 +507,49 @@ int main(int argc, char** argv) {
         targetInfo.name = fn.filename();
         targets.push_back(targetInfo);
       }
+      if (!outputType.empty()) {
+        if (outputType.substr(0, 3) == "exe") {
+          targets.front().type = AltaCore::Modules::OutputBinaryType::Exectuable;
+        } else if (outputType.substr(0, 3) == "lib") {
+          targets.front().type = AltaCore::Modules::OutputBinaryType::Library;
+        } else {
+          std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": invalid output type provided" << std::endl;
+          return 15;
+        }
+      }
     }
 
     AltaCore::Filesystem::mkdirp(outDir);
 
     auto outdirRuntime = outDir / "_runtime";
-    AltaCore::Filesystem::copyDirectory(runtimePath, outdirRuntime);
+    auto runtimeFiles = getDirectoryListing(runtimePath, true);
+    mkdirp(outdirRuntime);
+    for (auto& file: runtimeFiles) {
+      auto relPath = file.relativeTo(runtimePath);
+      if (file.isDirectory()) {
+        mkdirp(outdirRuntime / relPath);
+      } else {
+        mkdirp(file.dirname());
+        bool output = true;
+        auto outpath = outdirRuntime / relPath;
+        if (outpath.exists()) {
+          std::ifstream fileIn(file.toString(), std::ios::in | std::ios::binary);
+          std::ifstream fileOut(outpath.toString(), std::ios::in | std::ios::binary);
+          std::vector<unsigned char> hashIn(picosha2::k_digest_size);
+          std::vector<unsigned char> hashOut(picosha2::k_digest_size);
+          picosha2::hash256(fileIn, hashIn.begin(), hashIn.end());
+          picosha2::hash256(fileOut, hashOut.begin(), hashOut.end());
+          auto hashInString = picosha2::bytes_to_hex_string(hashIn.begin(), hashIn.end());
+          auto hashOutString = picosha2::bytes_to_hex_string(hashOut.begin(), hashOut.end());
+          if (hashInString == hashOutString) {
+            output = false;
+          }
+        }
+        if (output) {
+          copyFile(file, outpath);
+        }
+      }
+    }
 
     manifest["runtime"] = {
       {"path", outdirRuntime.absolutify().normalize().toString()},
@@ -501,7 +570,7 @@ int main(int argc, char** argv) {
     }
     runtimeCmakeLists << "if (NOT TARGET alta-global-runtime)\n";
     runtimeCmakeLists << "  add_library(alta-global-runtime\n";
-    auto runtimeFiles = AltaCore::Filesystem::getDirectoryListing(outdirRuntime, true);
+    runtimeFiles = AltaCore::Filesystem::getDirectoryListing(outdirRuntime, true);
     for (auto& runtimeFile: runtimeFiles) {
       if (runtimeFile.extname() == "c") {
         runtimeCmakeLists << "    \"${PROJECT_SOURCE_DIR}/" << runtimeFile.relativeTo(outdirRuntime).toString('/') << "\"\n";
@@ -799,30 +868,28 @@ int main(int argc, char** argv) {
       AltaCore::Attributes::clearAllAttributes();
 
       auto indexHeaderPath = outDir / "index.h";
-      std::ofstream outfileIndex(indexHeaderPath.toString());
+      std::stringstream outstringIndex;
 
       auto generalCmakeListsPath = outDir / "CMakeLists.txt";
       std::ofstream generalCmakeLists(generalCmakeListsPath.toString());
 
       auto dummySourcePath = outDir / "dummy.c";
-      std::ofstream dummySource(dummySourcePath.toString());
 
-      dummySource << "\n";
-      dummySource.close();
+      if (!dummySourcePath.exists()) {
+        std::ofstream dummySource(dummySourcePath.toString());
+        dummySource << "\n";
+        dummySource.close();
+      }
 
       ALTACORE_MAP<std::string, std::pair<std::ofstream, AltaCore::Modules::PackageInfo>> cmakeListsCollection;
       ALTACORE_MAP<std::string, std::set<std::string>> packageDependencies;
       ALTACORE_MAP<std::string, std::vector<std::shared_ptr<AltaCore::DET::ScopeItem>>> genericsUsed;
 
-      std::stringstream uuidStream;
-      uuidStream << xg::newGuid();
-
-      std::string indexUUID = uuidStream.str();
-      std::replace(indexUUID.begin(), indexUUID.end(), '-', '_');
+      std::string indexUUID = picosha2::hash256_hex_string(target.main.toString() + ':' + target.name + ':' + std::to_string((size_t)target.type));
 
       // setup index header
-      outfileIndex << "#ifndef _ALTA_INDEX_" << indexUUID << '\n';
-      outfileIndex << "#define _ALTA_INDEX_" << indexUUID << '\n';
+      outstringIndex << "#ifndef _ALTA_INDEX_" << indexUUID << '\n';
+      outstringIndex << "#define _ALTA_INDEX_" << indexUUID << '\n';
 
       // setup root cmakelists
       generalCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
@@ -872,15 +939,15 @@ int main(int argc, char** argv) {
           return 1;
         }
 
-        std::ofstream outfileC(cOut.toString());
-        std::ofstream outfileH(hOut.toString());
-        std::ofstream outfileD(dOut.toString());
-        std::vector<std::ofstream> outfileGs;
+        std::stringstream outstringC;
+        std::stringstream outstringH;
+        std::stringstream outstringD;
+        std::vector<std::stringstream> outstringGs;
 
         for (size_t i = 0; i < gRoots.size(); i++) {
           auto gOut = base + "-" + std::to_string(i) + ".c";
           gOuts.push_back(gOut);
-          outfileGs.push_back(std::ofstream(gOut.toString()));
+          outstringGs.push_back(std::stringstream());
         }
 
         if (cmakeListsCollection.find(mod->packageInfo.name) == cmakeListsCollection.end()) {
@@ -905,50 +972,102 @@ int main(int argc, char** argv) {
         auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
 
         //outfileC << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
-        outfileC << "#include \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
-        outfileC << cRoot->toStringWithComments();
+        outstringC << "#include \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
+        outstringC << cRoot->toString();
 
         for (size_t i = 0; i < gRoots.size(); i++) {
           auto& gRoot = gRoots[i];
-          auto& outfileG = outfileGs[i];
+          auto& outstringG = outstringGs[i];
           auto& gOut = gOuts[i];
           auto& gItem = gItems[i];
           auto gName = Talta::headerMangle(gItem.get());
           //outfileG << "#define _ALTA_MODULE_ALL_" << Talta::mangleName(mod.get()) << "\n";
-          outfileG << "#define " + gName + "\n";
-          outfileG << "#include \"" << hOut.relativeTo(gOut).toString('/') << "\"\n";
-          outfileG << gRoot->toStringWithComments();
+          outstringG << "#define " + gName + "\n";
+          outstringG << "#include \"" << hOut.relativeTo(gOut).toString('/') << "\"\n";
+          outstringG << gRoot->toString();
         }
 
         auto mangledModuleName = Talta::mangleName(mod.get());
 
         // include the Alta common runtime header
-        outfileH << "#define _ALTA_RUNTIME_COMMON_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/common.h\"\n";
-        outfileH << "#define _ALTA_RUNTIME_DEFINITIONS_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/definitions.h\"\n";
+        outstringH << "#define _ALTA_RUNTIME_COMMON_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/common.h\"\n";
+        outstringH << "#define _ALTA_RUNTIME_DEFINITIONS_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/definitions.h\"\n";
 
         // define the definition header include path
-        outfileH << "#define _ALTA_DEF_HEADER_" << mangledModuleName << " \"" << dOut.relativeTo(hOut).toString('/') << "\"\n";
+        outstringH << "#define _ALTA_DEF_HEADER_" << mangledModuleName << " \"" << dOut.relativeTo(hOut).toString('/') << "\"\n";
 
         // include the index in the module's header, otherwise we won't be able to find our dependencies
-        outfileH << "#include \"" << indexHeaderPath.relativeTo(hOut).toString('/') << "\"\n";
+        outstringH << "#include \"" << indexHeaderPath.relativeTo(hOut).toString('/') << "\"\n";
 
-        outfileH << hRoot->toStringWithComments();
+        outstringH << hRoot->toString();
 
         outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << cOut.relativeTo(modOutDir).toString('/') << "\"\n";
         manifest["targets"][target.name][mod->packageInfo.name]["sources"].push_back(cOut.absolutify().normalize().toString());
         manifest["targets"][target.name][mod->packageInfo.name]["headers"].push_back(hOut.absolutify().normalize().toString());
         manifest["targets"][target.name][mod->packageInfo.name]["definition-headers"].push_back(dOut.absolutify().normalize().toString());
 
-        outfileD << dRoot->toStringWithComments();
-        outfileD.close();
+        outstringD << dRoot->toString();
 
         // finally, add our header to the index for all our dependents
         for (auto& dependent: mod->dependents) {
-          outfileIndex << "#define _ALTA_MODULE_" << Talta::mangleName(dependent.get()) << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(outDir / dependent->name).toString('/') << "\"\n";
+          outstringIndex << "#define _ALTA_MODULE_" << Talta::mangleName(dependent.get()) << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(outDir / dependent->name).toString('/') << "\"\n";
         }
 
         // add our header to index for ourselves (in case we have any generics that we use)
-        outfileIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
+        outstringIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
+
+        bool outputC = true;
+        if (cOut.exists()) {
+          if (checkHashes(cOut, outstringC)) {
+            outputC = false;
+          }
+        }
+        if (outputC) {
+          std::ofstream outfileC(cOut.toString());
+          outfileC << outstringC.rdbuf();
+          outfileC.close();
+        }
+
+        bool outputH = true;
+        if (hOut.exists()) {
+          if (checkHashes(hOut, outstringH)) {
+            outputH = false;
+          }
+        }
+        if (outputH) {
+          std::ofstream outfileH(hOut.toString());
+          outfileH << outstringH.rdbuf();
+          outfileH.close();
+        }
+
+        bool outputD = true;
+        if (dOut.exists()) {
+          if (checkHashes(dOut, outstringD)) {
+            outputD = false;
+          }
+        }
+        if (outputD) {
+          std::ofstream outfileD(dOut.toString());
+          outfileD << outstringD.rdbuf();
+          outfileD.close();
+        }
+
+        for (size_t i = 0; i < gRoots.size(); i++) {
+          auto& outstringG = outstringGs[i];
+          auto& gOut = gOuts[i];
+
+          bool outputG = true;
+          if (gOut.exists()) {
+            if (checkHashes(gOut, outstringG)) {
+              outputG = false;
+            }
+          }
+          if (outputG) {
+            std::ofstream outfileG(gOut.toString());
+            outfileG << outstringG.rdbuf();
+            outfileG.close();
+          }
+        }
       }
 
       for (auto& [packageName, cmakeInfo]: cmakeListsCollection) {
@@ -1023,7 +1142,7 @@ int main(int argc, char** argv) {
             outfileCmake << "if (NOT TARGET alta-dummy-target-" << name << '-' << target.name << ")\n";
             outfileCmake << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << name << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << name << "\")\n";
             outfileCmake << "endif()\n";
-            outfileIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledImportName << " \"" << depHOut.relativeTo(cOut).toString('/') << "\"\n";
+            outstringIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledImportName << " \"" << depHOut.relativeTo(cOut).toString('/') << "\"\n";
           }
 
           genEntry["source"] = gOut.absolutify().normalize().toString();
@@ -1140,8 +1259,19 @@ int main(int argc, char** argv) {
         outfileCmake.close();
       }
 
-      outfileIndex << "#endif // _ALTA_INDEX_" << indexUUID << "\n";
-      outfileIndex.close();
+      outstringIndex << "#endif // _ALTA_INDEX_" << indexUUID << "\n";
+
+      bool outputIndexHeader = true;
+      if (indexHeaderPath.exists()) {
+        if (checkHashes(indexHeaderPath, outstringIndex)) {
+          outputIndexHeader = false;
+        }
+      }
+      if (outputIndexHeader) {
+        std::ofstream outfileIndex(indexHeaderPath.toString());
+        outfileIndex << outstringIndex.rdbuf();
+        outfileIndex.close();
+      }
     }
 
     rootCmakeLists.close();

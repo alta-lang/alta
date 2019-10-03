@@ -17,6 +17,10 @@ _Alta_runtime_export void _Alta_init_global_runtime() {
   _Alta_global_runtime.functionTable.entries = malloc(0);
   _Alta_global_runtime.functionTable.count = 0;
 
+  _Alta_global_runtime.symbolTable.symbols = malloc(0);
+  _Alta_global_runtime.symbolTable.infos = malloc(0);
+  _Alta_global_runtime.symbolTable.count = 0;
+
   _Alta_global_runtime.inited = _Alta_bool_true;
 };
 
@@ -27,6 +31,14 @@ _Alta_runtime_export void _Alta_unwind_global_runtime() {
   _Alta_object_stack_deinit(&_Alta_global_runtime.local);
   _Alta_object_stack_deinit(&_Alta_global_runtime.persistent);
   _Alta_generic_stack_deinit();
+
+  free(_Alta_global_runtime.functionTable.keys);
+  free(_Alta_global_runtime.functionTable.entries);
+  _Alta_global_runtime.functionTable.count = 0;
+
+  free(_Alta_global_runtime.symbolTable.symbols);
+  free(_Alta_global_runtime.symbolTable.infos);
+  _Alta_global_runtime.symbolTable.count = 0;
 };
 
 _Alta_runtime_export void _Alta_object_stack_init(_Alta_object_stack* stack) {
@@ -373,7 +385,8 @@ _Alta_runtime_export void _Alta_uncaught_error(const char* typeName) {
 #ifdef ALTA_FINAL_ERROR_HANDLER
   return ALTA_FINAL_ERROR_HANDLER(typeName);
 #else
-  printf("uncaught error thrown in Alta (with type \"%s\")\n", typeName);
+  const char* friendly = _Alta_symbol_to_full_Alta_name(typeName);
+  printf("uncaught error thrown in Alta (with type \"%s\")\n", friendly ? friendly : typeName);
   abort();
 #endif
 };
@@ -446,4 +459,48 @@ _Alta_runtime_export void _Alta_register_virtual_function(const char* classNameA
 _Alta_runtime_export void _Alta_invalid_return_value() {
   printf("ERROR: invalid/absent return value\n");
   abort();
+};
+
+_Alta_runtime_export void _Alta_register_symbol(const char* symbol, _Alta_symbol_info info) {
+  _Alta_symbol_table* table = &_Alta_global_runtime.symbolTable;
+
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable: 4090)
+#endif // _MSC_VER
+
+  table->symbols = realloc(table->symbols, (++table->count) * sizeof(const char*));
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif // _MSC_VER
+
+  table->infos = realloc(table->infos, table->count * sizeof(_Alta_symbol_info));
+
+  table->symbols[table->count - 1] = symbol;
+  table->infos[table->count - 1] = info;
+};
+
+_Alta_runtime_export _Alta_symbol_info* _Alta_find_info_for_symbol(const char* symbol) {
+  _Alta_symbol_table* table = &_Alta_global_runtime.symbolTable;
+
+  for (size_t i = 0; i < table->count; ++i) {
+    if (strcmp(table->symbols[i], symbol) == 0) {
+      return &table->infos[i];
+    }
+  }
+
+  return NULL;
+};
+
+_Alta_runtime_export const char* _Alta_symbol_to_full_Alta_name(const char* symbol) {
+  _Alta_symbol_table* table = &_Alta_global_runtime.symbolTable;
+
+  _Alta_symbol_info* info = _Alta_find_info_for_symbol(symbol);
+
+  if (!info) {
+    return NULL;
+  }
+
+  return info->fullAltaName;
 };

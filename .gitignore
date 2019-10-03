@@ -10,3 +10,5 @@ nbproject
 CMakeFiles
 .vs
 **/alta-build
+**/._*
+**/.DS_Store

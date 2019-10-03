@@ -65,6 +65,9 @@ typedef struct __Alta_global_runtime_type {
 
   // function table used to store virtual function addresses
   _Alta_function_table functionTable;
+
+  // symbol table used to store information about symbols translated from Alta to C
+  _Alta_symbol_table symbolTable;
 } _Alta_global_runtime_type;
 
 extern _Alta_global_runtime_type _Alta_global_runtime;
@@ -107,5 +110,9 @@ _Alta_runtime_export void* _Alta_lookup_virtual_function(const char* className, 
 _Alta_runtime_export void _Alta_register_virtual_function(const char* classNameAndSignature, void* functionPointer);
 
 _Alta_runtime_export void _Alta_invalid_return_value();
+
+_Alta_runtime_export void _Alta_register_symbol(const char* symbol, _Alta_symbol_info info);
+_Alta_runtime_export _Alta_symbol_info* _Alta_find_info_for_symbol(const char* symbol);
+_Alta_runtime_export const char* _Alta_symbol_to_full_Alta_name(const char* symbol);
 
 #endif /* _ALTA_RUNTIME_COMMON_H */

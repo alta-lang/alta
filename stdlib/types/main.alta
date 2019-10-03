@@ -1,4 +1,5 @@
 export size_t as Size from "libc/lib/stddef"
+
 export {
   int8_t as int8,
   int16_t as int16,
@@ -8,6 +9,24 @@ export {
   uint16_t as uint16,
   uint32_t as uint32,
   uint64_t as uint64,
+
+  INT8_MIN as Int8Minimum,
+  INT8_MAX as Int8Maximum,
+  UINT8_MAX as UInt8Maximum,
+
+  INT16_MIN as Int16Minimum,
+  INT16_MAX as Int16Maximum,
+  UINT16_MAX as UInt16Maximum,
+
+  INT32_MIN as Int32Minimum,
+  INT32_MAX as Int32Maximum,
+  UINT32_MAX as UInt32Maximum,
+
+  INT64_MIN as Int64Minimum,
+  INT64_MAX as Int64Maximum,
+  UINT64_MAX as UInt64Maximum,
+
+  SIZE_MAX as SizeMaximum,
 } from "libc/lib/stdint"
 
 export type rawstring = ptr byte

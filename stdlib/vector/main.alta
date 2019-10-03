@@ -15,7 +15,6 @@ export generic class Vector<T> {
   }
   public constructor(length: Size) {
     this._size = length
-    this._length = this._size
     this._data = allocate<T>(length)
   }
   public @copy constructor(other: ref Vector<T>) {

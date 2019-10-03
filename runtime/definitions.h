@@ -159,4 +159,21 @@ typedef struct __Alta_function_table {
   void** entries;
 } _Alta_function_table;
 
+// <symbol-table>
+typedef struct __Alta_symbol_info {
+  // a developer-friendly name for the symbol
+  const char* friendlyName;
+
+  // a developer-friendly name for the symbol that includes
+  // all the information from the Alta scope item it represents
+  const char* fullAltaName;
+} _Alta_symbol_info;
+
+typedef struct __Alta_symbol_table {
+  size_t count;
+  const char** symbols;
+  _Alta_symbol_info* infos;
+} _Alta_symbol_table;
+// </symbol-table>
+
 #endif // _ALTA_RUNTIME_DEFINITIONS_H
