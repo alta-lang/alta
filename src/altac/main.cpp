@@ -1093,19 +1093,29 @@ int main(int argc, char** argv) {
             cmakeLists << "  alta-global-runtime" << '\n';
           }
 
+          std::unordered_set<std::string> depsLinked;
+
           for (auto& dep: packageDependencies[packageName]) {
-            cmakeLists << "  " << dep << '-' << target.name << '\n';
-            manifest["targets"][target.name][packageName]["dependencies"].push_back(dep);
+            auto name = dep + '-' + target.name;
+            if (depsLinked.find(name) == depsLinked.end()) {
+              cmakeLists << "  " << name << '\n';
+              manifest["targets"][target.name][packageName]["dependencies"].push_back(dep);
+              depsLinked.insert(name);
+            }
           }
 
           for (auto& generic: genericsUsed[packageName]) {
             auto genMod = generic->parentScope.lock()->parentModule.lock();
             auto pkgName = Talta::mangleName(genMod.get());
-            cmakeLists << "  " << pkgName << '-' << generic->moduleIndex << '-' << target.name << '\n';
-            manifest["targets"][target.name][packageName]["generics-used"].push_back({
-              {"module", genMod->name},
-              {"id", std::to_string(generic->moduleIndex)},
-            });
+            auto name = pkgName + '-' + std::to_string(generic->moduleIndex) + '-' + target.name;
+            if (depsLinked.find(name) == depsLinked.end()) {
+              cmakeLists << "  " << name << '\n';
+              manifest["targets"][target.name][packageName]["generics-used"].push_back({
+                {"module", genMod->name},
+                {"id", std::to_string(generic->moduleIndex)},
+              });
+              depsLinked.insert(name);
+            }
           }
 
           for (auto& lib: libsToLink[packageName]) {
