@@ -112,7 +112,7 @@ export class File {
   }
 }
 
-export type ConsoleData = double | int | char | bool | String
+export type ConsoleData = String | double | int | char | bool
 
 function toString(data: ConsoleData): String {
   if data instanceof String {
