@@ -17,6 +17,14 @@ export generic class Vector<T> {
     this._size = length
     this._data = allocate<T>(length)
   }
+  public constructor(length: Size, initializer: T) {
+    this._size = this._length = length
+    this._data = allocate<T>(length)
+
+    for i: Size in 0..this._length {
+      this._data[i] @strict = initializer
+    }
+  }
   public @copy constructor(other: ref Vector<T>) {
     this._size = other._size
     this._length = other._length
@@ -40,10 +48,14 @@ export generic class Vector<T> {
   }
 
   public @read function first(): ref T {
+    if this.length < 1
+      throw new InvalidIndex
     return this._data[0]
   }
 
   public @read function last(): ref T {
+    if this.length < 1
+      throw new InvalidIndex
     return this._data[this._length - 1]
   }
 
@@ -102,6 +114,16 @@ export generic class Vector<T> {
       other._data[i] @strict = this._data[i]
     }
     return other
+  }
+
+  public function clear(): void {
+    # we don't just use `pop` in order to avoid
+    # the (usually small) cost of copying the values
+    # when it copies them
+    for i: Size in this._length..0 {
+      delete this._data[i - 1]
+    }
+    this._length = 0
   }
 
   public this[Size]: ref T {
