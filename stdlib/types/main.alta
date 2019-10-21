@@ -1,6 +1,5 @@
 export size_t as Size from "libc/lib/stddef"
-
-export {
+import {
   int8_t as int8,
   int16_t as int16,
   int32_t as int32,
@@ -29,5 +28,80 @@ export {
   SIZE_MAX as SizeMaximum,
 } from "libc/lib/stdint"
 
+export {
+  int8,
+  int16,
+  int32,
+  int64,
+  uint8,
+  uint16,
+  uint32,
+  uint64,
+
+  int8 as Int8,
+  int16 as Int16,
+  int32 as Int32,
+  int64 as Int64,
+  uint8 as UInt8,
+  uint16 as UInt16,
+  uint32 as UInt32,
+  uint64 as UInt64,
+
+  Int8Minimum,
+  Int8Maximum,
+  UInt8Maximum,
+
+  Int16Minimum,
+  Int16Maximum,
+  UInt16Maximum,
+
+  Int32Minimum,
+  Int32Maximum,
+  UInt32Maximum,
+
+  Int64Minimum,
+  Int64Maximum,
+  UInt64Maximum,
+
+  SizeMaximum,
+}
+
 export type rawstring = ptr byte
 export type rawconststring = ptr const byte
+
+export bitfield UInt64ToUInt32: uint64 {
+  part1: uint32 = 0..32
+  part2: uint32 = 32..64
+}
+export bitfield UInt64ToUInt16: uint64 {
+  part1: uint16 = 0..16
+  part2: uint16 = 16..32
+  part3: uint16 = 32..48
+  part4: uint16 = 48..64
+}
+export bitfield UInt64ToUInt8: uint8 {
+  part1: uint8 = 0..8
+  part2: uint8 = 8..16
+  part3: uint8 = 16..24
+  part4: uint8 = 24..32
+  part5: uint8 = 32..40
+  part6: uint8 = 40..48
+  part7: uint8 = 48..56
+  part8: uint8 = 56..64
+}
+
+export bitfield UInt32ToUInt16: uint32 {
+  part1: uint16 = 0..16
+  part2: uint16 = 16..32
+}
+export bitfield UInt32ToUInt8: uint32 {
+  part1: uint8 = 0..8
+  part2: uint8 = 8..16
+  part3: uint8 = 16..24
+  part4: uint8 = 24..32
+}
+
+export bitfield UInt16ToUInt8: uint16 {
+  part1: uint8 = 0..8
+  part2: uint8 = 8..16
+}
