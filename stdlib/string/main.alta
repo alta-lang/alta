@@ -328,6 +328,7 @@ export class String {
     for i: Size in 0..this._length {
       let bytes = unicode.detectRequiredUTF8Bytes(this.data[i])
       len -= bytes - 1
+      i += bytes - 1
     }
     return len
   }
@@ -409,6 +410,11 @@ export class String {
     return this.append(data.bytes + data.byteIndex, data.byteLength)
   }
 
+  public function append(data: uint32): ref String {
+    let tmp = unicode.utf32ToUTF8(data)
+    return this.append(tmp.data as ptr byte, tmp.length)
+  }
+
   public function substring(from: Size, to: Size): String {
     let sub = new String
     for i: Size in from..to {
@@ -467,15 +473,38 @@ export class String {
     return this.prepend(data.bytes + data.byteLength, data.byteLength)
   }
 
-  public function includes(data: byte...): bool {
+  public function prepend(data: uint32): ref String {
+    let tmp = unicode.utf32ToUTF8(data)
+    return this.prepend(tmp.data as ptr byte, 4)
+  }
+
+  public function includes(data: CodePoint | byte...): bool {
+    # why not just call indexOf with each of the items?
+    # well, because this is a slightly more optimized approach.
+    # indexOf loops through all the characters, stopping on the
+    # first instance of the desired character. this means we would have
+    # to loop through all the characters in the string for each argument
+    # that's not present. this method loops through each of the arguments
+    # for every character in this string, which means that a character that
+    # is present would need to go through fewer characters in this string
+    # before being found
     for i: Size in 0..this._length {
       for j: Size in 0..data.length {
-        if this._data[i] == data[j] {
-          return true
+        let isCP = data[j] instanceof CodePoint
+        if isCP {
+          if this[i] == (data[j] as CodePoint)
+            return true
+        } else {
+          if this[i] == (data[j] as byte)
+            return true
         }
       }
     }
     return false
+  }
+
+  public function includes(test: (CodePoint) => bool): bool {
+    return this.indexOf(test) != SizeMaximum
   }
 
   # TODO: default parameters
@@ -504,6 +533,32 @@ export class String {
     return this.indexOf(data, SizeMaximum)
   }
 
+  # Basically just a direct-expression-of-intent wrapper for code that tests whether
+  # a character matches some conditions they set forth
+  public function indexOf(test: (CodePoint) => bool, after: Size): Size {
+    for i: Size in 0..this._length {
+      if test(this[i])
+        return i
+    }
+    return SizeMaximum
+  }
+  public function indexOf(test: (CodePoint) => bool): Size {
+    return this.indexOf(test, SizeMaximum)
+  }
+
+  public function lastIndexOf(data: CodePoint | byte, after: Size): Size {
+    let idx = this.indexOf(data, after)
+    if idx == SizeMaximum
+      return SizeMaximum
+    while (let next = this.indexOf(data, after: idx)) != SizeMaximum {
+      idx = next
+    }
+    return idx
+  }
+  public function lastIndexOf(data: CodePoint | byte): Size {
+    return this.lastIndexOf(data, SizeMaximum)
+  }
+
   public this + String: String {
     let other = new String(this)
     other.append($)
@@ -522,6 +577,50 @@ export class String {
     return other
   }
 
+  public this + uint32: String {
+    let other = new String(this)
+    other.append($)
+    return other
+  }
+
+  # why have both the `this + String` version AND
+  # the `String + this` version? in order to allow
+  # `String` to be created from a string literal
+  # regardles of which side of this object it is
+  # e.g. `"foo" + myString` will properly
+  # convert "foo" to a String and append `myString`
+  # to it
+  public String + this: String {
+    # btw, this will not recurse; it calls the
+    # lefthand-this version of the `+` operator
+    # (Alta always checks for a lefthand-this
+    # operator before checking for a righthand-this
+    # operator)
+    #
+    # note for Alta language developers: remember to
+    # document this behavior when writing future
+    # language documentation
+    return $ + this
+  }
+
+  public CodePoint + this: String {
+    let other = new String(this)
+    other.prepend($)
+    return other
+  }
+
+  public byte + this: String {
+    let other = new String(this)
+    other.prepend($)
+    return other
+  }
+
+  public uint32 + this: String {
+    let other = new String(this)
+    other.prepend($)
+    return other
+  }
+
   public this += String: ref String {
     return this.append($)
   }
@@ -531,6 +630,10 @@ export class String {
   }
 
   public this += byte: ref String {
+    return this.append($)
+  }
+
+  public this += uint32: ref String {
     return this.append($)
   }
 
@@ -546,7 +649,66 @@ export class String {
     return this.prepend($)
   }
 
+  public this ^= uint32: ref String {
+    return this.prepend($)
+  }
+
   public this[Size]: CodePoint {
     return this.charAt($)
+  }
+
+  public this == String: bool {
+    if this.length != $.length
+      return false
+
+    for i: Size in 0..this.length {
+      if this[i] != $[i]
+        return false
+    }
+
+    return true
+  }
+
+  # TODO: auto-generate complementary operators
+  #       when given their counterpart. e.g. automatically
+  #       generate `!=` if `==` is provided
+  public this != String: bool {
+    return !(this == $)
+  }
+
+  # same reason for having the righthand-this version
+  # of the `+` operator for `String`s. this lets
+  # `"foo" == myString` properly convert "foo" to
+  # a String and then compare it to `myString`.
+  # without this, Alta will:
+  #   1. try to find a lefthand-this operator on `ptr const byte`
+  #      which fails because it's a native type; and anyways,
+  #      this isn't what we want
+  #      (`ptr const byte == ptr const byte`)
+  #   2. try to find a righthand-this operator on `String`
+  #      which fails because none is defined (assuming we're
+  #      not creating this method); however, this IS what we want
+  #      (`String == String`)
+  #   3. try to find a `to` cast from `String` to `ptr const byte`
+  #      which it DOES find; unfortunately, this is not what
+  #      we want since we would end up comparing pointer addresses
+  #      (`ptr const byte == ptr const byte`)
+  #   4. try to find a `from` cast from `ptr const byte` to `String`
+  #      which it DOES find; this would generate the behavior we want
+  #      (`String == String`)
+  # it would be fine if #4 happened, but the problem is that #3 is
+  # found first (and is the proper behavior), so this method MUST
+  # be defined for #2 to be found first and generate proper behavior
+  public String == this: bool {
+    return $ == this
+  }
+
+  # same reason for existing as `String == this`
+  public String != this: bool {
+    return $ != this
+  }
+
+  public to bool {
+    return this.length > 0
   }
 }
