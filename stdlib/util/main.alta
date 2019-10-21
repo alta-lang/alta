@@ -6,6 +6,7 @@ import Exception from "exceptions"
 
 export class InvalidDigit extends Exception {}
 export class InvalidRadix extends Exception {}
+export class IntegerOverflow extends Exception {}
 
 export function parseNumber<T>(string: String, radix: Size): T {
   if radix > 36
@@ -14,22 +15,32 @@ export function parseNumber<T>(string: String, radix: Size): T {
   let result: T = 0
   let negate = false
 
-  for i: Size in 0..string.length {
+  for i: Size in string.length::0 {
+    let idx = i - 1
     let digit = 0
 
-    if i == 0 && string[i] == '-' {
+    if idx == 0 && string[idx] == '-' {
       negate = true
-    } else if string[i] >= '0' && string[i] <= '9' {
-      digit = string[i] - '0'
-    } else if string[i] >= 'a' && string[i] <= 'z' {
-      digit = string[i] - 'a' + 10
-    } else if string[i] >= 'A' && string[i] <= 'Z' {
-      digit = string[i] - 'A' + 10
+    } else if string[idx] >= '0' && string[idx] <= '9' {
+      digit = string[idx] - '0'
+    } else if string[idx] >= 'a' && string[idx] <= 'z' {
+      digit = string[idx] - 'a' + 10
+    } else if string[idx] >= 'A' && string[idx] <= 'Z' {
+      digit = string[idx] - 'A' + 10
     } else {
       throw new InvalidDigit
     }
 
-    result += digit * power<T>(radix, string.length - (i + 1))
+    if digit >= radix
+      throw new InvalidDigit
+
+    let additional = digit * power<T>(radix, string.length - i)
+    let newVal = result + additional
+
+    if newVal < result
+      throw new IntegerOverflow
+
+    result += additional
   }
 
   return negate ? -result : result
@@ -160,8 +171,18 @@ export function numberToString<T>(number: T, radix: Size): String {
   let iteration = 1
   while number >= 1 {
     let mod = power<T>(radix, iteration)
-    let num = number % mod
-    let digit: byte = num * radix / mod
+    let num: T
+    let digit: byte
+    if mod == 0 {
+      # we've overflowed the type. assume this is intentional
+      # and try to determine the digit by simply dividing by one less
+      # than the power of the radix
+      num = number
+      digit = number / power<T>(radix, iteration - 1)
+    } else {
+      num = number % mod
+      digit = num * radix / mod
+    }
 
     if digit < 10 {
       result ^= digit + '0'
