@@ -83,6 +83,9 @@ _Alta_runtime_export _Alta_bool _Alta_object_stack_cherry_pick(_Alta_object_stac
 _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, size_t count, _Alta_bool isPosition);
 _Alta_runtime_export void _Alta_object_destroy(_Alta_object* object);
 
+_Alta_runtime_export void _Alta_release_state(_Alta_lambda_state* state);
+_Alta_runtime_export void _Alta_release_capture_class_state_cache(_Alta_wrapper* wrapper);
+
 _Alta_runtime_export void _Alta_generic_stack_init();
 _Alta_runtime_export void _Alta_generic_stack_deinit();
 _Alta_runtime_export void _Alta_generic_stack_push(void* memory, _Alta_memory_destructor dtor);

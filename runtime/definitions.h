@@ -51,6 +51,7 @@ typedef struct __Alta_class_info {
   ptrdiff_t nextOffset;
   size_t baseOffset;
   size_t parentOffset;
+  _Alta_bool isCaptureClass;
 } _Alta_class_info;
 
 struct __Alta_basic_class {
@@ -110,6 +111,12 @@ typedef struct __Alta_basic_function {
   void* lambda;
   void* proxy;
 } _Alta_basic_function;
+
+typedef struct __Alta_basic_capture_class {
+  _Alta_object_type objectType;
+  _Alta_class_info _Alta_class_info_struct;
+  _Alta_lambda_state _Alta_capture_class_state;
+} _Alta_basic_capture_class;
 
 // <object-stack>
 typedef struct __Alta_object_stack_node {

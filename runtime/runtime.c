@@ -123,6 +123,29 @@ _Alta_runtime_export void _Alta_object_stack_unwind(_Alta_object_stack* stack, s
   }
 };
 
+_Alta_runtime_export void _Alta_release_state(_Alta_lambda_state* state) {
+  if (state->referenceCount) {
+    --*state->referenceCount;
+    if (*state->referenceCount == 0) {
+      if (state->copies) {
+        size_t i;
+        for (i = 0; i < state->copyCount; i++) {
+          _Alta_object_destroy(state->copies[i]);
+          free(state->copies[i]);
+        }
+        free(state->copies);
+      }
+      if (state->references) {
+        free(state->references);
+      }
+      free(state->referenceCount);
+    }
+    state->copies = NULL;
+    state->references = NULL;
+    state->referenceCount = NULL;
+  }
+};
+
 _Alta_runtime_export void _Alta_object_destroy(_Alta_object* object) {
   if (object->objectType == _Alta_object_type_class) {
     _Alta_basic_class* klass = (_Alta_basic_class*)object;
@@ -145,24 +168,7 @@ _Alta_runtime_export void _Alta_object_destroy(_Alta_object* object) {
   } else if (object->objectType == _Alta_object_type_function) {
     _Alta_basic_function* func = (_Alta_basic_function*)object;
     if (func->state.referenceCount) {
-      --*func->state.referenceCount;
-      if (*func->state.referenceCount == 0) {
-        if (func->state.copies) {
-          size_t i;
-          for (i = 0; i < func->state.copyCount; i++) {
-            _Alta_object_destroy(func->state.copies[i]);
-            free(func->state.copies[i]);
-          }
-          free(func->state.copies);
-        }
-        if (func->state.references) {
-          free(func->state.references);
-        }
-        free(func->state.referenceCount);
-      }
-      func->state.copies = NULL;
-      func->state.references = NULL;
-      func->state.referenceCount = NULL;
+      _Alta_release_state(&func->state);
       func->plain = NULL;
       func->lambda = NULL;
       func->proxy = NULL;
@@ -503,4 +509,13 @@ _Alta_runtime_export const char* _Alta_symbol_to_full_Alta_name(const char* symb
   }
 
   return info->fullAltaName;
+};
+
+_Alta_runtime_export void _Alta_release_capture_class_state_cache(_Alta_wrapper* wrapper) {
+  _Alta_lambda_state* state = (_Alta_lambda_state*)wrapper->value;
+  --*state->referenceCount;
+  if (*state->referenceCount == 0) {
+    *state->referenceCount = 1;
+    _Alta_release_state(state);
+  }
 };
