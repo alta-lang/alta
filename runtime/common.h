@@ -55,12 +55,6 @@ typedef struct __Alta_global_runtime_type {
   // object stack for "function stack" (i.e. local) variables
   _Alta_object_stack local;
 
-  // object stack for "malloc-ed" (i.e. persistent) variables
-  _Alta_object_stack persistent;
-
-  // memory stack for other persistent values
-  _Alta_generic_stack otherPersistent;
-
   _Alta_error_container lastError;
 
   // function table used to store virtual function addresses
@@ -86,13 +80,6 @@ _Alta_runtime_export void _Alta_object_destroy(_Alta_object* object);
 _Alta_runtime_export void _Alta_release_state(_Alta_lambda_state* state);
 _Alta_runtime_export void _Alta_release_capture_class_state_cache(_Alta_wrapper* wrapper);
 
-_Alta_runtime_export void _Alta_generic_stack_init();
-_Alta_runtime_export void _Alta_generic_stack_deinit();
-_Alta_runtime_export void _Alta_generic_stack_push(void* memory, _Alta_memory_destructor dtor);
-_Alta_runtime_export void _Alta_generic_stack_pop();
-_Alta_runtime_export void _Alta_generic_stack_cherry_pick(void* memory);
-_Alta_runtime_export void _Alta_generic_stack_unwind(size_t count, _Alta_bool isPosition);
-
 _Alta_runtime_export void _Alta_common_dtor(_Alta_basic_class* klass, _Alta_bool isPersistent);
 
 _Alta_runtime_export _Alta_basic_class* _Alta_get_child(_Alta_basic_class* klass, size_t count, ...);
@@ -113,9 +100,13 @@ _Alta_runtime_export void* _Alta_lookup_virtual_function(const char* className, 
 _Alta_runtime_export void _Alta_register_virtual_function(const char* classNameAndSignature, void* functionPointer);
 
 _Alta_runtime_export void _Alta_invalid_return_value();
+_Alta_runtime_export void _Alta_generator_invalid_index();
 
 _Alta_runtime_export void _Alta_register_symbol(const char* symbol, _Alta_symbol_info info);
 _Alta_runtime_export _Alta_symbol_info* _Alta_find_info_for_symbol(const char* symbol);
 _Alta_runtime_export const char* _Alta_symbol_to_full_Alta_name(const char* symbol);
+
+_Alta_runtime_export void* _Alta_generator_push(_Alta_basic_generator_state* generator, size_t size);
+_Alta_runtime_export void _Alta_generator_pop(_Alta_basic_generator_state* generator, size_t size);
 
 #endif /* _ALTA_RUNTIME_COMMON_H */

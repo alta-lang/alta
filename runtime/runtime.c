@@ -5,7 +5,6 @@ _Alta_global_runtime_type _Alta_global_runtime;
 
 _Alta_runtime_export void _Alta_init_global_runtime() {
   _Alta_object_stack_init(&_Alta_global_runtime.local);
-  _Alta_object_stack_init(&_Alta_global_runtime.persistent);
 
   _Alta_global_runtime.lastError.value = NULL;
   _Alta_global_runtime.lastError.handlerStack = NULL;
@@ -29,8 +28,6 @@ _Alta_runtime_export void _Alta_unwind_global_runtime() {
   _Alta_global_runtime.inited = _Alta_bool_false;
 
   _Alta_object_stack_deinit(&_Alta_global_runtime.local);
-  _Alta_object_stack_deinit(&_Alta_global_runtime.persistent);
-  _Alta_generic_stack_deinit();
 
   free(_Alta_global_runtime.functionTable.keys);
   free(_Alta_global_runtime.functionTable.entries);
@@ -178,105 +175,6 @@ _Alta_runtime_export void _Alta_object_destroy(_Alta_object* object) {
   }
 };
 
-_Alta_runtime_export void _Alta_generic_stack_init() {
-  _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
-
-  stack->nodeList = NULL;
-  stack->nodeCount = 0;
-};
-
-_Alta_runtime_export void _Alta_generic_stack_deinit() {
-  if (!_Alta_global_runtime.inited) return;
-  _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
-
-  _Alta_generic_stack_unwind(SIZE_MAX, _Alta_bool_false); // effectively unwinds the entire stack
-};
-
-_Alta_runtime_export void _Alta_generic_stack_push(void* object, _Alta_memory_destructor dtor) {
-  if (!_Alta_global_runtime.inited) return;
-  _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
-
-  _Alta_generic_stack_node* node = malloc(sizeof(_Alta_generic_stack_node));
-
-  node->memory = object;
-  node->dtor = dtor;
-  node->prev = stack->nodeList;
-  stack->nodeList = node;
-  ++stack->nodeCount;
-};
-
-_Alta_runtime_export void _Alta_generic_stack_pop() {
-  if (!_Alta_global_runtime.inited) return;
-  _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
-
-  if (stack->nodeList == NULL) {
-    return;
-  }
-
-  _Alta_generic_stack_node* node = stack->nodeList;
-  if (node->dtor != NULL) {
-    node->dtor(node->memory);
-  } else {
-    free(node->memory);
-  }
-
-  stack->nodeList = node->prev;
-  --stack->nodeCount;
-  free(node);
-};
-
-_Alta_runtime_export void _Alta_generic_stack_cherry_pick(void* object) {
-  if (!_Alta_global_runtime.inited) return;
-  _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
-
-  // this is the node that comes before the current node
-  // in the linked list, NOT the node that corresponds to the
-  // object created just before the object for the current node
-  _Alta_generic_stack_node* previousNode = NULL;
-  _Alta_generic_stack_node* node = stack->nodeList;
-  while (node != NULL) {
-    if (node->memory == object) {
-      if (node->dtor != NULL) {
-        node->dtor(node->memory);
-      } else {
-        free(node->memory);
-      }
-
-      if (previousNode != NULL) {
-        previousNode->prev = node->prev;
-      } else {
-        stack->nodeList = node->prev;
-      }
-
-      --stack->nodeCount;
-      free(node);
-
-      break;
-    }
-
-    previousNode = node;
-    node = node->prev;
-  }
-};
-
-_Alta_runtime_export void _Alta_generic_stack_unwind(size_t count, _Alta_bool isPosition) {
-  if (!_Alta_global_runtime.inited) return;
-  _Alta_generic_stack* stack = &_Alta_global_runtime.otherPersistent;
-
-  if (isPosition) {
-    while (stack->nodeCount > count) {
-      _Alta_generic_stack_pop();
-      if (stack->nodeList == NULL) break;
-    }
-  } else {
-    size_t i;
-    for (i = 0; i < count; i++) {
-      _Alta_generic_stack_pop();
-      if (stack->nodeList == NULL) break;
-    }
-  }
-};
-
 _Alta_runtime_export void _Alta_common_dtor(_Alta_basic_class* klass, _Alta_bool isPersistent) {
   _Alta_basic_class* base = (_Alta_basic_class*)((char*)klass - klass->_Alta_class_info_struct.baseOffset);
   if (base->_Alta_class_info_struct.destructor != NULL) {
@@ -375,16 +273,12 @@ _Alta_runtime_export size_t _Alta_pop_error_handler() {
 _Alta_runtime_export _Alta_runtime_state _Alta_save_state() {
   return (_Alta_runtime_state) {
     .localIndex = _Alta_global_runtime.local.nodeCount,
-    .persistentIndex = _Alta_global_runtime.persistent.nodeCount,
-    .otherIndex = _Alta_global_runtime.otherPersistent.nodeCount,
   };
 };
 
 _Alta_runtime_export void _Alta_restore_state(const _Alta_runtime_state state) {
   if (!_Alta_global_runtime.inited) return;
   _Alta_object_stack_unwind(&_Alta_global_runtime.local, state.localIndex, _Alta_bool_true);
-  _Alta_object_stack_unwind(&_Alta_global_runtime.persistent, state.persistentIndex, _Alta_bool_true);
-  _Alta_generic_stack_unwind(state.otherIndex, _Alta_bool_true);
 };
 
 _Alta_runtime_export void _Alta_uncaught_error(const char* typeName) {
@@ -518,4 +412,20 @@ _Alta_runtime_export void _Alta_release_capture_class_state_cache(_Alta_wrapper*
     *state->referenceCount = 1;
     _Alta_release_state(state);
   }
+};
+
+_Alta_runtime_export void* _Alta_generator_push(_Alta_basic_generator_state* generator, size_t size) {
+  generator->stackSize += size;
+  generator->stack = realloc(generator->stack, generator->stackSize);
+  return generator->stack + (generator->stackSize - size);
+};
+
+_Alta_runtime_export void _Alta_generator_pop(_Alta_basic_generator_state* generator, size_t size) {
+  generator->stackSize -= size;
+  generator->stack = realloc(generator->stack, generator->stackSize);
+};
+
+_Alta_runtime_export void _Alta_generator_invalid_index() {
+  printf("invalid generator index - aborting...");
+  abort();
 };

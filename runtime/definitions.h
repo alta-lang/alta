@@ -141,23 +141,8 @@ typedef struct __Alta_object_stack {
 } _Alta_object_stack;
 // </object-stack>
 
-// <generic-stack>
-typedef struct __Alta_generic_stack_node {
-  void* memory;
-  _Alta_memory_destructor dtor;
-  struct __Alta_generic_stack_node* prev;
-} _Alta_generic_stack_node;
-
-typedef struct __Alta_generic_stack {
-  _Alta_generic_stack_node* nodeList;
-  size_t nodeCount;
-} _Alta_generic_stack;
-// </generic-stack>
-
 typedef struct __Alta_runtime_state {
   size_t localIndex;
-  size_t persistentIndex;
-  size_t otherIndex;
 } _Alta_runtime_state;
 
 typedef struct __Alta_function_table {
@@ -182,5 +167,14 @@ typedef struct __Alta_symbol_table {
   _Alta_symbol_info* infos;
 } _Alta_symbol_table;
 // </symbol-table>
+
+typedef struct __Alta_basic_generator_state {
+  void* stack;
+  size_t stackSize;
+  void* input;
+  size_t index;
+  _Alta_bool done;
+  void* parameters;
+} _Alta_basic_generator_state;
 
 #endif // _ALTA_RUNTIME_DEFINITIONS_H
