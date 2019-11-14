@@ -1,0 +1,27 @@
+import "../native.alta" as Native
+import Object from "objects.alta"
+
+export class Wrapper extends Object {
+  private @read function handle(): ptr Native._Alta_wrapper {
+    return super.handle as ptr Native._Alta_wrapper
+  }
+
+  public @from constructor(handle: ptr Native._Alta_wrapper) {
+    super(handle as ptr Native._Alta_object)
+  }
+  public @from constructor(object: Object) {
+    super(object)
+  }
+
+  public to ptr Native._Alta_wrapper {
+    return this.handle
+  }
+
+  public @read function value(): ref ptr void {
+    return this.handle.value
+  }
+
+  public @read function rawDestructor(): ref (ptr Native._Alta_wrapper) -> void {
+    return this.handle.destructor
+  }
+}

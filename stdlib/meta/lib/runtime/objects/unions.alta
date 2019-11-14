@@ -1,0 +1,27 @@
+import "../native.alta" as Native
+import Object from "objects.alta"
+
+export class Union extends Object {
+  private @read function handle(): ptr Native._Alta_basic_union {
+    return super.handle as ptr Native._Alta_basic_union
+  }
+
+  public @from constructor(handle: ptr Native._Alta_basic_union) {
+    super(handle as ptr Native._Alta_object)
+  }
+  public @from constructor(object: Object) {
+    super(object)
+  }
+
+  public to ptr Native._Alta_basic_union {
+    return this.handle
+  }
+
+  public @read function typeName(): ref ptr byte {
+    return this.handle.typeName
+  }
+
+  public @read function rawDestructor(): ref (ptr Native._Alta_basic_union) -> void {
+    return this.handle.destructor
+  }
+}

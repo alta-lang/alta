@@ -1,0 +1,95 @@
+import "../native.alta" as Native
+import Object from "objects.alta"
+import Captures from "lambdas.alta"
+import ptrdiff_t from "libc/lib/stddef"
+
+export class Class extends Object {
+  private @read function handle(): ptr Native._Alta_basic_class {
+    return super.handle as ptr Native._Alta_basic_class
+  }
+
+  public @from constructor(handle: ptr Native._Alta_basic_class) {
+    super(handle as ptr Native._Alta_object)
+  }
+  public @from constructor(object: Object) {
+    super(object)
+  }
+
+  public to ptr Native._Alta_basic_class {
+    return this.handle
+  }
+
+  public @read function typeName(): ref ptr const byte {
+    return this.handle._Alta_class_info_struct.typeName
+  }
+
+  public @read function destroyed(): ref bool {
+    return this.handle._Alta_class_info_struct.destroyed
+  }
+
+  public @read function persistent(): ref bool {
+    return this.handle._Alta_class_info_struct.persistent
+  }
+
+  public @read function mutableDestructor(): ref (ptr Native.__Alta_basic_class, bool) -> void {
+    return this.handle._Alta_class_info_struct.destructor
+  }
+
+  public @read function rawDestructor(): (ptr Native._Alta_basic_class, bool) -> void {
+    return this.handle._Alta_class_info_struct.destructor as (ptr Native._Alta_basic_class, bool) -> void
+  }
+
+  public @read function ownedByChild(): ref bool {
+    return this.handle._Alta_class_info_struct.isBaseStruct
+  }
+
+  public @read function childTypeName(): ref ptr const byte {
+    return this.handle._Alta_class_info_struct.parentTypeName
+  }
+
+  public @read function isLiveCopy(): bool {
+    return this.handle._Alta_class_info_struct.realOffset == 0
+  }
+
+  public @read function liveCopyOffset(): ref ptrdiff_t {
+    return this.handle._Alta_class_info_struct.realOffset
+  }
+
+  public @read function liveCopy(): Class {
+    if this.isLiveCopy
+      return this
+
+    return (this.handle as ptr byte - this.handle._Alta_class_info_struct.realOffset) as ptr Native._Alta_basic_class
+  }
+
+  public @read function nextGhostCopyOffset(): ref ptrdiff_t {
+    return this.handle._Alta_class_info_struct.nextOffset
+  }
+
+  public @read function isRootInstance(): bool {
+    return this.handle._Alta_class_info_struct.baseOffset == 0
+  }
+
+  public @read function rootInstanceOffset(): ref ptrdiff_t {
+    return this.handle._Alta_class_info_struct.baseOffset
+  }
+
+  public @read function rootInstance(): Class {
+    if this.isRootInstance
+      return this
+
+    return (this.handle as ptr byte - this.handle._Alta_class_info_struct.baseOffset) as ptr Native._Alta_basic_class
+  }
+
+  public @read function owningChild(): Class {
+    return (this.handle as ptr byte - this.handle._Alta_class_info_struct.parentOffset) as ptr Native._Alta_basic_class
+  }
+
+  public @read function isCaptureClass(): ref bool {
+    return this.handle._Alta_class_info_struct.isCaptureClass
+  }
+
+  public @read function captures(): Captures {
+    return &(this.handle as ptr _Alta_basic_capture_class)._Alta_capture_class_state
+  }
+}

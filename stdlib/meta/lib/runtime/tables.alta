@@ -1,0 +1,129 @@
+import "native.alta" as Native
+import Size, rawconststring from "types"
+import WeakArray from "util"
+import rawstringsEqual from "string"
+import IndexOutOfBounds from "exceptions"
+
+export class FunctionTable {
+  private var handle: ptr Native._Alta_function_table = nullptr
+
+  public @from constructor(handle: ptr Native._Alta_function_table) {
+    this.handle = handle
+  }
+
+  public to ptr Native._Alta_function_table {
+    return this.handle
+  }
+
+  public @read function length(): ref Size {
+    return this.handle.count
+  }
+
+  public @read function keys(): WeakArray<rawconststring> {
+    return new WeakArray<rawconststring>(this.handle.keys, this.handle.count)
+  }
+
+  public @read function values(): WeakArray<ptr void> {
+    return new WeakArray<ptr void>(this.handle.entries, this.handle.count)
+  }
+
+  public function has(key: String): bool {
+    for i: Size in 0..this.handle.count {
+      if rawstringsEqual($, this.handle.keys[i])
+        return true
+    }
+    return false
+  }
+
+  public function ensure(key: String): ref ptr void {
+    for i: Size in 0..this.handle.count {
+      if rawstringsEqual($, this.handle.keys[i])
+        return this.handle.entries[i]
+    }
+    # note that this memory WILL be leaked
+    # once a key is created in the virtual function table,
+    # it is never deleted. also, it is expected that keys
+    # will be always be present once they're inserted, thus
+    # we need to create a heap-allocated copy of the provided
+    # string
+    let copy = new* String(key)
+    Native._Alta_register_virtual_function(copy, nullptr)
+    return this.handle.entries[this.handle.count - 1]
+  }
+
+  public this[String]: ref ptr void {
+    for i: Size in 0..this.handle.count {
+      if rawstringsEqual($, this.handle.keys[i])
+        return this.handle.entries[i]
+    }
+    throw new IndexOutOfBounds
+  }
+}
+
+export class Symbol {
+  private var handle: ptr Native._Alta_symbol_info = nullptr
+
+  public @from constructor(handle: ptr Native._Alta_symbol_info) {
+    this.handle = handle
+  }
+
+  public this = Symbol: ref Symbol {
+    *this.handle = *$.handle
+    return this
+  }
+
+  public to ptr Native._Alta_symbol_info {
+    return this.handle
+  }
+
+  public @read function shortName(): ref rawconststring {
+    return this.handle.friendlyName
+  }
+
+  public @read function fullName(): ref rawconststring {
+    return this.handle.fullAltaName
+  }
+}
+
+export class SymbolTable {
+  private var handle: ptr Native._Alta_symbol_table = nullptr
+
+  public @from constructor(handle: ptr Native._Alta_symbol_table) {
+    this.handle = handle
+  }
+
+  public to ptr Native._Alta_symbol_table {
+    return this.handle
+  }
+
+  public @read function length(): ref Size {
+    return this.handle.count
+  }
+
+  public @read function keys(): WeakArray<rawconststring> {
+    return new WeakArray<rawconststring>(this.handle.symbols, this.handle.count)
+  }
+
+  public @read function values(): WeakArray<_Alta_symbol_info> {
+    return new WeakArray<_Alta_symbol_info>(this.handle.infos, this.handle.count)
+  }
+
+  public function ensure(key: String): Symbol {
+    for i: Size in 0..this.handle.count {
+      if rawstringsEqual($, this.handle.symbols[i])
+        return &this.handle.values[i]
+    }
+    # same as the note in FunctionTable.ensure
+    let copy = new* String(key)
+    Native._Alta_register_symbol(copy, new Native._Alta_symbol_info)
+    return &this.handle.values[this.handle.count - 1]
+  }
+
+  public this[String]: Symbol {
+    for i: Size in 0..this.handle.count {
+      if rawstringsEqual($, this.handle.symbols[i])
+        return &this.handle.values[i]
+    }
+    throw new IndexOutOfBounds
+  }
+}
