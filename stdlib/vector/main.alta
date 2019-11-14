@@ -1,9 +1,8 @@
 import allocate, free, reallocate from "memory"
 import Size from "types"
-import Exception from "exceptions"
+import Exception, IndexOutOfBounds from "exceptions"
 
 export class ResizeFailure extends Exception {}
-export class InvalidIndex extends Exception {}
 
 export generic class Vector<T> {
   private var _data: ptr T = nullptr
@@ -23,6 +22,14 @@ export generic class Vector<T> {
 
     for i: Size in 0..this._length {
       this._data[i] @strict = initializer
+    }
+  }
+  public constructor(items: T...) {
+    this._size = this._length = items.length
+    this._data = allocate<T>(this._length)
+
+    for i: Size in 0..this._length {
+      this._data[i] @strict = items[i]
     }
   }
   public @copy constructor(other: ref Vector<T>) {
@@ -49,13 +56,13 @@ export generic class Vector<T> {
 
   public @read function first(): ref T {
     if this.length < 1
-      throw new InvalidIndex
+      throw new IndexOutOfBounds
     return this._data[0]
   }
 
   public @read function last(): ref T {
     if this.length < 1
-      throw new InvalidIndex
+      throw new IndexOutOfBounds
     return this._data[this._length - 1]
   }
 
@@ -65,7 +72,7 @@ export generic class Vector<T> {
 
   public function get(index: Size): ref T {
     if index >= this._length
-      throw new InvalidIndex
+      throw new IndexOutOfBounds
     return this._data[index]
   }
 

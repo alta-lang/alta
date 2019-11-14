@@ -11,6 +11,11 @@ export generic class Map<K, V> {
     this._keys = keys
     this._values = values
   }
+  public constructor(items: Pair<K, V>...) {
+    for i: Size in 0..items.length {
+      this[items[i].first] = items[i].second
+    }
+  }
 
   # Gets a reference to the value associated with the given key
   # @returns a reference to the value
