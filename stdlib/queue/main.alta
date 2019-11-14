@@ -1,0 +1,31 @@
+import List from "list"
+
+export generic class Queue<T> {
+  private var list: List<T>
+
+  public constructor() {}
+  public constructor(items: T...) {
+    for i: Size in 0..items.length {
+      this.push(items[i])
+    }
+  }
+
+  public function push(data: T): ref T {
+    return this.list.pushBack(data)
+  }
+  public function pop(): T {
+    return this.list.popFront()
+  }
+
+  public @read function front(): ref T {
+    return this.list.first
+  }
+  public @read function length(): Size {
+    return this.list.length
+  }
+
+  public function clear(): ref Queue<T> {
+    this.list.clear()
+    return this
+  }
+}
