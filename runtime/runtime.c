@@ -417,7 +417,7 @@ _Alta_runtime_export void _Alta_release_capture_class_state_cache(_Alta_wrapper*
 _Alta_runtime_export void* _Alta_generator_push(_Alta_basic_generator_state* generator, size_t size) {
   generator->stackSize += size;
   generator->stack = realloc(generator->stack, generator->stackSize);
-  return generator->stack + (generator->stackSize - size);
+  return (void*)((char*)generator->stack + (generator->stackSize - size));
 };
 
 _Alta_runtime_export void _Alta_generator_pop(_Alta_basic_generator_state* generator, size_t size) {
