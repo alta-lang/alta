@@ -175,6 +175,7 @@ typedef struct __Alta_basic_generator_state {
   size_t index;
   _Alta_bool done;
   void* parameters;
+  _Alta_basic_class* self;
 } _Alta_basic_generator_state;
 
 #endif // _ALTA_RUNTIME_DEFINITIONS_H
