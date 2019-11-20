@@ -28,4 +28,11 @@ export generic class Queue<T> {
     this.list.clear()
     return this
   }
+
+  public @read generator function items(): ref T {
+    for item: ref T in this.list.items {
+      yield item
+    }
+    return;
+  }
 }

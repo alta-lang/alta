@@ -723,4 +723,15 @@ export class String {
   public to bool {
     return this.length > 0
   }
+
+  public @read generator function items(): CodePoint {
+    if this.length == 0
+      return;
+    if this.length == 1
+      return this[0]
+    for i: Size in 0..this.length - 1 {
+      yield this[i]
+    }
+    return this[this._length - 1]
+  }
 }

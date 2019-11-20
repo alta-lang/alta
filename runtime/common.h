@@ -100,7 +100,6 @@ _Alta_runtime_export void* _Alta_lookup_virtual_function(const char* className, 
 _Alta_runtime_export void _Alta_register_virtual_function(const char* classNameAndSignature, void* functionPointer);
 
 _Alta_runtime_export void _Alta_invalid_return_value();
-_Alta_runtime_export void _Alta_generator_invalid_index();
 
 _Alta_runtime_export void _Alta_register_symbol(const char* symbol, _Alta_symbol_info info);
 _Alta_runtime_export _Alta_symbol_info* _Alta_find_info_for_symbol(const char* symbol);

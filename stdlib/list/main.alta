@@ -206,4 +206,17 @@ export generic class List<T> {
     }
     throw new Impossible
   }
+
+  public @read generator function items(): ref T {
+    if this.count == 0
+      return;
+    if this.count == 1
+      return *this.start.data
+    let ptr = this.start
+    for i: Size in 0..this.count - 1 {
+      yield *ptr.data
+      ptr = ptr.next
+    }
+    return *ptr.data
+  }
 }

@@ -424,8 +424,3 @@ _Alta_runtime_export void _Alta_generator_pop(_Alta_basic_generator_state* gener
   generator->stackSize -= size;
   generator->stack = realloc(generator->stack, generator->stackSize);
 };
-
-_Alta_runtime_export void _Alta_generator_invalid_index() {
-  printf("invalid generator index - aborting...");
-  abort();
-};

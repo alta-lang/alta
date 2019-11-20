@@ -136,4 +136,15 @@ export generic class Vector<T> {
   public this[Size]: ref T {
     return this.get($)
   }
+
+  public @read generator function items(): ref T {
+    if this._length == 0
+      return;
+    if this._length == 1
+      return this._data[0]
+    for i: Size in 0..this._length - 1 {
+      yield this._data[i]
+    }
+    return this._data[this._length - 1]
+  }
 }

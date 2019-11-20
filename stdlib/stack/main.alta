@@ -19,4 +19,11 @@ export generic class Stack<T> {
   public function pop(): T {
     return this._vec.pop()
   }
+
+  public @read generator function items(): ref T {
+    for item: ref T in this._vec.items {
+      yield item
+    }
+    return;
+  }
 }
