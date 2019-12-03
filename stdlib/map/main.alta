@@ -81,6 +81,6 @@ export generic class Map<K, V> {
     for i: Size in 0..this._keys.length - 1 {
       yield new Pair<K, V>(this._keys[i], this._values[i])
     }
-    return new Pair<K, V>(this._keys[this._length - 1], this._values[this._length - 1])
+    return new Pair<K, V>(this._keys[this._keys.length - 1], this._values[this._keys.length - 1])
   }
 }

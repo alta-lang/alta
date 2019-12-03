@@ -43,54 +43,88 @@ export class CodePoint {
   # we have to store references to the String *members* instead of
   # the `String` instance directly because Alta doesn't auto-declare
   # classes yet, so at this point, `String` does not exist
-  private var data: ref rawstring
-  private var length: ref Size
-  private var _index: Size = 0
+  private var data: (ref rawstring)? = null
+  private var length: (ref Size)? = null
+  private var _index: Size? = null
+  private var selfData: rawstring = nullptr
+  private var dataLength: Size = 0
 
+  public @from constructor(data: uint32) {
+    let bytes = unicode.utf32ToUTF8(data)
+    this.selfData = allocate<byte>(this.dataLength = bytes.length)
+    for i: Size in 0..bytes.length {
+      this.selfData[i] = bytes[i]
+    }
+  }
+  public @from constructor(data: byte) {
+    this.selfData = allocate<byte>(this.dataLength = 1)
+    this.selfData[0] = data
+  }
   public constructor(data: ref rawstring, length: ref Size, index: Size) {
-    this.data @strict = data
-    this.length @strict = length
+    this.data = data
+    this.length = length
     this._index = index
+  }
+  public @copy constructor(other: ref CodePoint) {
+    if other.data {
+      this.selfData = allocate<byte>(this.dataLength = other.byteLength)
+      let offset = other.byteIndex
+      for i: Size in 0..this.dataLength {
+        this.selfData[i] = other.bytes[offset + i]
+      }
+    } else {
+      this.selfData = allocate<byte>(this.dataLength = other.dataLength)
+      for i: Size in 0..this.dataLength {
+        this.selfData[i] = other.selfData[i]
+      }
+    }
   }
 
   private function findByteIndex(): Size {
     let i: Size = 0
-    for strIdx: Size in 0..this._index {
-      let bytes = unicode.detectRequiredUTF8Bytes(this.data[i])
+    for strIdx: Size in 0..(*this._index) {
+      let bytes = unicode.detectRequiredUTF8Bytes((*this.data)[i])
       i += bytes
     }
     return i
   }
 
   private function resize(idx: Size, needed: Size): void {
-    let current = unicode.detectRequiredUTF8Bytes(this.data[idx])
+    let current = unicode.detectRequiredUTF8Bytes((*this.data)[idx])
 
     if needed < current {
       let diff = current - needed
-      for i: Size in idx + current..this.length {
-        this.data[i - diff] = this.data[i]
+      for i: Size in idx + current..(*this.length) {
+        (*this.data)[i - diff] = (*this.data)[i]
       }
-      this.length -= diff
-      this.data = reallocate<byte>(this.data, this.length)
+      ;(*this.length) -= diff
+      ;(*this.data) = reallocate<byte>((*this.data), (*this.length))
     } else if needed > current {
       let diff = needed - current
-      this.data = reallocate<byte>(this.data, this.length + diff)
-      for i: Size in this.length + diff - 1:::idx + current {
-        this.data[i] = this.data[i - diff]
+      ;(*this.data) = reallocate<byte>((*this.data), (*this.length) + diff)
+      for i: Size in (*this.length) + diff - 1:::idx + current {
+        ;(*this.data)[i] = (*this.data)[i - diff]
       }
-      this.length += diff
+      ;(*this.length) += diff
     }
   }
 
   public this = uint32: ref CodePoint {
-    let idx = this.findByteIndex()
-
-    this.resize(idx, unicode.detectRequiredUTF8BytesForUTF32($))
-
     let bytes = unicode.utf32ToUTF8($)
 
-    for i: Size in 0..bytes.length {
-      this.data[idx + i] = bytes[i]
+    if this.data {
+      let idx = this.findByteIndex()
+
+      this.resize(idx, bytes.length)
+
+      for i: Size in 0..bytes.length {
+        ;(*this.data)[idx + i] = bytes[i]
+      }
+    } else {
+      this.dataLength = bytes.length
+      for i: Size in 0..this.dataLength {
+        this.selfData[i] = bytes[i]
+      }
     }
 
     return this
@@ -98,7 +132,6 @@ export class CodePoint {
 
   public this = rawconststring: ref CodePoint {
     let strLen = rawstringLength($)
-    let idx = this.findByteIndex()
 
     if strLen == 0
       throw new InvalidCodePoint
@@ -108,65 +141,75 @@ export class CodePoint {
     if strLen != required
       throw new InvalidCodePoint
 
-    this.resize(idx, required)
+    if this.data {
+      let idx = this.findByteIndex()
 
-    for i: Size in 0..strLen {
-      this.data[idx + i] = $[i]
+      this.resize(idx, required)
+
+      for i: Size in 0..strLen {
+        ;(*this.data)[idx + i] = $[i]
+      }
+    } else {
+      this.dataLength = strLen
+      for i: Size in 0..strLen {
+        this.selfData[i] = $[i]
+      }
     }
+    
 
     return this
-  }
-
-  public this = CodePoint: ref CodePoint {
-    let idx = this.findByteIndex()
-    let otherIdx = $.findByteIndex()
-    let required = unicode.detectRequiredUTF8Bytes($.data[otherIdx])
-
-    this.resize(idx, required)
-
-    for i: Size in 0..required {
-      this.data[idx + i] = $.data[otherIdx]
-    }
-
-    return this
-  }
-
-  public to byte {
-    let idx = this.findByteIndex()
-    let required = unicode.detectRequiredUTF8Bytes(this.data[idx])
-
-    if required > 1
-      throw new InvalidCodePoint
-
-    return this.data[idx]
   }
 
   public to uint32 {
-    let idx = this.findByteIndex()
-    let required = unicode.detectRequiredUTF8Bytes(this.data[idx])
+    let idx: Size = 0
+    let required: Size = 0
+    if this.data {
+      idx = this.findByteIndex()
+      required = unicode.detectRequiredUTF8Bytes((*this.data)[idx])
+    } else {
+      required = this.dataLength
+    }
+
     let vec = new Vector<uint8>(required)
 
     for i: Size in 0..required {
-      vec.push(this.data[idx + i])
+      vec.push(!this.data ? this.selfData[i] : (*this.data)[idx + i])
     }
 
     return unicode.utf8ToUTF32(vec)
   }
 
+  public to byte {
+    if !this.data {
+      if this.dataLength > 1
+        throw new InvalidCodePoint
+
+      return this.selfData[0]
+    }
+
+    let idx = this.findByteIndex()
+    let required = unicode.detectRequiredUTF8Bytes((*this.data)[idx])
+
+    if required > 1
+      throw new InvalidCodePoint
+
+    return (*this.data)[idx]
+  }
+
   public @read function index(): Size {
-    return this._index
+    return !this.data ? 0 : (*this._index)
   }
 
   public @read function byteIndex(): Size {
-    return this.findByteIndex()
+    return !this.data ? 0 : this.findByteIndex()
   }
 
   public @read function byteLength(): Size {
-    return unicode.detectRequiredUTF8Bytes(this.data[this.findByteIndex()])
+    return !this.data ? this.dataLength : unicode.detectRequiredUTF8Bytes((*this.data)[this.findByteIndex()])
   }
 
   public @read function bytes(): rawconststring {
-    return this.data
+    return !this.data ? this.selfData : (*this.data)
   }
 
   public this == CodePoint: bool {
