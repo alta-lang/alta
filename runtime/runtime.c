@@ -146,9 +146,11 @@ _Alta_runtime_export void _Alta_release_state(_Alta_lambda_state* state) {
 _Alta_runtime_export void _Alta_object_destroy(_Alta_object* object) {
   if (object->objectType == _Alta_object_type_class) {
     _Alta_basic_class* klass = (_Alta_basic_class*)object;
-    klass = (_Alta_basic_class*)(((char*)klass) - (klass->_Alta_class_info_struct.baseOffset));
-    if (!klass->_Alta_class_info_struct.destroyed && klass->_Alta_class_info_struct.destructor != NULL) {
-      klass->_Alta_class_info_struct.destructor(klass, _Alta_bool_false);
+    if (!klass->_Alta_class_info_struct.destroyed) {
+      klass = (_Alta_basic_class*)(((char*)klass) - (klass->_Alta_class_info_struct.baseOffset));
+      if (!klass->_Alta_class_info_struct.destroyed && klass->_Alta_class_info_struct.destructor != NULL) {
+        klass->_Alta_class_info_struct.destructor(klass, _Alta_bool_false);
+      }
     }
   } else if (object->objectType == _Alta_object_type_union) {
     _Alta_basic_union* uni = (_Alta_basic_union*)object;
