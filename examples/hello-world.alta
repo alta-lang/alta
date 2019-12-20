@@ -1,7 +1,7 @@
-import printf from "io"
+import printLine from "io"
 
 literal function main(): int {
-  printf("Hello, world!\n")
+  printLine("Hello, world!")
 
   return 0
 }

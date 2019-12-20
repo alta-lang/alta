@@ -1,6 +1,6 @@
-# this program reads the file it's given  and writes out the data to stdout, one character at a time
+# this program reads the file it's given and writes out the data to stdout, one character at a time
 import rawstring, Size from "types"
-import printf, printError, File from "io"
+import print, printError, File from "io"
 
 literal function main(argc: int, argv: ptr rawstring): int {
   if argc < 2 {
@@ -10,14 +10,14 @@ literal function main(argc: int, argv: ptr rawstring): int {
 
   let file = new File(argv[1], "r")
 
-  if !file.valid {
+  if !file {
     printError("Failed to open the file")
     return 2
   }
 
-  let char: byte = '\0'
+  let char = '\0'
   while char = file.read() {
-    printf("%c", char)
+    print(char)
   }
 
   return 0

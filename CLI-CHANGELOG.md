@@ -6,6 +6,22 @@ This project follows [semantic versioning](https://semver.org).
 ## [Unreleased]
 Nothing yet.
 
+## [0.6.1] - 2019-12-19
+### Fixed
+  * A fix in AltaCore now allows the error logging function in the CLI to find the right line when a parsing error occurs
+
+## [0.6.0] - 2019-12-14
+TBD
+
+## [0.5.2] - 2019-06-05
+TBD
+
+## [0.5.1] - 2019-06-02
+TBD
+
+## [0.5.0] - 2019-05-26
+TBD
+
 ## [0.4.0] - 2018-12-20
 ### Added
   * CMakeLists.txt generation for generated C code

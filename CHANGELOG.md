@@ -6,6 +6,14 @@ This project and all of its subprojects follow [semantic versioning](https://sem
 ## [Unreleased]
 Nothing yet.
 
+## [0.6.1] - 2019-12-19
+### Added
+#### Language
+  * `returnTypeOf` fetch/accessor attribute
+    * Used to indicate that the fetch or accessor should actually fetch the return type of the target
+    * e.g. if `foo` is a variable/function with a type of `(int, int) -> double`, `@returnTypeOf foo` would evaluate to a type of `double`
+    * This is particularly useful for getting the return type of a function that returns a capture class (in the future, once automatic return type inference is implemented) and capture-class-like types like generators
+
 ## [0.6.0] - 2019-12-14
 ### Added
 #### Language

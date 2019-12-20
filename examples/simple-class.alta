@@ -1,12 +1,12 @@
-import printf from "io"
+import printLine from "io"
 
 class Foo {
   public var bar: int = 9
   public constructor() {
-    printf("i'm constructor 1\n")
+    printLine("i'm constructor 1")
   }
   public constructor(bar: int) {
-    printf("i'm constructor 2\n")
+    printLine("i'm constructor 2")
     this.bar = bar + 1
   }
   public function calculate(bar: int): int {
@@ -15,18 +15,18 @@ class Foo {
 }
 
 literal function main(): int {
-  let foobar: Foo = new Foo
-  let foo2: Foo = new Foo(89)
+  let foobar = new Foo
+  let foo2 = new Foo(89)
 
-  printf("foobar.bar = %d\n", foobar.bar)
+  printLine("foobar.bar = ", foobar.bar)
 
   foobar.bar = 6
 
-  printf("foobar.bar = %d\n", foobar.bar)
+  printLine("foobar.bar = ", foobar.bar)
 
-  printf("foobar.calculate(8) = %d\n", foobar.calculate(8))
+  printLine("foobar.calculate(8) = ", foobar.calculate(8))
 
-  printf("foo2.bar = %d\n", foo2.bar)
+  printLine("foo2.bar = ", foo2.bar)
 
   return 0
 }

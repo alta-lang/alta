@@ -1,10 +1,10 @@
-import printf from "io"
+import printLine from "io"
 import Size, rawconststring from "types"
 import rawstringLength from "string"
 
 function doSomething(nums: int...): void {
   for i: Size in 0..nums.length {
-    printf("num #%llu = %d\n", i + 1, nums[i])
+    printLine("num #", i + 1, " = ", nums[i])
   }
 }
 
@@ -26,7 +26,7 @@ literal function main(): int {
   doSomething(5, 8, 3)
   
   let total = sum(3, 4, "foo", "bar")
-  printf("total = %llu\n", total)
+  printLine("total = ", total)
 
   return 0
 }
