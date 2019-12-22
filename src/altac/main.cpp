@@ -880,7 +880,7 @@ int main(int argc, char** argv) {
         return 11;
       }
 
-      Ceetah::AST::newlineOnExpressions = true;
+      Ceetah::AST::newlineOnExpressions = false;
 
       // TL;DR: reset the attributes, otherwise you'll end up with dangling
       //        references in the attribute callbacks for attributes in the

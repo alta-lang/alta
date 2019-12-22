@@ -15,9 +15,8 @@ literal function main(argc: int, argv: ptr rawstring): int {
     return 2
   }
 
-  let char = '\0'
-  while char = file.read() {
-    print(char)
+  while var char = file.read?() {
+    print(*char)
   }
 
   return 0
