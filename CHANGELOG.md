@@ -12,6 +12,8 @@ This project and all of its subprojects follow [semantic versioning](https://sem
       * Maybe do all possible parses and then analyze them later, taking into account line numbers, to determine which is the best alternative
   * `list` and `queue` packages
     * Remember to import `Size`!
+  * `util` package
+    * Fix floating point stringification for plain zeros (`0` or `0.0`)
 
 ## [0.6.2] - 2019-12-21
 *Codename*: Ancast Juniper

@@ -228,6 +228,9 @@ export function floatingPointToString<T>(number: T, radix: Size): String {
     ;++iteration
   }
 
+  if result.length == 0
+    result += '0'
+
   result += '.'
   iteration = 1
 
