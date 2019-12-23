@@ -10,6 +10,8 @@ This project and all of its subprojects follow [semantic versioning](https://sem
     * Fix the dereference operator being parsed as multiplication in the `Node` class
     * TODO in the parser: take line number into account when parsing expressions
       * Maybe do all possible parses and then analyze them later, taking into account line numbers, to determine which is the best alternative
+  * `list` and `queue` packages
+    * Remember to import `Size`!
 
 ## [0.6.2] - 2019-12-21
 *Codename*: Ancast Juniper

@@ -1,5 +1,6 @@
 import allocate, free from "memory"
 import Impossible, IndexOutOfBounds from "exceptions"
+import Size from "types"
 
 generic class Node<T> {
   # TODO: make T a raw member
