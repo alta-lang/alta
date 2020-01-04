@@ -4,6 +4,11 @@ All the changes for the language and CLI will be kept in this file. For changes 
 This project and all of its subprojects follow [semantic versioning](https://semver.org).
 
 ## [Unreleased]
+Nothing yet.
+
+## [0.6.3] - 2020-01-03
+*Codename*: Ancast Poppy
+
 ### Fixed
 #### Standard Library
   * `list` package
@@ -14,6 +19,10 @@ This project and all of its subprojects follow [semantic versioning](https://sem
     * Remember to import `Size`!
   * `util` package
     * Fix floating point stringification for plain zeros (`0` or `0.0`)
+### Added
+  * Packaging! (for the compiler)
+    * Alta now uses CPack to create distribution packages and installers for all the major platforms
+    * TODO: Setup automatic RPM builds using the Ubuntu image in Azure Pipelines (it *should* be possible)
 
 ## [0.6.2] - 2019-12-21
 *Codename*: Ancast Juniper

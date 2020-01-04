@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<component type="console-application">
+  <id>org.alta.alta</id>
+  <name>Alta</name>
+  <summary>Essentials for Alta developement</summary>
+  <url type="homepage">https://github.com/alta-lang/alta</url>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer_name>Alta Project Contributors</developer_name>
+  <provides>
+    <binary>altac</binary>
+    <binary>amake</binary>
+  </provides>
+  <releases>
+    <release version="0.6.3" date="2020-01-03"/>
+  </releases>
+</component>

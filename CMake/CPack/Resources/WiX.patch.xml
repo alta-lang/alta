@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<CPackWiXPatch>
+  <CPackWiXFragment Id="#PRODUCT">
+    <DirectoryRef Id="INSTALL_ROOT">
+      <!-- A17A = ALTA -->
+      <!--
+        Since we don't need that many GUIDs, we leave the only the last 4 digits
+        of the GUID available. The rest we fill with A17A (ALTA) as a sort of namespace.
+      -->
+      <Component Id="SetSystemPATH" Guid="A17AA17A-A17A-A17A-A17A-A17AA17A0001">
+        <CreateFolder/>
+        <Condition>INSTALL_TO_PATH = "System"</Condition>
+        <Environment Id="SystemPATH" Name="PATH" Value="[INSTALL_ROOT]" Permanent="no" Part="last" Action="set" System="yes"/>
+      </Component>
+      <Component Id="SetUserPATH" Guid="A17AA17A-A17A-A17A-A17A-A17AA17A0002">
+        <CreateFolder/>
+        <Condition>INSTALL_TO_PATH = "User"</Condition>
+        <Environment Id="UserPATH" Name="PATH" Value="[INSTALL_ROOT]" Permanent="no" Part="last" Action="set" System="no"/>
+      </Component>
+    </DirectoryRef>
+  </CPackWiXFragment>
+  <CPackWiXFragment Id="CM_C_Core" Level="1"></CPackWiXFragment>
+  <CPackWiXFragment Id="CM_C_Utilities" Level="3"></CPackWiXFragment>
+  <CPackWiXFragment Id="CM_C_StandardLibrary" Level="3"></CPackWiXFragment>
+  <CPackWiXFragment Id="CM_C_Documentation" Level="1000"></CPackWiXFragment>
+  <CPackWiXFragment Id="#PRODUCTFEATURE">
+    <ComponentRef Id="SetSystemPATH"/>
+    <ComponentRef Id="SetUserPATH"/>
+  </CPackWiXFragment>
+</CPackWiXPatch>
