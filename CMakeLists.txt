@@ -317,6 +317,7 @@ elseif (UNIX)
   set(CPACK_RPM_CHANGELOG_FILE "${PROJECT_SOURCE_DIR}/CHANGELOG.md")
   set(CPACK_RPM_PACKAGE_REQUIRES "libuuid >= 2.34")
   set(CPACK_RPM_PACKAGE_AUTOREQ TRUE)
+  set(CPACK_RPM_CHANGELOG_FILE "${PROJECT_SOURCE_DIR}/CMake/CPack/Resources/changelog.rpm.txt")
 
   # debian
   set(CPACK_DEBIAN_PACKAGE_DEPENDS "libuuid1 (>= 2.25)")
