@@ -4,7 +4,11 @@ All the changes for the language and CLI will be kept in this file. For changes 
 This project and all of its subprojects follow [semantic versioning](https://semver.org).
 
 ## [Unreleased]
-Nothing yet.
+### Fixed
+#### CLI
+  * Report the correct version information
+    * Using information from Git like tags, commits, and modification status
+    * The version information is automatically refreshed every build
 
 ## [0.6.3] - 2020-01-03
 *Codename*: Ancast Poppy
