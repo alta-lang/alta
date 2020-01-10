@@ -8,6 +8,7 @@
 #include <chrono>
 
 #include "../include/cli.hpp"
+#include <alta/version.hpp>
 #include <crossguid/guid.hpp>
 #include <json.hpp>
 #include <picosha2.h>
@@ -222,7 +223,7 @@ int main(int argc, char** argv) {
   try {
     auto defaultOutDir = "alta-build";
 
-    CLI::Parser parser("altac", "The Alta compiler", "0.3.1");
+    CLI::Parser parser("altac", "The Alta compiler", Alta::Version::version);
 
     auto compileSwitch = Option()
       .shortID('c')

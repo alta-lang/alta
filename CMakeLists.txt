@@ -7,6 +7,14 @@ project(alta
   LANGUAGES C CXX
 )
 
+# `_version.hpp` is never actually produced, it's just there to force
+# CMake to always rerun this command
+add_custom_command(
+  OUTPUT "${PROJECT_BINARY_DIR}/gen/include/alta/version.hpp"
+         "${PROJECT_BINARY_DIR}/gen/include/alta/_version.hpp"
+  COMMAND ${CMAKE_COMMAND} "-DPROJECT_BINARY_DIR=${PROJECT_BINARY_DIR}" -P "${PROJECT_SOURCE_DIR}/CMake/version.cmake"
+)
+
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 endif()
@@ -21,10 +29,12 @@ add_executable(altac
   "${PROJECT_SOURCE_DIR}/src/altac/main.cpp"
   "${PROJECT_SOURCE_DIR}/src/altac/printers.cpp"
   "${PROJECT_SOURCE_DIR}/src/altac/cli-parser.cpp"
+  "${PROJECT_BINARY_DIR}/gen/include/alta/version.hpp"
 )
 target_include_directories(altac
   PRIVATE "${PROJECT_SOURCE_DIR}/include"
   PRIVATE "${PROJECT_SOURCE_DIR}/deps/jsoncpp"
+  PRIVATE "${PROJECT_BINARY_DIR}/gen/include"
 )
 
 # credit to Austin Lasher (https://medium.com/@alasher/colored-c-compiler-output-with-ninja-clang-gcc-10bfe7f2b949)
