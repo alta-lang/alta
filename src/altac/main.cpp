@@ -216,6 +216,70 @@ bool checkHashes(const AltaCore::Filesystem::Path filepath, const std::stringstr
   return picosha2::get_hash_hex_string(fileHasher) == picosha2::get_hash_hex_string(stringHasher);
 };
 
+void logger(AltaCore::Logging::Message message) {
+  std::string severityColor;
+  std::string severityName;
+  switch (message.severity()) {
+    case AltaCore::Logging::Severity::Error: {
+      severityColor = CLI::COLOR_RED;
+      severityName = "Error";
+    } break;
+    case AltaCore::Logging::Severity::Warning: {
+      severityColor = CLI::COLOR_YELLOW;
+      severityName = "Warning";
+    } break;
+    case AltaCore::Logging::Severity::Information: {
+      severityColor = CLI::COLOR_BLUE;
+      severityName = "Information";
+    } break;
+    case AltaCore::Logging::Severity::Verbose: {
+      severityColor = CLI::COLOR_GREEN;
+      severityName = "Verbose";
+    } break;
+    default: {
+      severityColor = CLI::COLOR_NORMAL;
+      severityName = "";
+    } break;
+  }
+  std::cout << severityColor
+            << severityName
+            << CLI::COLOR_NORMAL
+            <<" ["
+            << message.code()
+            << ']';
+  if (message.location().file) {
+    std::cout << " at "
+              << message.location().file.toString()
+              << ":"
+              << message.location().line
+              << ":"
+              << message.location().column
+              ;
+  }
+  std::cout << ": " << message.summary() << std::endl;
+  if (message.location().file) {
+    std::ifstream fileSource(message.location().file.toString());
+    // seek to the beginning of the line
+    fileSource.seekg(message.location().filePosition - message.location().column + 1);
+    std::string line;
+    std::getline(fileSource, line);
+    std::cout << line << std::endl;
+    for (size_t i = 1; i < message.location().column; i++) {
+      std::cout << ' ';
+    }
+    std::cout << '^' << std::endl;
+  }
+  if (!message.description().empty()) {
+    auto formattedDescription = message.description();
+    size_t offset = 0;
+    while ((offset = formattedDescription.find('\n', offset)) != std::string::npos) {
+      formattedDescription.replace(offset, 1, "\n>> ");
+      offset += 4;
+    }
+    std::cout << ">> " << formattedDescription << std::endl;
+  }
+};
+
 int main(int argc, char** argv) {
   using json = nlohmann::json;
   using Option = CLI::Option;
@@ -349,6 +413,8 @@ int main(int argc, char** argv) {
       std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to determine the path of this executable" << std::endl;
       return 14;
     }
+
+    AltaCore::Logging::registerListener(logger);
 
     AltaCore::Modules::searchPaths.insert(AltaCore::Modules::searchPaths.end(), searchDirs.begin(), searchDirs.end());
     AltaCore::Modules::prioritySearchPaths.insert(AltaCore::Modules::prioritySearchPaths.end(), prioritySearchDirs.begin(), prioritySearchDirs.end());
@@ -728,27 +794,6 @@ int main(int argc, char** argv) {
         if (lexer.absences.size() > 0) printf("\n");
       }
 
-      auto logError = [&](AltaCore::Errors::Error& e) {
-        std::cerr << "Error at " << e.position.file.toString() << ":" << e.position.line << ":" << e.position.column << std::endl;
-        if (e.position.file) {
-          std::ifstream fileSource(e.position.file.toString());
-          // seek to the beginning of the line
-          fileSource.seekg(e.position.filePosition - e.position.column + 1);
-          std::string line;
-          std::getline(fileSource, line);
-          std::cerr << line << std::endl;
-          for (size_t i = 1; i < e.position.column; i++) {
-            std::cerr << ' ';
-          }
-          std::cerr << '^' << std::endl;
-          std::cerr << '>';
-          for (size_t i = 2; i < e.position.column; i++) {
-            std::cerr << ' ';
-          }
-        }
-        std::cerr << e.what() << std::endl;
-      };
-
       ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::AST::RootNode>> importCache;
 
       auto defaultParseModule = AltaCore::Modules::parseModule;
@@ -791,8 +836,11 @@ int main(int argc, char** argv) {
 
           return root;
         } catch (AltaCore::Errors::Error& e) {
-          logError(e);
+          logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
           exit(13);
+        } catch (AltaCore::Logging::Message& e) {
+          logger(e);
+          exit(14);
         }
       };
 
@@ -800,8 +848,11 @@ int main(int argc, char** argv) {
       try {
         parser.parse();
       } catch (AltaCore::Errors::Error& e) {
-        logError(e);
+        logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         exit(13);
+      } catch (AltaCore::Logging::Message& e) {
+        logger(e);
+        exit(14);
       }
 
       if (!parser.root || !(*parser.root)) {
@@ -834,7 +885,7 @@ int main(int argc, char** argv) {
         manifest["target-infos"].back()["package"] = root->info->module->packageInfo.name;
       } catch (AltaCore::Errors::DetailingError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed detailing" << CLI::COLOR_NORMAL << std::endl;
-        logError(e);
+        logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         return 12;
       }
 
@@ -865,7 +916,7 @@ int main(int argc, char** argv) {
         AltaCore::Validator::validate(root);
       } catch (AltaCore::Errors::ValidationError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed semantic validation" << CLI::COLOR_NORMAL << std::endl;
-        logError(e);
+        logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         return 11;
       }
 
@@ -877,7 +928,7 @@ int main(int argc, char** argv) {
         transpiledModules = Talta::recursivelyTranspileToC(root);
       } catch (AltaCore::Errors::ValidationError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed to transpile" << CLI::COLOR_NORMAL << std::endl;
-        logError(e);
+        logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         return 11;
       }
 
@@ -896,9 +947,6 @@ int main(int argc, char** argv) {
       // already been disposed of, leading to LOTS of dangling references
       AltaCore::Attributes::clearAllAttributes();
 
-      auto indexHeaderPath = outDir / "index.h";
-      std::stringstream outstringIndex;
-
       auto generalCmakeListsPath = outDir / "CMakeLists.txt";
       std::ofstream generalCmakeLists(generalCmakeListsPath.toString());
 
@@ -915,10 +963,6 @@ int main(int argc, char** argv) {
       ALTACORE_MAP<std::string, std::vector<std::shared_ptr<AltaCore::DET::ScopeItem>>> genericsUsed;
 
       std::string indexUUID = picosha2::hash256_hex_string(target.main.toString() + ':' + target.name + ':' + std::to_string((size_t)target.type));
-
-      // setup index header
-      outstringIndex << "#ifndef _ALTA_INDEX_" << indexUUID << '\n';
-      outstringIndex << "#define _ALTA_INDEX_" << indexUUID << '\n';
 
       // setup root cmakelists
       generalCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
@@ -945,6 +989,18 @@ int main(int argc, char** argv) {
           auto gMod = AltaCore::Util::getModule(generic->parentScope.lock().get()).lock();
           if (gMod->packageInfo.name == mod->packageInfo.name) continue;
           genericsUsed[mod->packageInfo.name].push_back(generic);
+        }
+      }
+
+      ALTACORE_MAP<std::string, std::unordered_set<std::string>> depIndex;
+
+      for (auto& [moduleName, info]: transpiledModules) {
+        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
+        auto base = outDir / moduleName;
+        auto hOut = base + ".h";
+        auto mangledModuleName = Talta::mangleName(mod.get());
+        for (auto& dependent: mod->dependents) {
+          depIndex[dependent->id].insert("#define _ALTA_MODULE_" + Talta::mangleName(dependent.get()) + "_0_INCLUDE_" + mangledModuleName + " \"" + hOut.relativeTo(outDir / dependent->name).toString('/') + "\"");
         }
       }
 
@@ -1018,11 +1074,31 @@ int main(int argc, char** argv) {
         outstringH << "#define _ALTA_RUNTIME_COMMON_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/common.h\"\n";
         outstringH << "#define _ALTA_RUNTIME_DEFINITIONS_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/definitions.h\"\n";
 
+        outstringH << "#ifndef _ALTA_HEADER_DEFS_" << mangledModuleName << '\n';
+        outstringH << "#define _ALTA_HEADER_DEFS_" << mangledModuleName << '\n';
         // define the definition header include path
         outstringH << "#define _ALTA_DEF_HEADER_" << mangledModuleName << " \"" << dOut.relativeTo(hOut).toString('/') << "\"\n";
 
-        // include the index in the module's header, otherwise we won't be able to find our dependencies
-        outstringH << "#include \"" << indexHeaderPath.relativeTo(hOut).toString('/') << "\"\n";
+        // add dependency header path definitions to our header
+        for (auto& dep: depIndex[mod->id]) {
+          outstringH << dep << '\n';
+        }
+
+        // add a header path definition to our header for ourselves (in case we have any generics that we use)
+        outstringH << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
+
+        for (size_t i = 0; i < gRoots.size(); i++) {
+          auto gBool = gBools[i];
+          if (!gBool) continue;
+          auto& gItem = gItems[i];
+          for (auto& item: mod->genericDependencies[gItem->id]) {
+            auto mangledImportName = Talta::mangleName(item.get());
+            auto depBase = outDir / item->name;
+            auto depHOut = depBase + ".h";
+            outstringH << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledImportName << " \"" << depHOut.relativeTo(cOut).toString('/') << "\"\n";
+          }
+        }
+        outstringH << "#endif /* _ALTA_HEADER_DEFS_" << mangledModuleName << " */\n";
 
         outstringH << hRoot->toString();
 
@@ -1038,14 +1114,6 @@ int main(int argc, char** argv) {
         manifest["targets"][target.name][mod->packageInfo.name]["definition-headers"].push_back(dOut.absolutify().normalize().toString());
 
         outstringD << dRoot->toString();
-
-        // finally, add our header to the index for all our dependents
-        for (auto& dependent: mod->dependents) {
-          outstringIndex << "#define _ALTA_MODULE_" << Talta::mangleName(dependent.get()) << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(outDir / dependent->name).toString('/') << "\"\n";
-        }
-
-        // add our header to index for ourselves (in case we have any generics that we use)
-        outstringIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
 
         bool outputH = true;
         if (hOut.exists()) {
@@ -1160,6 +1228,7 @@ int main(int argc, char** argv) {
           if (!gBool) continue;
           auto gOut = base + "-" + std::to_string(i - 1) + ".c";
           auto cOut = base + ".c";
+          auto hOut = base + ".h";
           auto& gItem = gItems[i];
           auto targetName = Talta::mangleName(gItem->parentScope.lock()->parentModule.lock().get()) + '-' + std::to_string(gItem->moduleIndex) + '-' + target.name;
           auto& genEntry = manifest["targets"][target.name][mod->packageInfo.name]["generics"][i];
@@ -1174,7 +1243,6 @@ int main(int argc, char** argv) {
             outfileCmake << "if (NOT TARGET alta-dummy-target-" << name << '-' << target.name << ")\n";
             outfileCmake << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << name << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << name << "\")\n";
             outfileCmake << "endif()\n";
-            outstringIndex << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledImportName << " \"" << depHOut.relativeTo(cOut).toString('/') << "\"\n";
           }
 
           genEntry["source"] = gOut.absolutify().normalize().toString();
@@ -1292,20 +1360,6 @@ int main(int argc, char** argv) {
 
         outfileCmake.close();
       }
-
-      outstringIndex << "#endif // _ALTA_INDEX_" << indexUUID << "\n";
-
-      bool outputIndexHeader = true;
-      if (indexHeaderPath.exists()) {
-        if (checkHashes(indexHeaderPath, outstringIndex)) {
-          outputIndexHeader = false;
-        }
-      }
-      if (outputIndexHeader) {
-        std::ofstream outfileIndex(indexHeaderPath.toString());
-        outfileIndex << outstringIndex.rdbuf();
-        outfileIndex.close();
-      }
     }
 
     rootCmakeLists.close();
@@ -1361,6 +1415,9 @@ int main(int argc, char** argv) {
     }
 
     return 0;
+  }  catch (AltaCore::Logging::Message& e) {
+    logger(e);
+    return 102;
   } catch (std::exception& e) {
     std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": " << e.what() << std::endl;
     return 100;
