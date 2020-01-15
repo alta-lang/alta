@@ -1,6 +1,6 @@
 import "libc/lib/stdlib" as stdlib
 import Size from "types"
-import Exception from "exceptions"
+import Exception, NullPointerAccess from "exceptions"
 
 export stdlib.malloc as unsafeAllocate
 export stdlib.calloc as unsafeZeroAllocate
@@ -135,6 +135,8 @@ export generic class Box<T> {
     return this.handle
   }
   public to ref T {
+    if !this
+      throw new NullPointerAccess
     return *this.handle
   }
   public to bool {
