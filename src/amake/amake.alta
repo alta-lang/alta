@@ -1,13 +1,21 @@
 import rawstring from "types"
 import Vector from "vector"
 import String from "string"
-
+import printLine from "io"
 
 literal function main(argc: int, argv: ptr rawstring): int {
   # make arguments easier to work with
   let args = new Vector<String>
   for i: int in 0..argc {
-    args.push(new String(argv[i]))
+    args.push(argv[i])
+  }
+
+  printLine("amake is currently under construction.")
+  printLine("for now, i'll just spit your arguments back at you.")
+  printLine("here you go:")
+
+  for arg: String in args.items {
+    printLine("arg: ", arg)
   }
 
   return 0
