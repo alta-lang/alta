@@ -28,7 +28,7 @@ jobs:
   - task: CMake@1
     displayName: "Build project"
     inputs:
-      cmakeArgs: "--build ."
+      cmakeArgs: "--build . --verbose"
 
   # package it
   - task: CMake@1
