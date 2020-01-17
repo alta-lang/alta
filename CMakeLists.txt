@@ -34,7 +34,7 @@ add_executable(altac
 target_include_directories(altac
   PRIVATE "${PROJECT_SOURCE_DIR}/include"
   PRIVATE "${PROJECT_SOURCE_DIR}/deps/jsoncpp"
-  PRIVATE "${PROJECT_BINARY_DIR}/gen/include/"
+  PRIVATE "${PROJECT_BINARY_DIR}/gen/include/alta"
 )
 
 # credit to Austin Lasher (https://medium.com/@alasher/colored-c-compiler-output-with-ninja-clang-gcc-10bfe7f2b949)
