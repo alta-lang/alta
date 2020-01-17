@@ -90,4 +90,6 @@ if (NOT "${ALTA_VERSION_FILE_CONTENTS}" STREQUAL "${ALTA_VERSION_FILE_CURRENT_CO
   file(WRITE "${PROJECT_BINARY_DIR}/gen/include/alta/version.hpp" "${ALTA_VERSION_FILE_CONTENTS}")
 endif()
 
-execute_process(COMMAND ls "${PROJECT_BINARY_DIR}/../**")
+execute_process(COMMAND ls "${PROJECT_BINARY_DIR}/gen")
+execute_process(COMMAND ls "${PROJECT_BINARY_DIR}/gen/include")
+execute_process(COMMAND ls "${PROJECT_BINARY_DIR}/gen/include/alta")
