@@ -1,3 +1,8 @@
+variables:
+# TODO: fetch the version from the latest Git tag
+- name: 'Alta.Version'
+  value: '0.6.3'
+
 jobs:
 - job: Linux
   pool:
@@ -37,11 +42,26 @@ jobs:
       cmakeArgs: "--build . --target package"
 
   # publish the relevant artifacts
-  - task: PublishPipelineArtifact@0
-    displayName: "Publish the relevant artifacts"
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish the Debian package"
     inputs:
-      artifactName: "altac-linux-amd64"
-      targetPath: $(Build.ArtifactStagingDirectory)
+      artifactName: "altac-linux-amd64-debian"
+      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Linux.deb"
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish the RPM package"
+    inputs:
+      artifactName: "altac-linux-amd64-rpm"
+      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Linux.rpm"
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish the tar.gz package"
+    inputs:
+      artifactName: "altac-linux-amd64-tar-gz"
+      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Linux.tar.gz"
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish the tar.xz package"
+    inputs:
+      artifactName: "altac-linux-amd64-tar-xz"
+      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Linux.tar.xz"
 
 - job: Windows
   pool:
@@ -81,11 +101,21 @@ jobs:
       cmakeArgs: "--build . --config Debug --target package"
 
   # publish the relevant artifacts
-  - task: PublishPipelineArtifact@0
-    displayName: "Publish the relevant artifacts"
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish the installer package"
     inputs:
-      artifactName: "altac-win64"
-      targetPath: $(Build.ArtifactStagingDirectory)
+      artifactName: "altac-win64-msi"
+      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-win64.msi"
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish the 7Zip package"
+    inputs:
+      artifactName: "altac-win64-7z"
+      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-win64.7z"
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish the zip package"
+    inputs:
+      artifactName: "altac-win64-zip"
+      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-win64.zip"
 
 - job: macOS
   pool:
@@ -118,8 +148,13 @@ jobs:
       cmakeArgs: "--build . --target package"
 
   # publish the relevant artificats
-  - task: PublishPipelineArtifact@0
-    displayName: "Publish the relevant artifacts"
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish the installer package"
     inputs:
-      artifactName: "altac-macos"
-      targetPath: $(Build.ArtifactStagingDirectory)
+      artifactName: "altac-macos-pkg"
+      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Darwin.pkg"
+  - task: PublishPipelineArtifact@1
+    displayName: "Publish the installer package"
+    inputs:
+      artifactName: "altac-macos-zip"
+      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Darwin.zip"
