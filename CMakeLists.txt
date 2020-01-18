@@ -14,6 +14,9 @@ add_custom_command(
          "${PROJECT_BINARY_DIR}/gen/include/alta/_version.hpp"
   COMMAND ${CMAKE_COMMAND} "-DPROJECT_BINARY_DIR=${PROJECT_BINARY_DIR}" -P "${PROJECT_SOURCE_DIR}/CMake/version.cmake"
 )
+add_custom_target(alta-version-header
+  DEPENDS "${PROJECT_BINARY_DIR}/gen/include/alta/version.hpp"
+)
 
 if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RelWithDebInfo")
@@ -29,7 +32,9 @@ add_executable(altac
   "${PROJECT_SOURCE_DIR}/src/altac/main.cpp"
   "${PROJECT_SOURCE_DIR}/src/altac/printers.cpp"
   "${PROJECT_SOURCE_DIR}/src/altac/cli-parser.cpp"
-  "${PROJECT_BINARY_DIR}/gen/include/alta/version.hpp"
+)
+add_dependencies(altac
+  alta-version-header
 )
 target_include_directories(altac
   PRIVATE "${PROJECT_SOURCE_DIR}/include"
