@@ -8,7 +8,7 @@
 #include <chrono>
 
 #include "../include/cli.hpp"
-#include <version.hpp>
+#include <alta/version.hpp>
 #include <crossguid/guid.hpp>
 #include <json.hpp>
 #include <picosha2.h>
