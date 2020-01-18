@@ -22,7 +22,7 @@ jobs:
     displayName: "Configure project with CMake (for debug)"
     condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
     inputs:
-      cmakeArgs: '-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Debug -DCPACK_OUTPUT_FILE_PREFIX="$(Build.ArtifactStagingDirectory)" -DCMAKE_VERBOSE_MAKEFILE=1 ..'
+      cmakeArgs: '-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Debug -DCPACK_OUTPUT_FILE_PREFIX="$(Build.ArtifactStagingDirectory)" ..'
 
    # build it
   - task: CMake@1
