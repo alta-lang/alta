@@ -239,7 +239,13 @@ endif()
 include(InstallRequiredSystemLibraries)
 include(CPackComponent)
 
-set(CPACK_PROJECT_CONFIG_FILE "${PROJECT_SOURCE_DIR}/CMake/cpack-config.cmake")
+configure_file(
+  "${PROJECT_SOURCE_DIR}/CMake/cpack-config.cmake.in"
+  "${PROJECT_BINARY_DIR}/cpack-config.cmake"
+  IMMEDIATE @ONLY
+)
+
+set(CPACK_PROJECT_CONFIG_FILE "${PROJECT_BINARY_DIR}/cpack-config.cmake")
 
 set(CPACK_PACKAGE_NAME "Alta")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Essentials for Alta development")

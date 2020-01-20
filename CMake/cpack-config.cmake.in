@@ -34,7 +34,7 @@ else()
   set(ALTA_SYSTEM_NAME "unknown")
 endif()
 
-if ("${CMAKE_SIZEOF_VOID_P}" EQUAL "8")
+if (@CMAKE_SIZEOF_VOID_P@ EQUAL 8)
   set(ALTA_SYSTEM_ARCHITECTURE "arch64")
 else()
   set(ALTA_SYSTEM_ARCHITECTURE "arch32")
