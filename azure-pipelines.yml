@@ -1,13 +1,17 @@
-variables:
-# TODO: fetch the version from the latest Git tag
-- name: 'Alta.Version'
-  value: '0.6.3'
-
 jobs:
 - job: Linux
   pool:
     vmImage: "ubuntu-latest"
   steps:
+  - bash: |
+      if tag=$(git describe --tags --match "v*.*.*" --exact-match); then
+        echo "##vso[task.setvariable variable='Alta.Version']$tag";
+      else
+        echo "##vso[task.setvariable variable='Alta.Version']$(git rev-parse --short=7 HEAD)"
+      fi
+      echo "##vso[task.setvariable variable='Alta.Commit']$(git rev-parse --short=7 HEAD)"
+    displayName: "Determine Alta compiler version"
+
   # set up GCC 7 (required to build because we use C++17)
   # and install uuid-dev (dependency of crossguid)
   - script: |
@@ -41,32 +45,106 @@ jobs:
     inputs:
       cmakeArgs: "--build . --target package"
 
+  - task: CopyFiles@2
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Copy files to include version information"
+    inputs:
+      sourceFolder: "$(Build.ArtifactStagingDirectory)"
+      contents: "altac-*"
+      targetFolder: "$(Build.ArtifactStagingDirectory)/release"
+
+  - bash: |
+      cd "$(Build.ArtifactStagingDirectory)/release"
+      for file in altac-*-linux-arch64.*; do
+        mv "$file" "altac-$(Alta.Version)-linux-arch64${file#altac-*-linux-arch64}"
+      done
+    displayName: "Rename files to include version information"
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+
   # publish the relevant artifacts
+  # debug
   - task: PublishPipelineArtifact@1
-    displayName: "Publish the Debian package"
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the Debian package (debug)"
     inputs:
       artifactName: "altac-linux-amd64-debian"
-      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Linux.deb"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-linux-arch64.deb"
   - task: PublishPipelineArtifact@1
-    displayName: "Publish the RPM package"
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the RPM package (debug)"
     inputs:
       artifactName: "altac-linux-amd64-rpm"
-      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Linux.rpm"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-linux-arch64.rpm"
   - task: PublishPipelineArtifact@1
-    displayName: "Publish the tar.gz package"
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the tar.gz package (debug)"
     inputs:
       artifactName: "altac-linux-amd64-tar-gz"
-      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Linux.tar.gz"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-linux-arch64.tar.gz"
   - task: PublishPipelineArtifact@1
-    displayName: "Publish the tar.xz package"
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the tar.xz package (debug)"
     inputs:
       artifactName: "altac-linux-amd64-tar-xz"
-      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Linux.tar.xz"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-linux-arch64.tar.xz"
+  # release
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the Debian package (release)"
+    inputs:
+      artifactName: "altac-linux-amd64-debian"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-linux-arch64.deb"
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the RPM package (release)"
+    inputs:
+      artifactName: "altac-linux-amd64-rpm"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-linux-arch64.rpm"
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the tar.gz package (release)"
+    inputs:
+      artifactName: "altac-linux-amd64-tar-gz"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-linux-arch64.tar.gz"
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the tar.xz package (release)"
+    inputs:
+      artifactName: "altac-linux-amd64-tar-xz"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-linux-arch64.tar.xz"
+
+  # upload it to sourceforge
+  # automated
+  - task: CopyFilesOverSSH@0
+    displayName: "Upload the artifacts to SourceForge (automated)"
+    inputs:
+      sshEndpoint: 'SourceForge Upload'
+      sourceFolder: '$(Build.ArtifactStagingDirectory)'
+      contents: 'altac-*'
+      targetFolder: '/home/frs/project/alta-builds/automated/$(Alta.Commit)'
+  # release
+  - task: CopyFilesOverSSH@0
+    displayName: "Upload the artifacts to SourceForge (release)"
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    inputs:
+      sshEndpoint: 'SourceForge Upload'
+      sourceFolder: '$(Build.ArtifactStagingDirectory)/release'
+      contents: 'altac-*'
+      targetFolder: '/home/frs/project/alta-builds/release/$(Alta.Version)'
 
 - job: Windows
   pool:
     vmImage: "windows-latest"
   steps:
+  - bash: |
+      if tag=$(git describe --tags --match "v*.*.*" --exact-match); then
+        echo "##vso[task.setvariable variable='Alta.Version']$tag";
+      else
+        echo "##vso[task.setvariable variable='Alta.Version']$(git rev-parse --short=7 HEAD)"
+      fi
+      echo "##vso[task.setvariable variable='Alta.Commit']$(git rev-parse --short=7 HEAD)"
+    displayName: "Determine Alta compiler version"
+
   # configure it
   - task: CMake@1
     displayName: "Configure project with CMake"
@@ -100,27 +178,94 @@ jobs:
     inputs:
       cmakeArgs: "--build . --config Debug --target package"
 
+  - task: CopyFiles@2
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Copy files to include version information"
+    inputs:
+      sourceFolder: "$(Build.ArtifactStagingDirectory)"
+      contents: "altac-*"
+      targetFolder: "$(Build.ArtifactStagingDirectory)/release"
+
+  - bash: |
+      cd "$(Build.ArtifactStagingDirectory)/release"
+      for file in altac-*-windows-arch64.*; do
+        mv "$file" "altac-$(Alta.Version)-windows-arch64${file#altac-*-windows-arch64}"
+      done
+    displayName: "Rename files to include version information"
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+
   # publish the relevant artifacts
+  # debug
   - task: PublishPipelineArtifact@1
-    displayName: "Publish the installer package"
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the installer package (debug)"
     inputs:
       artifactName: "altac-win64-msi"
-      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-win64.msi"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-windows-arch64.msi"
   - task: PublishPipelineArtifact@1
-    displayName: "Publish the 7Zip package"
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the 7Zip package (debug)"
     inputs:
       artifactName: "altac-win64-7z"
-      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-win64.7z"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-windows-arch64.7z"
   - task: PublishPipelineArtifact@1
-    displayName: "Publish the zip package"
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the zip package (debug)"
     inputs:
       artifactName: "altac-win64-zip"
-      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-win64.zip"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-windows-arch64.zip"
+  # release
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the installer package (release)"
+    inputs:
+      artifactName: "altac-win64-msi"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-windows-arch64.msi"
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the 7Zip package (release)"
+    inputs:
+      artifactName: "altac-win64-7z"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-windows-arch64.7z"
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the zip package (release)"
+    inputs:
+      artifactName: "altac-win64-zip"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-windows-arch64.zip"
+
+  # upload it to sourceforge
+  # automated
+  - task: CopyFilesOverSSH@0
+    displayName: "Upload the artifacts to SourceForge (automated)"
+    inputs:
+      sshEndpoint: 'SourceForge Upload'
+      sourceFolder: '$(Build.ArtifactStagingDirectory)'
+      contents: 'altac-*'
+      targetFolder: '/home/frs/project/alta-builds/automated/$(Alta.Commit)'
+  # release
+  - task: CopyFilesOverSSH@0
+    displayName: "Upload the artifacts to SourceForge (release)"
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    inputs:
+      sshEndpoint: 'SourceForge Upload'
+      sourceFolder: '$(Build.ArtifactStagingDirectory)/release'
+      contents: 'altac-*'
+      targetFolder: '/home/frs/project/alta-builds/release/$(Alta.Version)'
 
 - job: macOS
   pool:
     vmImage: "macOS-latest"
   steps:
+  - bash: |
+      if tag=$(git describe --tags --match "v*.*.*" --exact-match); then
+        echo "##vso[task.setvariable variable='Alta.Version']$tag";
+      else
+        echo "##vso[task.setvariable variable='Alta.Version']$(git rev-parse --short=7 HEAD)"
+      fi
+      echo "##vso[task.setvariable variable='Alta.Commit']$(git rev-parse --short=7 HEAD)"
+    displayName: "Determine Alta compiler version"
+
   # if this is a tagged commit, build for release
   - task: CMake@1
     displayName: "Configure project with CMake (for release)"
@@ -147,14 +292,65 @@ jobs:
     inputs:
       cmakeArgs: "--build . --target package"
 
-  # publish the relevant artificats
+  - task: CopyFiles@2
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Copy files to include version information"
+    inputs:
+      sourceFolder: "$(Build.ArtifactStagingDirectory)"
+      contents: "altac-*"
+      targetFolder: "$(Build.ArtifactStagingDirectory)/release"
+
+  - bash: |
+      cd "$(Build.ArtifactStagingDirectory)/release"
+      for file in altac-*-macos-arch64.*; do
+        mv "$file" "altac-$(Alta.Version)-macos-arch64${file#altac-*-macos-arch64}"
+      done
+    displayName: "Rename files to include version information"
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+
+  # publish the relevant artifacts
+  # debug
   - task: PublishPipelineArtifact@1
-    displayName: "Publish the installer package"
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the installer package (debug)"
     inputs:
       artifactName: "altac-macos-pkg"
-      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Darwin.pkg"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-macos-arch64.pkg"
   - task: PublishPipelineArtifact@1
-    displayName: "Publish the installer package"
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the zip package (debug)"
     inputs:
       artifactName: "altac-macos-zip"
-      targetPath: "$(Build.ArtifactStagingDirectory)/Alta-$(Alta.Version)-Darwin.zip"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-macos-arch64.zip"
+  # release
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the installer package (release)"
+    inputs:
+      artifactName: "altac-macos-pkg"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-macos-arch64.pkg"
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the zip package (release)"
+    inputs:
+      artifactName: "altac-macos-zip"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-macos-arch64.zip"
+
+  # upload it to sourceforge
+  # automated
+  - task: CopyFilesOverSSH@0
+    displayName: "Upload the artifacts to SourceForge (automated)"
+    inputs:
+      sshEndpoint: 'SourceForge Upload'
+      sourceFolder: '$(Build.ArtifactStagingDirectory)'
+      contents: 'altac-*'
+      targetFolder: '/home/frs/project/alta-builds/automated/$(Alta.Commit)'
+  # release
+  - task: CopyFilesOverSSH@0
+    displayName: "Upload the artifacts to SourceForge (release)"
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    inputs:
+      sshEndpoint: 'SourceForge Upload'
+      sourceFolder: '$(Build.ArtifactStagingDirectory)/release'
+      contents: 'altac-*'
+      targetFolder: '/home/frs/project/alta-builds/release/$(Alta.Version)'

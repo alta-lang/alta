@@ -17,3 +17,27 @@ if ((CPACK_GENERATOR MATCHES "NSIS") OR (CPACK_GENERATOR MATCHES "NSIS64") OR (C
   get_filename_component(README_NAME "${CPACK_RESOURCE_FILE_README}" NAME_WLE)
   set(CPACK_RESOURCE_FILE_README "${README_DIR}/${README_NAME}.installer.txt")
 endif()
+
+execute_process(
+  COMMAND git rev-parse --short=7 HEAD
+  OUTPUT_VARIABLE ALTA_GIT_COMMIT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+if (APPLE)
+  set(ALTA_SYSTEM_NAME "macos")
+elseif (WIN32)
+  set(ALTA_SYSTEM_NAME "windows")
+elseif (UNIX)
+  set(ALTA_SYSTEM_NAME "linux")
+else()
+  set(ALTA_SYSTEM_NAME "unknown")
+endif()
+
+if ("${CMAKE_SIZEOF_VOID_P}" EQUAL "8")
+  set(ALTA_SYSTEM_ARCHITECTURE "arch64")
+else()
+  set(ALTA_SYSTEM_ARCHITECTURE "arch32")
+endif()
+
+set(CPACK_PACKAGE_FILE_NAME "altac-${ALTA_GIT_COMMIT}-${ALTA_SYSTEM_NAME}-${ALTA_SYSTEM_ARCHITECTURE}")
