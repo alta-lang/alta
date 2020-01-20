@@ -5,11 +5,11 @@ jobs:
   steps:
   - bash: |
       if tag=$(git describe --tags --match "v*.*.*" --exact-match); then
-        echo "##vso[task.setvariable variable='Alta.Version']$tag";
+        echo "##vso[task.setvariable variable=Alta.Version]$tag";
       else
-        echo "##vso[task.setvariable variable='Alta.Version']$(git rev-parse --short=7 HEAD)"
+        echo "##vso[task.setvariable variable=Alta.Version]$(git rev-parse --short=7 HEAD)"
       fi
-      echo "##vso[task.setvariable variable='Alta.Commit']$(git rev-parse --short=7 HEAD)"
+      echo "##vso[task.setvariable variable=Alta.Commit]$(git rev-parse --short=7 HEAD)"
     displayName: "Determine Alta compiler version"
 
   # set up GCC 7 (required to build because we use C++17)
@@ -138,11 +138,11 @@ jobs:
   steps:
   - bash: |
       if tag=$(git describe --tags --match "v*.*.*" --exact-match); then
-        echo "##vso[task.setvariable variable='Alta.Version']$tag";
+        echo "##vso[task.setvariable variable=Alta.Version]$tag";
       else
-        echo "##vso[task.setvariable variable='Alta.Version']$(git rev-parse --short=7 HEAD)"
+        echo "##vso[task.setvariable variable=Alta.Version]$(git rev-parse --short=7 HEAD)"
       fi
-      echo "##vso[task.setvariable variable='Alta.Commit']$(git rev-parse --short=7 HEAD)"
+      echo "##vso[task.setvariable variable=Alta.Commit]$(git rev-parse --short=7 HEAD)"
     displayName: "Determine Alta compiler version"
 
   # configure it
@@ -259,11 +259,11 @@ jobs:
   steps:
   - bash: |
       if tag=$(git describe --tags --match "v*.*.*" --exact-match); then
-        echo "##vso[task.setvariable variable='Alta.Version']$tag";
+        echo "##vso[task.setvariable variable=Alta.Version]$tag";
       else
-        echo "##vso[task.setvariable variable='Alta.Version']$(git rev-parse --short=7 HEAD)"
+        echo "##vso[task.setvariable variable=Alta.Version]$(git rev-parse --short=7 HEAD)"
       fi
-      echo "##vso[task.setvariable variable='Alta.Commit']$(git rev-parse --short=7 HEAD)"
+      echo "##vso[task.setvariable variable=Alta.Commit]$(git rev-parse --short=7 HEAD)"
     displayName: "Determine Alta compiler version"
 
   # if this is a tagged commit, build for release
