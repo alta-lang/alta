@@ -20,18 +20,10 @@ jobs:
       sudo apt-get install -y gcc-7 g++-7 uuid-dev
     displayName: "Install GCC 7 and uuid-dev"
 
-  # if this is a tagged commit, build for release
   - task: CMake@1
-    displayName: "Configure project with CMake (for release)"
-    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Configure project with CMake"
     inputs:
       cmakeArgs: '-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Release -DCPACK_OUTPUT_FILE_PREFIX="$(Build.ArtifactStagingDirectory)" ..'
-  # otherwise, build for debug
-  - task: CMake@1
-    displayName: "Configure project with CMake (for debug)"
-    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
-    inputs:
-      cmakeArgs: '-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Debug -DCPACK_OUTPUT_FILE_PREFIX="$(Build.ArtifactStagingDirectory)" ..'
 
    # build it
   - task: CMake@1
@@ -151,20 +143,12 @@ jobs:
     inputs:
       cmakeArgs: '-DCPACK_OUTPUT_FILE_PREFIX="$(Build.ArtifactStagingDirectory)" ..'
 
-  # if this is a tagged commit, build for release
   # note: Visual Studio requires the build configuration type at build time,
   #       not configuration time (unlike Make on Linux and macOS)
   - task: CMake@1
-    displayName: "Build project (for release)"
-    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Build project"
     inputs:
       cmakeArgs: "--build . --config Release"
-  # otherwise, build for debug
-  - task: CMake@1
-    displayName: "Build project (for debug)"
-    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
-    inputs:
-      cmakeArgs: "--build . --config Debug"
 
   # package it
   - task: CMake@1
@@ -266,19 +250,10 @@ jobs:
       echo "##vso[task.setvariable variable=Alta.Commit]$(git rev-parse --short=7 HEAD)"
     displayName: "Determine Alta compiler version"
 
-  # if this is a tagged commit, build for release
   - task: CMake@1
-    displayName: "Configure project with CMake (for release)"
-    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Configure project with CMake"
     inputs:
       cmakeArgs: '-DCMAKE_BUILD_TYPE=Release -DCPACK_OUTPUT_FILE_PREFIX="$(Build.ArtifactStagingDirectory)" ..'
-
-  # otherwise, build for debug
-  - task: CMake@1
-    displayName: "Configure project with CMake (for debug)"
-    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
-    inputs:
-      cmakeArgs: '-DCMAKE_BUILD_TYPE=Debug -DCPACK_OUTPUT_FILE_PREFIX="$(Build.ArtifactStagingDirectory)" ..'
 
   # build it
   - task: CMake@1
