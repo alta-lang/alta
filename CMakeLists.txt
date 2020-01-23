@@ -345,7 +345,7 @@ elseif (UNIX)
   set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "build-essential (>= 12.4)")
 
   # setting generators
-  set(CPACK_GENERATOR "TGZ;TXZ")
+  set(CPACK_GENERATOR "ZIP;TGZ;TXZ")
 
   find_program(DPKG_COMMAND dpkg)
   find_program(RPMBUILD_COMMAND rpmbuild)
