@@ -152,15 +152,9 @@ jobs:
 
   # package it
   - task: CMake@1
-    displayName: "Package project (for release)"
-    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Package project"
     inputs:
       cmakeArgs: "--build . --config Release --target package"
-  - task: CMake@1
-    displayName: "Package project (for debug)"
-    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
-    inputs:
-      cmakeArgs: "--build . --config Debug --target package"
 
   - task: CopyFiles@2
     condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
