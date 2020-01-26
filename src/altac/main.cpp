@@ -543,6 +543,7 @@ int main(int argc, char** argv) {
         AltaCore::Modules::TargetInfo targetInfo;
         targetInfo.main = fn;
         targetInfo.name = fn.filename();
+        targetInfo.type = AltaCore::Modules::OutputBinaryType::Exectuable;
         targets.push_back(targetInfo);
         std::cout << CLI::COLOR_YELLOW << "Warning" << CLI::COLOR_NORMAL << ": failed to parse package information for \"" << fn.toString() << "\". Using default main of \"" << mainPackageModulePath.toString() << '"' << std::endl;
       }
@@ -566,12 +567,14 @@ int main(int argc, char** argv) {
           AltaCore::Modules::TargetInfo targetInfo;
           targetInfo.main = fn;
           targetInfo.name = fn.filename();
+          targetInfo.type = modInfo.outputBinary;
           targets.push_back(targetInfo);
         }
       } catch (AltaCore::Modules::PackageInformationNotFoundError&) {
         AltaCore::Modules::TargetInfo targetInfo;
         targetInfo.main = fn;
         targetInfo.name = fn.filename();
+        targetInfo.type = AltaCore::Modules::OutputBinaryType::Exectuable;
         targets.push_back(targetInfo);
       }
       if (!outputType.empty()) {

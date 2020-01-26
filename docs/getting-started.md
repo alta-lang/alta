@@ -6,7 +6,9 @@ So, you wanna program in Alta? Well, good choice! It's very simple to get starte
 ## Installing the transpiler
 First things first: you have to install Alta's C transpiler, `altac`. This is what's going to translate Alta code into C code for us, and then it'll help us compile the generated C code.
 
-If you haven't done so already, head on over to the [releases page](https://github.com/alta-lang/alta/releases) and download the ~~installer~~ binary for your system and put it somewhere in your PATH (or just make sure to reference it directly).
+If you haven't done so already, head on over to the [releases page](https://github.com/alta-lang/alta/releases) and download the installer for your system.
+
+> If you'd like, instead of installing it, you can download a portable version of the compiler and either put it somewhere in your PATH or just make sure to reference the executable directly.
 
 Second, make sure that you have a working C compiler. If not, install the right compiler for your system:
   * **Windows**
@@ -27,10 +29,10 @@ Great! Now you're ready to jump into the code!
 With that set up, let's go ahead and throw you into the deep end. Put the following code into a file called `hello-world.alta` and see if you can figure out what this does:
 
 ```alta
-import printf from "io"
+import printLine from "io"
 
 literal function main(): int {
-  printf("Hello, world!\n")
+  printLine("Hello, world!")
 
   return 0
 }
@@ -40,12 +42,12 @@ Don't worry, you don't have to figure that out on your own. Here's the line-by-l
 
 ### Line 1
 ```alta
-import printf from "io"
+import printLine from "io"
 ```
 
-As you can probably guess, this imports the `printf` function from the `io` module. The `io` module is a component of Alta's standard library that exposes many useful I/O constructs.
+As you can probably guess, this imports the `printLine` function from the `io` module. The `io` module is a component of Alta's standard library that exposes many useful I/O constructs.
 
-`printf` is a function that Alta borrows from C. In case you're not familiar with it, what `printf` does is that it prints the string given to it to the screen.
+`printLine` is a function that takes whatever it's given and prints it to the console, adding a new line to the console after doing so.
 
 > **Related**
 > * If you'd like to know more about the `io` module, [check out its API page](stdlib/io.md).
@@ -60,7 +62,7 @@ literal function main(): int {
 
 This defines a `literal` (i.e. un-mangled) function called `main` that takes no parameters and returns an integer (`int`).
 
-`main` is our special entry point; all programs (in Alta, C, and C++) must have one, since it's where the operating system begins executing code when our program is launched.
+`main` is our special entry point; all programs (in most systems programming languages like Alta, C, C++, Rust, and others) must have one, since it's where the operating system begins executing code when our program is launched.
 
 > **Related**
 > * For more info on functions and why the `literal` modifier is necessary here, see [the reference page on functions](language-reference/functions.md).
@@ -68,10 +70,10 @@ This defines a `literal` (i.e. un-mangled) function called `main` that takes no 
 
 ### Line 4
 ```alta
-  printf("Hello, world!\n")
+  printLine("Hello, world!")
 ```
 
-This calls the `printf` function with a string to print: "Hello, world!". Well, technically, this will print "Hello, world!" and then move to a new line because of the `\n`.
+This calls the `printLine` function with a string to print: "Hello, world!". What this makes `printLine` do is fairly obvious: it prints "Hello, world!" and then moves to a new line.
 
 ### Line 6
 ```alta
@@ -92,11 +94,13 @@ Open up a shell (Command Prompt or PowerShell on Windows, Terminal on macOS/Linu
 ### 2
 Run the following in that shell:
 ```bash
-altac hello-world.alta
+altac -c hello-world.alta
 ```
 
+The `-c` switch tells the Alta compiler to try to compile the C code after generating it.
+
 ### 3
-Your `hello-world` binary is now avilable in the `alta-build` folder. Go ahead and run it:
+Your `hello-world` binary is now available in the `alta-build` folder. Go ahead and run it:
 
 **PowerShell/Bash**:
 ```bash
