@@ -45,27 +45,27 @@ Classes
 #### `constructor(path: [types].rawconststring, mode: [types].rawconststring = "r")`
 **Summary**: Creates a File instance and associates with a newly-opened native file handle to file at the given `path`, with the given `mode`
 
-**Notes**
-
-By default, the file is opened for reading only (i.e. `mode` is set to "r" for "read").
-
 **Parameters**:
   * `path`:  The path to the file to open new native file handle to
   * `mode`:  The mode to open the file in. See [the C reference on fopen](https://en.cppreference.com/w/c/io/fopen) for possible values
 
+**Notes**
+
+By default, the file is opened for reading only (i.e. `mode` is set to "r" for "read").
+
 ### Methods
 #### `open(path: [types].rawconststring, mode: [types].rawconststring): void`
 **Summary**: Opens a new native file handle at the given `path` with the given `mode` and associates this File instance with it
-
-**Notes**
-
-Note that this *will* discard any handle this File is currently associated with.
 
 **Parameters**:
   * `path`:  The path to the file to open new native file handle to
   * `mode`:  The mode to open the file in. See [the C reference on fopen](https://en.cppreference.com/w/c/io/fopen) for possible values
 
 **Returns**: Nothing
+
+**Notes**
+
+Note that this *will* discard any handle this File is currently associated with.
 
 #### `close(): void`
 **Summary**: Closes the native file handle this File instance is associated with
@@ -112,6 +112,11 @@ Functions
 ## `print(data: ConsoleData...): void`
 **Summary**: Prints the data to the standard output (i.e. C's `stdout`)
 
+**Parameters**:
+  * `data`:  The items to print to the console
+
+**Returns**: Nothing
+
 **Notes**
 
 Items can be any type in the `ConsoleData` union and are formatted according to their type:
@@ -121,58 +126,53 @@ Items can be any type in the `ConsoleData` union and are formatted according to 
   * `char`s are printed literally
   * `bool`s are printed as `true` or `false`
 
-**Parameters**:
-  * `data`:  The items to print to the console
-
-**Returns**: Nothing
-
 ## `printLine(message: [types].rawconststring): void`
 **Summary**: Prints the message to the standard output (i.e. C's `stdout`), adding a new line to the console after doing so
-
-**Notes**
-
-Identical to calling `[libc/lib/stdio].printf` with a string containing a newline as its last character.
 
 **Parameters**:
   * `message`:  Hi
 
 **Returns**: Nothing
 
-## `printLine(data: ConsoleData...): void`
-**Summary**: Prints the data to the standard output (i.e. C's `stdout`), adding a new line to the console after doing so
-
 **Notes**
 
-Follows the same formatting rules as `print`.
+Identical to calling `[libc/lib/stdio].printf` with a string containing a newline as its last character.
+
+## `printLine(data: ConsoleData...): void`
+**Summary**: Prints the data to the standard output (i.e. C's `stdout`), adding a new line to the console after doing so
 
 **Parameters**:
   * `data`:  The itmes to print to the console
 
 **Returns**: Nothing
 
-## `printError(message: [types].rawconststring): void`
-**Summary**: Prints the message to the standard error output (i.e. C's `stderr`), adding a new line to the console after doing so
-
 **Notes**
 
-Identical to calling `[libc/lib/stdio].fprint` with `stderr` as the first argument and a string containing a newline as its last character.
+Follows the same formatting rules as `print`.
+
+## `printError(message: [types].rawconststring): void`
+**Summary**: Prints the message to the standard error output (i.e. C's `stderr`), adding a new line to the console after doing so
 
 **Parameters**:
   * `message`:  The message to print
 
 **Returns**: Nothing
 
-## `printError(data: ConsoleData...): void`
-**Summary**: Prints the data to the standard error output (i.e. C's `stderr`), adding a new line to the console after doing so
-
 **Notes**
 
-Follows the same formatting rules as `print`.
+Identical to calling `[libc/lib/stdio].fprint` with `stderr` as the first argument and a string containing a newline as its last character.
+
+## `printError(data: ConsoleData...): void`
+**Summary**: Prints the data to the standard error output (i.e. C's `stderr`), adding a new line to the console after doing so
 
 **Parameters**:
   * `data`:  The items to print to the console
 
 **Returns**: Nothing
+
+**Notes**
+
+Follows the same formatting rules as `print`.
 
 ## `printf(string: [types].rawconststring, data: any...): int`
 **Summary**: C's native `printf` function, exposed to Alta
