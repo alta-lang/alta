@@ -1,5 +1,5 @@
-# `io` module - Alta Standard Library
-This module contains I/O constructs bridged over from C, wrapped up to be more Alta-style. It also conatins some Alta-specific useful utilities.
+# `io` package - Alta Standard Library
+This package contains I/O constructs bridged over from C, wrapped up to be more Alta-style. It also contains some Alta-specific useful utilities.
 
 ## Depends on
   * `lib/stdio` from [`libc`](libc.md)
@@ -142,7 +142,7 @@ Identical to calling `[libc/lib/stdio].printf` with a string containing a newlin
 **Summary**: Prints the data to the standard output (i.e. C's `stdout`), adding a new line to the console after doing so
 
 **Parameters**:
-  * `data`:  The itmes to print to the console
+  * `data`:  The items to print to the console
 
 **Returns**: Nothing
 
@@ -160,7 +160,7 @@ Follows the same formatting rules as `print`.
 
 **Notes**
 
-Identical to calling `[libc/lib/stdio].fprint` with `stderr` as the first argument and a string containing a newline as its last character.
+Identical to calling `[libc/lib/stdio].fprintf` with `stderr` as the first argument and a string containing a newline as its last character.
 
 ## `printError(data: ConsoleData...): void`
 **Summary**: Prints the data to the standard error output (i.e. C's `stderr`), adding a new line to the console after doing so

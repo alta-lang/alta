@@ -1,5 +1,5 @@
-# `map` module - Alta Standard Library
-This module contains a generic Map class that works for most use cases.
+# `map` package - Alta Standard Library
+This package contains a generic Map class that works for most use cases.
 
 ## Depends On
   * [`vector`](vector.md)
@@ -12,8 +12,10 @@ Classes
 **Has copy constructor**: Yes (default)\
 **Has destructor**: Yes (default)\
 **Generics**:
-  * `K` = Key type
-  * `V` = Value type
+  * `K`: Key type
+  * `V`: Value type
+
+**Summary**: A basic map class (a.k.a. table, associative array, dictionary, object, etc.)
 
 **Notes**
 
@@ -95,7 +97,7 @@ This is essentially the same as overwriting this Map with a new empty Map (i.e. 
 
 **Summary**: A vector containing copies of this Map's values
 
-#### `items: @generator() [util].Pair<K, V>`
+#### `items: @generator [util].Pair<K, V>`
 **Read**: Yes\
 **Write**: No
 
@@ -103,7 +105,7 @@ This is essentially the same as overwriting this Map with a new empty Map (i.e. 
 
 **Notes**
 
-This is an iterator. It generates pairs of keys and their corresponding values. Note that these keys and values are copies of the internal members; in other words, modifying them will *not* modify the keys or values contained in the Map.
+This is an iterator. It generates pairs of keys and their corresponding values. Note that these keys and values are *copies* of the internal members; in other words, modifying them will *not* modify the keys or values contained in the Map.
 
 This accessor is intended to make it easy to iterate over the entries in the map, like so:
 ```alta
@@ -124,9 +126,9 @@ for entry: Pair<MyKey, MyValue> in myCoolMap.entries.items {
 **Summary**: Retrieves the value associated with the given key
 
 **Parameters**:
-  * The key whose associated value will be retrieved
+  * The key associated with the value to retrieve
 
-**Returns**: A reference to the value assocated with the given key
+**Returns**: A reference to the value associated with the given key
 
 **Notes**
 

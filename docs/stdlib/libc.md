@@ -1,5 +1,5 @@
-# `libc` module - Alta Standard Library
-This modules declares most of the functions, structures, types, constants, and variables from the C99 standard library.
+# `libc` package - Alta Standard Library
+This package declares most of the functions, structures, types, constants, and variables from the C99 standard library.
 
 If a declaration is missing, it's most likely because it's not relevant to or usable in Alta (e.g. `va_start` and `va_end`, `iso646.h`, etc.).
 
@@ -43,4 +43,4 @@ libc.stdio
 libc.stdio.printf("blah blah\n")
 ```
 
-For a list of exports, see to the references linked in the [Depends On](#depends-on) section above.
+For a list of exports, see the references linked in the [Depends On](#depends-on) section above.
