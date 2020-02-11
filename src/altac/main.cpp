@@ -996,6 +996,7 @@ int main(int argc, char** argv) {
       }
 
       ALTACORE_MAP<std::string, std::unordered_set<std::string>> depIndex;
+      ALTACORE_MAP<std::string, std::string> includeMap;
 
       for (auto& [moduleName, info]: transpiledModules) {
         auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
@@ -1003,9 +1004,29 @@ int main(int argc, char** argv) {
         auto hOut = base + ".h";
         auto mangledModuleName = Talta::mangleName(mod.get());
         for (auto& dependent: mod->dependents) {
-          depIndex[dependent->id].insert("#define _ALTA_MODULE_" + Talta::mangleName(dependent.get()) + "_0_INCLUDE_" + mangledModuleName + " \"" + hOut.relativeTo(outDir / dependent->name).toString('/') + "\"");
+          auto name = "_ALTA_MODULE_" + Talta::mangleName(dependent.get()) + "_0_INCLUDE_" + mangledModuleName;
+          auto headerPath = hOut.relativeTo(outDir / dependent->name).toString('/');
+          depIndex[dependent->id].insert("#define " + name + " \"" + headerPath + '"');
+          includeMap[name] = headerPath;
         }
       }
+
+      std::function<void(std::shared_ptr<Ceetah::AST::Node>)> replaceItems = [&](std::shared_ptr<Ceetah::AST::Node> node) {
+        if (auto root = std::dynamic_pointer_cast<Ceetah::AST::RootNode>(node)) {
+          for (auto& stmt: root->statements) {
+            replaceItems(stmt);
+          }
+        } else if (auto incl = std::dynamic_pointer_cast<Ceetah::AST::InclusionalPreprocessorDirective>(node)) {
+          if (incl->type == Ceetah::AST::InclusionType::Computed && includeMap.find(incl->includeQuery) != includeMap.end()) {
+            incl->type = Ceetah::AST::InclusionType::Local;
+            incl->includeQuery = includeMap[incl->includeQuery];
+          }
+        } else if (auto cond = std::dynamic_pointer_cast<Ceetah::AST::ConditionalPreprocessorDirective>(node)) {
+          for (auto& stmt: cond->nodes) {
+            replaceItems(stmt);
+          }
+        }
+      };
 
       for (auto& [moduleName, info]: transpiledModules) {
         auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
@@ -1016,6 +1037,11 @@ int main(int argc, char** argv) {
         auto dOut = base + ".d.h";
         std::vector<AltaCore::Filesystem::Path> gOuts;
         auto cmakeOut = modOutDir / "CMakeLists.txt";
+
+        replaceItems(hRoot);
+        for (auto& gRoot: gRoots) {
+          replaceItems(gRoot);
+        }
 
         manifest["targets"][target.name][mod->packageInfo.name]["module-names"].push_back(mod->name);
         manifest["targets"][target.name][mod->packageInfo.name]["original-sources"].push_back(mod->path.absolutify().normalize().toString());
@@ -1081,14 +1107,6 @@ int main(int argc, char** argv) {
         outstringH << "#define _ALTA_HEADER_DEFS_" << mangledModuleName << '\n';
         // define the definition header include path
         outstringH << "#define _ALTA_DEF_HEADER_" << mangledModuleName << " \"" << dOut.relativeTo(hOut).toString('/') << "\"\n";
-
-        // add dependency header path definitions to our header
-        for (auto& dep: depIndex[mod->id]) {
-          outstringH << dep << '\n';
-        }
-
-        // add a header path definition to our header for ourselves (in case we have any generics that we use)
-        outstringH << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledModuleName << " \"" << hOut.relativeTo(cOut).toString('/') << "\"\n";
 
         for (size_t i = 0; i < gRoots.size(); i++) {
           auto gBool = gBools[i];
