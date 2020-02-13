@@ -280,6 +280,48 @@ void logger(AltaCore::Logging::Message message) {
   }
 };
 
+// credit to @evan-teran on StackOverflow
+// https://stackoverflow.com/a/217605
+// <stackoverflow-code>
+  // trim from start (copying)
+  // trim from start (in place)
+  static inline void ltrim(std::string &s) {
+    s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](int ch) {
+      return !std::isspace(ch);
+    }));
+  };
+
+  // trim from end (in place)
+  static inline void rtrim(std::string &s) {
+    s.erase(std::find_if(s.rbegin(), s.rend(), [](int ch) {
+      return !std::isspace(ch);
+    }).base(), s.end());
+  };
+
+  // trim from both ends (in place)
+  static inline void trim(std::string &s) {
+    ltrim(s);
+    rtrim(s);
+  };
+
+  static inline std::string ltrimCopy(std::string s) {
+    ltrim(s);
+    return s;
+  };
+
+  // trim from end (copying)
+  static inline std::string rtrimCopy(std::string s) {
+    rtrim(s);
+    return s;
+  };
+
+  // trim from both ends (copying)
+  static inline std::string trimCopy(std::string s) {
+    trim(s);
+    return s;
+  };
+// </stackoverflow-code>
+
 int main(int argc, char** argv) {
   using json = nlohmann::json;
   using Option = CLI::Option;
@@ -997,6 +1039,7 @@ int main(int argc, char** argv) {
 
       ALTACORE_MAP<std::string, std::unordered_set<std::string>> depIndex;
       ALTACORE_MAP<std::string, std::string> includeMap;
+      ALTACORE_MAP<std::string, std::shared_ptr<Ceetah::AST::ConditionalPreprocessorDirective>> includeBlocks;
 
       for (auto& [moduleName, info]: transpiledModules) {
         auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
@@ -1009,24 +1052,131 @@ int main(int argc, char** argv) {
           depIndex[dependent->id].insert("#define " + name + " \"" + headerPath + '"');
           includeMap[name] = headerPath;
         }
+        auto name = "_ALTA_MODULE_" + mangledModuleName + "_0_INCLUDE_" + mangledModuleName;
+        auto headerPath = hOut.relativeTo(outDir / mod->name).toString('/');
+        depIndex[mod->id].insert("#define " + name + " \"" + headerPath + '"');
+        includeMap[name] = headerPath;
       }
 
-      std::function<void(std::shared_ptr<Ceetah::AST::Node>)> replaceItems = [&](std::shared_ptr<Ceetah::AST::Node> node) {
-        if (auto root = std::dynamic_pointer_cast<Ceetah::AST::RootNode>(node)) {
-          for (auto& stmt: root->statements) {
-            replaceItems(stmt);
+      auto populateBlocks = [&](std::shared_ptr<Ceetah::AST::RootNode> root) {
+        auto builder = Ceetah::Builder(root);
+        while (true) {
+          if (builder.insertionPoint->index >= builder.insertionPoint->containerLength()) {
+            if (builder.insertionPoint->parent) {
+              builder.exitInsertionPoint();
+              builder.insertionPoint->moveForward();
+              continue;
+            } else {
+              break;
+            }
           }
-        } else if (auto incl = std::dynamic_pointer_cast<Ceetah::AST::InclusionalPreprocessorDirective>(node)) {
-          if (incl->type == Ceetah::AST::InclusionType::Computed && includeMap.find(incl->includeQuery) != includeMap.end()) {
-            incl->type = Ceetah::AST::InclusionType::Local;
-            incl->includeQuery = includeMap[incl->includeQuery];
-          }
-        } else if (auto cond = std::dynamic_pointer_cast<Ceetah::AST::ConditionalPreprocessorDirective>(node)) {
-          for (auto& stmt: cond->nodes) {
-            replaceItems(stmt);
+          auto node = builder.insertionPoint->container()[builder.insertionPoint->index];
+          if (auto cond = std::dynamic_pointer_cast<Ceetah::AST::ConditionalPreprocessorDirective>(node)) {
+            if (cond->test.substr(0, 9) == "(defined(") {
+              includeBlocks[cond->test.substr(9, cond->test.find(')') - 9)] = cond;
+            }
+            builder.enterInsertionPoint();
+          } else {
+            builder.insertionPoint->moveForward();
           }
         }
       };
+
+      auto replaceItems = [&](std::shared_ptr<Ceetah::AST::RootNode> root, bool isHeader = false) {
+        auto builder = Ceetah::Builder(root);
+        std::unordered_set<std::string> included;
+        while (true) {
+          if (builder.insertionPoint->index >= builder.insertionPoint->containerLength()) {
+            if (builder.insertionPoint->parent) {
+              builder.exitInsertionPoint();
+              builder.insertionPoint->moveForward();
+              continue;
+            } else {
+              break;
+            }
+          }
+          bool moveForward = true;
+          auto node = builder.insertionPoint->container()[builder.insertionPoint->index];
+          if (!isHeader) {
+            if (auto def = std::dynamic_pointer_cast<Ceetah::AST::DefinitivePreprocessorDirective>(node)) {
+              if (def->definition.substr(0, 6) == "_ALTA_") {
+                builder.insertionPoint->moveForward();
+                if (builder.insertionPoint->index < builder.insertionPoint->containerLength()) {
+                  auto newNode = builder.insertionPoint->container()[builder.insertionPoint->index];
+                  if (auto incl = std::dynamic_pointer_cast<Ceetah::AST::InclusionalPreprocessorDirective>(newNode)) {
+                    auto defName = trimCopy(def->definition);
+                    auto query = trimCopy(incl->includeQuery);
+                    if (incl->type == Ceetah::AST::InclusionType::Computed && includeMap.find(query) != includeMap.end()) {
+                      auto block = includeBlocks[defName];
+                      bool ok = included.find(defName) == included.end();
+                      bool insertChildren = block && block->test == "(defined(" + defName + ")) && !defined(_DEFINED_" + defName + ')';
+                      builder.insertionPoint->moveBackward();
+                      builder.insertionPoint->remove(false);
+                      builder.insertionPoint->remove(false);
+                      if (block) {
+                        if (ok) {
+                          if (insertChildren) {
+                            auto point = builder.insertionPoint->save();
+                            for (auto& child: block->nodes) {
+                              builder.insert(child->clone());
+                            }
+                            builder.insertionPoint->restore(point);
+                          } else {
+                            builder.insert(block->clone());
+                            builder.insertionPoint->moveBackward();
+                          }
+                        }
+                      }
+                      included.insert(defName);
+                      moveForward = false;
+                    }
+                  } else {
+                    builder.insertionPoint->moveBackward();
+                  }
+                }
+              }
+            }
+          }
+          if (moveForward) {
+            if (auto incl = std::dynamic_pointer_cast<Ceetah::AST::InclusionalPreprocessorDirective>(node)) {
+              if (incl->type == Ceetah::AST::InclusionType::Computed && includeMap.find(incl->includeQuery) != includeMap.end()) {
+                incl->type = Ceetah::AST::InclusionType::Local;
+                incl->includeQuery = includeMap[incl->includeQuery];
+              }
+            }
+          }
+          if (auto cond = std::dynamic_pointer_cast<Ceetah::AST::ConditionalPreprocessorDirective>(node)) {
+            builder.enterInsertionPoint();
+          } else if (moveForward) {
+            builder.insertionPoint->moveForward();
+          }
+        }
+      };
+
+      for (auto& [moduleName, info]: transpiledModules) {
+        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
+        populateBlocks(hRoot);
+      }
+
+      for (auto& [moduleName, info]: transpiledModules) {
+        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
+        auto base = outDir / moduleName;
+        auto hOut = base + ".h";
+        auto cOut = base + ".c";
+        for (size_t i = 0; i < gRoots.size(); i++) {
+          auto gOut = i == 0 ? cOut : base + "-" + std::to_string(i - 1) + ".c";
+          auto& gRoot = gRoots[i];
+          auto& gItem = gItems[i];
+          Ceetah::Builder builder = Ceetah::Builder(gRoot);
+          auto mangledModuleName = Talta::mangleName(mod.get());
+          builder.insertPreprocessorInclusion(hOut.relativeTo(gOut).toString('/'), Ceetah::AST::InclusionType::Local);
+          if (gItem) {
+            builder.insertPreprocessorDefinition(Talta::headerMangle(gItem.get()));
+          }
+          builder.insertPreprocessorInclusion("_ALTA_MODULE_" + mangledModuleName + "_0_INCLUDE_" + mangledModuleName, Ceetah::AST::InclusionType::Computed);
+          replaceItems(gRoot);
+        }
+      }
 
       for (auto& [moduleName, info]: transpiledModules) {
         auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
@@ -1038,10 +1188,7 @@ int main(int argc, char** argv) {
         std::vector<AltaCore::Filesystem::Path> gOuts;
         auto cmakeOut = modOutDir / "CMakeLists.txt";
 
-        replaceItems(hRoot);
-        for (auto& gRoot: gRoots) {
-          replaceItems(gRoot);
-        }
+        replaceItems(hRoot, true);
 
         manifest["targets"][target.name][mod->packageInfo.name]["module-names"].push_back(mod->name);
         manifest["targets"][target.name][mod->packageInfo.name]["original-sources"].push_back(mod->path.absolutify().normalize().toString());
@@ -1089,11 +1236,6 @@ int main(int argc, char** argv) {
           auto& outstringG = outstringGs[i];
           auto& gOut = gOuts[i];
           auto& gItem = gItems[i];
-          if (gItem) {
-            auto gName = Talta::headerMangle(gItem.get());
-            outstringG << "#define " + gName + "\n";
-          }
-          outstringG << "#include \"" << hOut.relativeTo(gOut).toString('/') << "\"\n";
           outstringG << gRoot->toString();
         }
 
