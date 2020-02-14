@@ -97,11 +97,11 @@ export class CodePoint {
       for i: Size in idx + current..(*this.length) {
         (*this.data)[i - diff] = (*this.data)[i]
       }
+      ;(*this.data) = reallocate<byte>(*this.data, *this.length, *this.length - diff)
       ;(*this.length) -= diff
-      ;(*this.data) = reallocate<byte>((*this.data), (*this.length))
     } else if needed > current {
       let diff = needed - current
-      ;(*this.data) = reallocate<byte>((*this.data), (*this.length) + diff)
+      ;(*this.data) = reallocate<byte>(*this.data, *this.length, *this.length + diff)
       for i: Size in (*this.length) + diff - 1:::idx + current {
         ;(*this.data)[i] = (*this.data)[i - diff]
       }
@@ -405,7 +405,7 @@ export class String {
   }
 
   private function resize(length: Size): ref String {
-    let tmp = reallocate<byte>(this._data, length + 1)
+    let tmp = reallocate<byte>(this._data, this._length, length + 1)
 
     # TODO: check for null pointer rather than strictly zero.
     #       while extremely unlikely and illogical, a platform

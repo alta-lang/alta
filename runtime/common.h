@@ -108,4 +108,8 @@ _Alta_runtime_export const char* _Alta_symbol_to_full_Alta_name(const char* symb
 _Alta_runtime_export void* _Alta_generator_push(_Alta_basic_generator_state* generator, size_t size);
 _Alta_runtime_export void _Alta_generator_pop(_Alta_basic_generator_state* generator, size_t size);
 
+_Alta_runtime_export void _Alta_no_op_optional_destructor(_Alta_basic_optional* optional);
+_Alta_runtime_export void _Alta_no_op_union_destructor(_Alta_basic_union* uni);
+_Alta_runtime_export void _Alta_no_op_class_destructor(_Alta_basic_class* class, _Alta_bool persistent);
+
 #endif /* _ALTA_RUNTIME_COMMON_H */

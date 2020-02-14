@@ -78,7 +78,7 @@ export generic class Vector<T> {
 
   private function ensureSize(desiredSize: Size): void {
     if this._size < desiredSize {
-      let tmp = reallocate<T>(this._data, desiredSize)
+      let tmp = reallocate<T>(this._data, this._size, desiredSize)
 
       if tmp == 0 {
         throw new ResizeFailure

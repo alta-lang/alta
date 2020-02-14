@@ -11,6 +11,11 @@ export class MemoryAllocationFailure extends Exception {}
 
 export generic function allocate<T>(count: Size): ptr T {
   let result = stdlib.malloc(count * sizeof T) as ptr T
+  # initialize the items to invalid values so that regular assignment
+  # doesn't call any destructors
+  for i: Size in 0..count {
+    result[i] @strict = @invalid(type T) $
+  }
   # some implementations return a null pointer when `count` is zero
   if count > 0 && !result {
     throw new MemoryAllocationFailure
@@ -20,6 +25,11 @@ export generic function allocate<T>(count: Size): ptr T {
 
 export generic function zeroAllocate<T>(count: Size): ptr T {
   let result = stdlib.calloc(count, sizeof T) as ptr T
+  # initialize the items to invalid values so that regular assignment
+  # doesn't call any destructors
+  for i: Size in 0..count {
+    result[i] @strict = @invalid(type T) $
+  }
   if count > 0 && !result {
     throw new MemoryAllocationFailure
   }
@@ -30,9 +40,14 @@ export generic function free<T>(data: ptr T): void {
   stdlib.free(data as ptr void)
 }
 
-export generic function reallocate<T>(data: ptr T, count: Size): ptr T {
-  let result = stdlib.realloc(data as ptr void, count * sizeof T) as ptr T
-  if count > 0 && !result {
+export generic function reallocate<T>(data: ptr T, oldCount: Size, newCount: Size): ptr T {
+  let result = stdlib.realloc(data as ptr void, newCount * sizeof T) as ptr T
+  # initialize the items to invalid values so that regular assignment
+  # doesn't call any destructors
+  for i: Size in oldCount..newCount {
+    result[i] @strict = @invalid(type T) $
+  }
+  if newCount > 0 && !result {
     throw new MemoryAllocationFailure
   }
   return result
