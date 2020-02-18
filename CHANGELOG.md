@@ -9,6 +9,39 @@ This project and all of its subprojects follow [semantic versioning](https://sem
   * Report the correct version information
     * Using information from Git like tags, commits, and modification status
     * The version information is automatically refreshed every build
+  * Target output types are now respected
+#### Standard Library
+  * `memory` package
+    * Don't allow null pointer to be dereferenced in `Box`
+#### Language
+  * `struct`s can now be constructed persistently (i.e. used with `new*`)
+### Changed
+#### CLI
+  * Brand-new logging system
+    * AltaCore has implemented a new logging system which allows it to send messages with different severities and codes, so we now use that to provide better feedback
+    * In addition, the new format is more similar to GCC's and Clang's error reporting formats
+  * The default target output type when no manifest is found is now "binary"
+#### Compiler
+  * We now preprocess the generated C code ourselves to reduce the load on the C compiler's preprocessor
+    * The previous implementation where we left it up to the C compiler to include the proper files and sections was very fragile and sometimes caused the preprocessor to segfault
+    * The new approach is to basically copy-paste the necessary declarations into source files
+    * This also means *significantly* faster C build times
+      * Example: the CI build time for one of our projects ([yipyap](https://github.com/alta-lang/yipyap)) was reduced to less than a quarter of it's previous time (down to 5-7 minutes from 25-26 minutes)
+#### Standard Library
+  * `memory` package
+    * The safe allocation functions (`allocate`, `reallocate`, and `zeroAllocate`) now initialize the values in their memory blocks with invalid values, which means it's now safe to assign directly to values in the memory block without strict assignment.
+#### Project
+  * All automated builds are now built for release, regardless of whether they're plain or tagged commits
+### Added
+#### Project
+  * Automated build artifacts are now hosted on [SourceForge](https://sourceforge.net/projects/alta-builds/)
+#### Language
+  * `@invalid` special fetch attribute
+    * This attribute turns a special fetch into an invalid value expression for the given type
+    * An invalid value expression is one that produces an invalid value for a given type, meaning that it can't be used for anything
+    * When would you want to use this? When setting a variable to an invalid value so that it's current value is destroyed, without assigning a new, valid, & destroyable value to it
+    * e.g. `@invalid(type MyCoolClass) $` produces an invalid value of type `MyCoolClass`
+    * e.g. `@invalid(type int?)` produces an invalid value of type `int?`
 
 ## [0.6.3] - 2020-01-03
 *Codename*: Ancast Poppy

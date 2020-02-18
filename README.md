@@ -46,12 +46,11 @@ Parsing some JSON is as simple as 1, 2, 3:
 import "jason" as jason
 
 literal function main(): int {
-  let object: jason.Object = jason.parse("{\"hi\": \"hola!\"}")
-  object.get("hi") # returns "hola!"
+  let object = jason.parse("{\"hi\": \"hola!\"}")
+  object["hi"] # returns "hola!"
   return 0
 }
 ```
-
 
 Alta packages should do one thing and do it right (much like Node.js packages), and this contributes to the simplicity of Alta. Just find the package that does what you need and stop worrying about implementation details.
 

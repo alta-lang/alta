@@ -84,7 +84,9 @@ Functions
 
 **Notes**
 
-This is a safe Alta wrapper around C's `malloc` that is effectively equivalent to calling it with `count * sizeof T` as the `size` argument. In addition to type safety, it also throws a `MemoryAllocationFailure` exception if the pointer returned by `malloc` is invalid.
+This is a safe Alta wrapper around C's `malloc` that calls it with `count * sizeof T` as the `size` argument. In addition to type safety, it also throws a `MemoryAllocationFailure` exception if the pointer returned by `malloc` is invalid.
+
+This method also provides some additional Alta memory safety by initializing newly allocated values in the memory block to invalid values, to allow plain assignment to be used with the initial assignments.
 
 ## `zeroAllocate<T>(count: [types].Size): ptr T`
 **Summary**: Allocates and zeroes a memory block big enough for `count` number of `T`s and returns it
@@ -99,23 +101,28 @@ This is a safe Alta wrapper around C's `malloc` that is effectively equivalent t
 
 **Notes**
 
-This is a safe Alta wrapper around C's `calloc` that is effectively equivalent to calling it with `count * sizeof T` as the `size` argument. In addition to type safety, it also throws a `MemoryAllocationFailure` exception if the pointer returned by `calloc` is invalid.
+This is a safe Alta wrapper around C's `calloc` that calls it with `count * sizeof T` as the `size` argument. In addition to type safety, it also throws a `MemoryAllocationFailure` exception if the pointer returned by `calloc` is invalid.
 
-## `reallocate<T>(data: ptr T, count: [types].Size): ptr T`
-**Summary**: Resizes the memory block at `data` to be big enough for `count` number of `T` and returns it
+This method also provides some additional Alta memory safety by initializing newly allocated values in the memory block to invalid values, to allow plain assignment to be used with the initial assignments.
+
+## `reallocate<T>(data: ptr T, oldCount: [types].Size, newCount: [types].Size): ptr T`
+**Summary**: Resizes the memory block at `data` to be big enough for `newCount` number of `T` and returns it
 
 **Generics**:
   * `T`: The type of each item in the memory block
 
 **Parameters**:
   * `data`: A pointer to the beginning of memory block to resize
-  * `count`: The number of items to make room for in the memory block
+  * `oldCount`: The current number of items in the memory block
+  * `newCount`: The desired new number of items to in the memory block
 
 **Returns** A pionter to the beginning of the newly resized memory block
 
 **Notes**
 
-This is a safe Alta wrapper around C's `realloc` that is effectively equivalent to calling it with `count * sizeof T` as the `newSize` argument. In addition to type safety, it also throws a `MemoryAllocationFailure` exception if the pointer returned by `calloc` is invalid.
+This is a safe Alta wrapper around C's `realloc` that calls it with `count * sizeof T` as the `newSize` argument. In addition to type safety, it also throws a `MemoryAllocationFailure` exception if the pointer returned by `calloc` is invalid.
+
+This method also provides some additional Alta memory safety by initializing newly allocated values in the memory block to invalid values, to allow plain assignment to be used with the initial assignments.
 
 ## `free<T>(data: ptr T): void`
 **Summary**: Frees an allocated block of memory
