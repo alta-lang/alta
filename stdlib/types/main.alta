@@ -79,7 +79,7 @@ export bitfield UInt64ToUInt16: uint64 {
   part3: uint16 = 32..48
   part4: uint16 = 48..64
 }
-export bitfield UInt64ToUInt8: uint8 {
+export bitfield UInt64ToUInt8: uint64 {
   part1: uint8 = 0..8
   part2: uint8 = 8..16
   part3: uint8 = 16..24

@@ -171,7 +171,7 @@ export function numberToString<T>(number: T, radix: Size): String {
       digit = number / power<T>(radix, iteration - 1)
     } else {
       num = number % mod
-      digit = num * radix / mod
+      digit = (num * radix / mod) & 0xff
     }
 
     if digit < 10 {
