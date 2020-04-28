@@ -1,4 +1,6 @@
 # Alta
+![Alta](docs/alta.png "Alta")
+
 [![Build Status](https://facekapow.visualstudio.com/alta/_apis/build/status/alta-lang.alta?branchName=master)](https://facekapow.visualstudio.com/alta/_build/latest?definitionId=1&branchName=master)
 [![License](https://img.shields.io/github/license/alta-lang/alta?color=%23428bff)](LICENSE)
 
