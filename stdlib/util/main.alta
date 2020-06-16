@@ -1,3 +1,4 @@
 export * from "lib/numbers.alta"
 export * from "lib/pair.alta"
 export * from "lib/weak-array.alta"
+export * from "lib/range.alta"

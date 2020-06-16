@@ -72,7 +72,7 @@ FILE(GLOB_RECURSE AMAKE_SOURCES FOLLOW_SYMLINKS LIST_DIRECTORIES true ${PROJECT_
 # we use `runtime-override` and `stdlib-override` to ensure
 # the right paths are used in release builds
 add_custom_target(amake ALL
-  "$<TARGET_FILE:altac>" -c -g "${CMAKE_GENERATOR}" -o "${PROJECT_BINARY_DIR}/amake" -nw msvc-crt-secure --runtime-override "${PROJECT_SOURCE_DIR}/runtime" --stdlib-override "${PROJECT_SOURCE_DIR}/stdlib" "${PROJECT_SOURCE_DIR}/src/amake"
+  "$<TARGET_FILE:altac>" -c -g "${CMAKE_GENERATOR}" -d -o "${PROJECT_BINARY_DIR}/amake" -nw msvc-crt-secure --runtime-override "${PROJECT_SOURCE_DIR}/runtime" --stdlib-override "${PROJECT_SOURCE_DIR}/stdlib" "${PROJECT_SOURCE_DIR}/src/amake"
   SOURCES ${AMAKE_SOURCES}
   USES_TERMINAL
 )

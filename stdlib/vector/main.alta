@@ -107,6 +107,16 @@ export generic class Vector<T> {
     return value
   }
 
+  public function remove(index: Size): T {
+    let value: T = this[index]
+    for i: Size in index..this._length - 1 {
+      this._data[index] = this._data[index + 1]
+    }
+    delete this[this._length - 1]
+    --this._length
+    return value
+  }
+
   public function from(index: Size): Vector<T> {
     let other = new Vector<T>(this._length - index)
     for i: Size in 0..other._length {
@@ -123,6 +133,18 @@ export generic class Vector<T> {
     return other
   }
 
+  public function replace(index: Size, length: Size, source: ptr T): void {
+    for i: Size in 0..length {
+      this._data[i + index] = source[i]
+    }
+  }
+  public function replace(index: Size, length: Size, source: Vector<T>): void {
+    return this.replace(index, source.length, source as ptr T)
+  }
+  public function replace(index: Size, source: Vector<T>): void {
+    return this.replace(index, source.length, source)
+  }
+
   public function clear(): void {
     # we don't just use `pop` in order to avoid
     # the (usually small) cost of copying the values
@@ -131,6 +153,18 @@ export generic class Vector<T> {
       delete this._data[i - 1]
     }
     this._length = 0
+  }
+
+  public this += Vector<T>: ref Vector<T> {
+    for item: ref T in $.items {
+      this.push(item)
+    }
+    return this
+  }
+
+  public this + Vector<T>: Vector<T> {
+    let copy: Vector<T> = this
+    return copy += $
   }
 
   public this[Size]: ref T {

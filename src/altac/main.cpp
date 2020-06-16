@@ -244,7 +244,9 @@ void logger(AltaCore::Logging::Message message) {
   std::cout << severityColor
             << severityName
             << CLI::COLOR_NORMAL
-            <<" ["
+            << " ["
+            << message.shortSubsystem()
+            << '-'
             << message.code()
             << ']';
   if (message.location().file) {
@@ -325,6 +327,9 @@ void logger(AltaCore::Logging::Message message) {
 int main(int argc, char** argv) {
   using json = nlohmann::json;
   using Option = CLI::Option;
+
+  AltaCore::Logging::shortSubsystemNames.push_back(std::make_pair<std::string, std::string>("frontend", "CLI"));
+  AltaCore::Logging::codeSummaryRepositories["frontend"] = {};
 
   try {
     auto defaultOutDir = "alta-build";
@@ -416,6 +421,11 @@ int main(int argc, char** argv) {
       .valueDescription("Output type (`exe` or `lib`)")
       .defaultValue("")
       ;
+    auto buildForDebugSwitch = Option()
+      .shortID("d")
+      .longID("debug")
+      .description("Builds the binary for debugging. This will set the CMake variable \"CMAKE_BUILD_TYPE\" to \"Debug\" (by default, it is set to \"Release\"). Note that some CMake generators ignore this variable. Running the Alta compiler with the `-c` switch (to compile the code after generating it) and with this switch will automatically handle those generators and build for debug.")
+      ;
 
     parser
       .add(compileSwitch)
@@ -432,6 +442,7 @@ int main(int argc, char** argv) {
       .add(runtimeOverride)
       .add(stdlibOverride)
       .add(outputTypeOption)
+      .add(buildForDebugSwitch)
       .parse(argc, argv)
       ;
 
@@ -443,6 +454,7 @@ int main(int argc, char** argv) {
     auto prioritySearchDirs = prioritySearchFlag.values();
     auto hiddenWarnings = hideWarningFlag.values();
     auto outputType = outputTypeOption.value();
+    bool buildForDebug = buildForDebugSwitch;
 
     for (auto warning: hiddenWarnings) {
       if (std::find(CLI::knownWarnings, CLI::knownWarnings + CLI::knownWarnings_count, warning) == CLI::knownWarnings + CLI::knownWarnings_count) {
@@ -722,6 +734,14 @@ int main(int argc, char** argv) {
     rootCmakeLists << "  endif()\n";
     rootCmakeLists << "endif()\n";
 
+    // modified from code by Marcus Hanwell (https://blog.kitware.com/cmake-and-the-default-build-type/)
+    rootCmakeLists << "# set the default build type if it is not specified";
+    rootCmakeLists << "if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)";
+    rootCmakeLists << "  message(STATUS \"Setting build type to \\\"Release\\\" as none was specified.\")";
+    rootCmakeLists << "  set(CMAKE_BUILD_TYPE \"Release\" CACHE STRING \"Choose the type of build.\" FORCE)";
+    rootCmakeLists << "  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS \"Debug\" \"Release\" \"MinSizeRel\" \"RelWithDebInfo\")";
+    rootCmakeLists << "endif()";
+
     // modified from code by Austin Lasher (https://medium.com/@alasher/colored-c-compiler-output-with-ninja-clang-gcc-10bfe7f2b949)
     rootCmakeLists << "option(FORCE_COLORED_OUTPUT \"Always produce ANSI-colored output (GNU/Clang only).\" TRUE)\n";
     rootCmakeLists << "macro(alta_add_properties target)\n"; // 
@@ -881,7 +901,7 @@ int main(int argc, char** argv) {
 
           return root;
         } catch (AltaCore::Errors::Error& e) {
-          logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
+          logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
           exit(13);
         } catch (AltaCore::Logging::Message& e) {
           logger(e);
@@ -893,7 +913,7 @@ int main(int argc, char** argv) {
       try {
         parser.parse();
       } catch (AltaCore::Errors::Error& e) {
-        logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
+        logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         exit(13);
       } catch (AltaCore::Logging::Message& e) {
         logger(e);
@@ -930,7 +950,7 @@ int main(int argc, char** argv) {
         manifest["target-infos"].back()["package"] = root->info->module->packageInfo.name;
       } catch (AltaCore::Errors::DetailingError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed detailing" << CLI::COLOR_NORMAL << std::endl;
-        logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
+        logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         return 12;
       }
 
@@ -961,7 +981,7 @@ int main(int argc, char** argv) {
         AltaCore::Validator::validate(root);
       } catch (AltaCore::Errors::ValidationError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed semantic validation" << CLI::COLOR_NORMAL << std::endl;
-        logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
+        logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         return 11;
       }
 
@@ -973,7 +993,7 @@ int main(int argc, char** argv) {
         transpiledModules = Talta::recursivelyTranspileToC(root);
       } catch (AltaCore::Errors::ValidationError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed to transpile" << CLI::COLOR_NORMAL << std::endl;
-        logger(AltaCore::Logging::Message("G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
+        logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         return 11;
       }
 
@@ -1393,7 +1413,7 @@ int main(int argc, char** argv) {
           auto cOut = base + ".c";
           auto hOut = base + ".h";
           auto& gItem = gItems[i];
-          auto targetName = Talta::mangleName(gItem->parentScope.lock()->parentModule.lock().get()) + '-' + std::to_string(gItem->moduleIndex) + '-' + target.name;
+          auto targetName = Talta::mangleName(AltaCore::Util::getModule(gItem->parentScope.lock().get()).lock().get()) + '-' + std::to_string(gItem->moduleIndex) + '-' + target.name;
           auto& genEntry = manifest["targets"][target.name][mod->packageInfo.name]["generics"][i];
           genEntry["id"] = gItem->moduleIndex;
 
@@ -1545,8 +1565,8 @@ int main(int argc, char** argv) {
 
       AltaCore::Filesystem::mkdirp(rootBuildDir);
 
-      std::string configureCommand = "cmake \"" + origOutDir.toString() + '"';
-      std::string compileCommand = "cmake --build \"" + rootBuildDir.toString() + '"';
+      std::string configureCommand = "cmake \"" + origOutDir.toString() + "\" -DCMAKE_BUILD_TYPE=\"" + (buildForDebug ? "Debug" : "Release") + '"';
+      std::string compileCommand = "cmake --build \"" + rootBuildDir.toString() + "\" --config \"" + (buildForDebug ? "Debug" : "Release") + '"';
 
       if (!generatorArg.value().empty()) {
         configureCommand += " -G \"" + generatorArg.value() + "\"";

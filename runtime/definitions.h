@@ -178,4 +178,16 @@ typedef struct __Alta_basic_generator_state {
   _Alta_basic_class* self;
 } _Alta_basic_generator_state;
 
+typedef struct __Alta_basic_coroutine_state {
+  void* stack;
+  size_t stackSize;
+  void* input;
+  size_t index;
+  _Alta_bool done;
+  void* parameters;
+  _Alta_basic_class* self;
+  void* value;
+  struct __Alta_basic_coroutine_state* waitingFor;
+} _Alta_basic_coroutine_state;
+
 #endif // _ALTA_RUNTIME_DEFINITIONS_H

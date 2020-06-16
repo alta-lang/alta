@@ -430,3 +430,14 @@ _Alta_runtime_export void _Alta_generator_pop(_Alta_basic_generator_state* gener
 _Alta_runtime_export void _Alta_no_op_optional_destructor(_Alta_basic_optional* optional) {};
 _Alta_runtime_export void _Alta_no_op_union_destructor(_Alta_basic_union* uni) {};
 _Alta_runtime_export void _Alta_no_op_class_destructor(_Alta_basic_class* class, _Alta_bool persistent) {};
+
+_Alta_runtime_export void _Alta_failed_assertion(const char* expression, const char* file, size_t line, size_t column) {
+#if defined(ALTA_FAILED_ASSERTION_HANDLER)
+  return ALTA_FAILED_ASSERTION_HANDLER(expression, file, line, column);
+#elif defined(ALTA_RUNTIME_FREESTANDING)
+  return _Alta_uncaught_error("@FailedAssertion@");
+#else
+  printf("failed assertion at %s:%zu:%zu: %s\n", (file[0] == '\0') ? "<unknown>" : file, line, column, (expression[0] == '\0') ? "<unknown>" : expression);
+  abort();
+#endif
+};

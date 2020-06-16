@@ -1,0 +1,45 @@
+export generic class Range<T> {
+  public var start: T
+  public var stop: T
+  public var increasing = true
+  public var includingEnd = false
+
+  public constructor(from: T, to: T) {
+    this.start = start
+    this.stop = stop
+    this.increasing = !(start > stop)
+  }
+  public constructor(from: T, to: T, increasing: bool) {
+    this.start = start
+    this.stop = stop
+    this.increasing = increasing
+  }
+  public constructor(from: T, to: T, includingEnd: bool) {
+    this.start = start
+    this.stop = stop
+    this.includingEnd = includingEnd
+    this.increasing = !(start > stop)
+  }
+  public constructor(from: T, to: T, increasing: bool, includingEnd: bool) {
+    this.start = start
+    this.stop = stop
+    this.increasing = increasing
+    this.includingEnd = includingEnd
+  }
+
+  public @read generator function items(): T {
+    let current = this.start
+    if this.increasing {
+      while current < this.stop || (this.includingEnd && current == this.stop) {
+        yield current
+        current = current + 1
+      }
+    } else {
+      while current > this.stop || (this.includingEnd && current == this.stop) {
+        yield current
+        current = current - 1
+      }
+    }
+    return;
+  }
+}

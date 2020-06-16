@@ -1,0 +1,1 @@
+command regex ap 's/(.+)/p _Alta_symbol_to_full_Alta_name("%1")/'

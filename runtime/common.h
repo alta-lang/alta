@@ -112,4 +112,6 @@ _Alta_runtime_export void _Alta_no_op_optional_destructor(_Alta_basic_optional* 
 _Alta_runtime_export void _Alta_no_op_union_destructor(_Alta_basic_union* uni);
 _Alta_runtime_export void _Alta_no_op_class_destructor(_Alta_basic_class* class, _Alta_bool persistent);
 
+_Alta_runtime_export void _Alta_failed_assertion(const char* expression, const char* file, size_t line, size_t column);
+
 #endif /* _ALTA_RUNTIME_COMMON_H */
