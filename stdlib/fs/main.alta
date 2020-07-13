@@ -51,7 +51,7 @@ import Exception from "exceptions"
 		st_mode: int;
 	}
 	type StatStruct = stat
-	declare literal function stat(path: ptr const byte, buffer: ptr _stat): int
+	declare literal function stat(path: ptr const byte, buffer: ptr stat): int
 	using statFunc = stat
 
 	type DIR = any
@@ -419,7 +419,7 @@ export class Path {
 			return false
 		if this.components.length != $.components.length
 			return false
-		for i in 0..$.components.length {
+		for i: Size in 0..$.components.length {
 			if this.components[i] != $.components[i]
 				return false
 		}
