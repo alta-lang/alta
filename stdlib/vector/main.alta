@@ -118,8 +118,8 @@ export generic class Vector<T> {
   public function unshift(): ref T {
     this.ensureSize(++this._length)
     # TODO: default construct a `T` value
-    for i: Size in 0..this._length - 1 {
-      this._data[i + 1] = this._data[i]
+    for i: Size in this._length - 1::0 {
+      this._data[i] = this._data[i - 1]
     }
     return this.first
   }
