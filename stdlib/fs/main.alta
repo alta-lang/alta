@@ -1,0 +1,439 @@
+import String from "string"
+import Vector from "vector"
+import Size, SizeMaximum from "types"
+import allocate from "memory"
+import Exception from "exceptions"
+
+##if platform == "windows"
+	@@CTranspiler.include("windows.h");
+	@@CTranspiler.include("sys/types.h");
+	@@CTranspiler.include("sys/stat.h");
+	@@CTranspiler.include("direct.h");
+
+	declare literal function GetCurrentDirectory(nBufferLength: unsigned int, lpBuffer: ptr byte): unsigned int
+
+	# sure, Windows has regular ol' `stat`, too,
+	# but the Windows API docs recommends
+	# `_stat` instead. it's fully compatible with
+	# stat for our purposes here so ¯\_(ツ)_/¯
+	literal @external struct _stat {
+		st_mode: int
+	}
+	type StatStruct = _stat
+	declare literal function _stat(path: ptr const byte, buffer: ptr _stat): int
+	using statFunc = _stat
+
+	type HANDLE = any
+	declare literal var INVALID_HANDLE_VALUE: HANDLE
+	type BOOL = any
+	literal @external @typed struct WIN32_FIND_DATAA {
+		cFileName: ptr byte
+	}
+	declare literal function FindFirstFileA(lpFileName: ptr const byte, lpFindFileData: ptr WIN32_FIND_DATAA): HANDLE
+	declare literal function FindNextFileA(hFindFile: HANDLE, lpFindFileData: ptr WIN32_FIND_DATAA): BOOL
+	declare literal function FindClose(hFindFile: HANDLE): BOOL
+	declare literal function GetLastError(): unsigned int
+	declare literal var ERROR_NO_MORE_FILES: unsigned int
+
+	export var defaultPathComponentSeparator: const ptr const char = "\\"
+	export var defaultPathSeparator: const ptr const char = ";"
+##else
+	@@CTranspiler.include("unistd.h");
+	@@CTranspiler.include("sys/param.h");
+	@@CTranspiler.include("sys/stat.h");
+	@@CTranspiler.include("errno.h");
+	@@CTranspiler.include("dirent.h");
+
+	declare literal var MAXPATHLEN: Size
+	declare literal function getcwd(buf: ptr byte, size: Size): ptr byte
+
+	literal @external struct stat {
+		st_mode: int;
+	}
+	type StatStruct = stat
+	declare literal function stat(path: ptr const byte, buffer: ptr _stat): int
+	using statFunc = stat
+
+	type DIR = any
+	literal @external struct dirent {
+		d_name: ptr byte;
+	}
+	declare literal function opendir(name: ptr const byte): ptr DIR
+	declare literal function readdir(dirp: ptr DIR): ptr dirent
+	declare literal function closedir(dirp: ptr DIR): int
+
+	export var defaultPathComponentSeparator: const ptr const char = "/"
+	export var defaultPathSeparator: const ptr const char = ":"
+##end if
+
+declare var S_IFDIR: int
+
+export class WindowsAPIError extends Exception {}
+export class InvalidOperationTarget extends Exception {}
+
+# this is internal because it returns a String since our Path implementation depends on it
+#
+# it only needs to be this way until the Alta compiler supports automatic class/export hoisting
+# (which is easier said than done)
+#
+# until then, the public function is the one that returns a Path, which is defined below the Path class
+function internalCurrentWorkingDirectory(): String {
+##if platform == "windows"
+	let requiredBufferLength = GetCurrentDirectory(0, nullptr)
+	let buf = allocate<byte>(requiredBufferLength)
+	GetCurrentDirectory(requiredBufferLength, buf)
+	let str = new String(buf)
+##else
+	let buf = allocate<byte>(MAXPATHLEN)
+	let str = getcwd(tmp, MAXPATHLEN) ? new String(tmp) : new String
+##end if
+
+	free(buf)
+	return str
+}
+
+export class Path {
+	private var hasRoot = false
+	private var root: String
+	private var components: Vector<String>
+
+	private function resolveInPlace(relativeTo: Path): void {
+		if this.hasRoot
+			return;
+		for component: String in components.items {
+			if component == "." {
+				# ignore
+			} else if component == ".." {
+				if relativeTo.components.length > 0
+					relativeTo.components.pop()
+			} else if !component.empty() {
+				relativeTo.components.push(component)
+			}
+		}
+		this.hasRoot = relativeTo.hasRoot
+		this.root = relativeTo.root
+		this.components = relativeTo.components
+	}
+
+	private function constructWithPathAndSeparators(path: String, separators: Vector<String>): void {
+		let separatorLengths: Vector<Size>
+		let startOfLatestComponent: Size = 0
+		let endOfLatestComponent: Size = 0
+		let hasContent = false
+
+		for separator: String in separators.items {
+			separatorLengths.push(separator.length)
+		}
+
+		for i: Size in 0..path.length {
+			let found = false
+			for j: Size in 0..separators.length {
+				let separator = separators[j]
+				let separatorLength = separatorLengths[j]
+				let ok = false
+				if path[i] == separator[0] {
+					let k: Size = 1
+					for j: Size in 1..path.length() {
+						if k >= separatorLength {
+							if hasContent {
+								this.components.push(path.substring(from: startOfLatestComponent, length: endOfLatestComponent - startOfLatestComponent + 1))
+							} else {
+								this.components.push(new String)
+							}
+							i = j
+							startOfLatestComponent = i + 1
+							endOfLatestComponent = i + 1
+							ok = true
+							break
+						} else if path[j] != separator[k] {
+							break
+						}
+						;++k
+					}
+				}
+				if ok {
+					found = true
+					break
+				}
+			}
+			if !found {
+				hasContent = true
+				endOfLatestComponent = i
+			}
+		}
+
+		if hasContent
+			this.components.push(path.substring(from: startOfLatestComponent, length: endOfLatestComponent - startOfLatestComponent + 1))
+
+		if this.components.length > 0 {
+			if this.components[0] == "" {
+				this.hasRoot = true
+				this.root = ""
+				this.components.shift()
+			} else if this.components[0][this.components[0].length - 1] == ':' {
+				this.hasRoot = true
+				this.root = this.components[0]
+				this.components.shift()
+			}
+		}
+	}
+
+	public constructor() {}
+	public constructor(path: String, separators: Vector<String>) {
+		this.constructWithPathAndSeparators(path, separators)
+	}
+	public constructor(path: String, separator: String) {
+		this.constructWithPathAndSeparators(path, new Vector<String>(items: separator))
+	}
+	public constructor(path: String, separator: byte) {
+		this.constructWithPathAndSeparators(path, new Vector<String>(items: new String(&separator, 1)))
+	}
+	public @from constructor(path: String) {
+		this.constructWithPathAndSeparators(path, new Vector<String>(items: "/", "\\"))
+	}
+
+	public function normalize(): Path {
+		let newPath = new Path(this)
+		newPath.components.clear()
+		for component: String in this.components.items {
+			if component == "." {
+				# ignore
+			} else if component == ".." {
+				if newPath.components.length > 0
+					newPath.components.pop()
+			} else if !component.empty {
+				newPath.components.push(component)
+			}
+		}
+		return newPath
+	}
+
+	public function resolve(from: Path): Path {
+		let newPath = new Path(this)
+		newPath.resolveInPlace(from)
+		return newPath
+	}
+	public function resolve(): Path {
+		return this.resolve(internalCurrentWorkingDirectory())
+	}
+
+	public function relative(to: Path): Path {
+		let newPath = this.resolve()
+		to = to.resolve()
+		while newPath.components.length > 0 && to.components.length > 0 && newPath.components[0] == to.components[0] {
+			newPath.shift()
+			to.shift()
+		}
+		if to.components.length > 0
+			to.shift()
+		for component: String in to.components.items {
+			newPath.unshift("..")
+		}
+		newPath.hasRoot = false
+		newPath.root = ""
+		return newPath
+	}
+	public function relative(): Path {
+		return this.relative(internalCurrentWorkingDirectory())
+	}
+
+	public function toString(separator: String): String {
+		let result = new String
+
+		if (this.hasRoot) {
+			result += this.root
+			result += separator
+		}
+
+		let isFirst = true
+		for component: String in components.items {
+			if isFirst {
+				isFirst = false
+			} else {
+				result += separator
+			}
+			result += component
+		}
+
+		return result
+	}
+	public function toString(separator: byte): String {
+		return this.toString(new String(&separator, 1))
+	}
+	public function toString(): String {
+		return this.toString(defaultPathSeparator)
+	}
+
+	public @read function basename(): String {
+		if !this.hasComponents
+			return ""
+		let len = components.length
+		if len < 1
+			return ""
+		return this.components[len - 1]
+	}
+	public @read function filename(): String {
+		if !this.hasComponents
+			return ""
+		let base = this.basename
+		let pos = base.lastIndexOf('.')
+		if pos == SizeMaximum
+			return base
+		return base.substring(from: 0, length: pos)
+	}
+	public @read function extname(): String {
+		if !this.hasComponents
+			return ""
+		let base = this.basename
+		return base.substring(from: base.find_last_of('.') + 1) # doesn't include the '.'
+	}
+	public @read function dirname(): Path {
+		if !this.hasComponents
+			return new Path
+		let newPath = new Path(this)
+		newPath.components.pop()
+		return newPath
+	}
+
+	public function uproot(): Path {
+		let newPath = new Path(this)
+		newPath.hasRoot = false
+		newPath.root = ""
+		return newPath
+	}
+
+	public function push(component: String): ref Path {
+		if component.empty()
+			return;
+		this.components.push(component)
+		return this
+	}
+	public function pop(): String {
+		if !this.hasComponents
+			return ""
+		return this.components.pop()
+	}
+	public function unshift(component: String): ref Path {
+		if component.empty()
+			return;
+		this.components.unshift(component)
+		return this
+	}
+	public function shift(): String {
+		if !hasComponents
+			return ""
+		return this.components.shift()
+	}
+
+	public @read function isValid(): bool {
+		return (this.hasRoot || this.components.length > 0)
+	}
+	public @read function isEmpty(): bool {
+		return !this.isValid
+	}
+	public @read function isRoot(): bool {
+		return (this.hasRoot && this.components.length == 0)
+	}
+	public @read function hasComponents(): bool {
+		return this.components.length > 0
+	}
+	public @read function isAbsolute(): bool {
+		return this.hasRoot
+	}
+	public @read function isDirectory(): bool {
+		let path = this.resolve() as String
+		let buf: StatStruct
+		if statFunc(path.data, &buf) != 0
+			return false
+		return buf.st_mode & S_IFDIR
+	}
+	public @read function exists(): bool {
+		if !this.isValid
+			return false
+
+		let path = this.resolve() as String
+		let cstrPath = path.c_str();
+		let buf: StatStruct
+		return statFunc(path.data, &buf) == 0
+	}
+
+	public function hasParentDirectory(parentDir: Path): bool {
+		if this.hasRoot != parentDir.hasRoot
+			return false
+		if this.root != parentDir.root
+			return false
+		if parentDir.components.length > this.components.length
+			return false
+		for i: Size in 0..parentDir.components.length {
+			if parentDir.components[i] != this.components[i]
+				return false
+		}
+		return true
+	}
+
+	public @read generator function children(): Path {
+		if !this.isDirectory
+			throw new InvalidOperationTarget
+
+		##if platform == "windows"
+			let str = this.resolve() + "\\*"
+			let ffd: WIN32_FIND_DATAA
+			let hFind: HANDLE = FindFirstFileA(str.data, &ffd)
+			while true {
+				yield this / ffd.cFileName
+				if FindNextFile(hFind, &ffd) == 0
+					break
+			}
+			if GetLastError() != ERROR_NO_MORE_FILES
+				throw new WindowsAPIError
+			FindClose(hFind)
+			return;
+		##else
+			let dir = opendir(this.resolve())
+			while let info = readdir(dir) {
+				yield this / info.d_name
+			}
+			closedir(dir)
+			return;
+		##end if
+	}
+
+	public this / Path: Path {
+		let newPath = new Path(this)
+		newPath.components += $.components
+		return newPath
+	}
+	public this + String: Path {
+		let newPath = new Path(this)
+		if !newPath.hasComponents {
+			newPath.components.push($)
+		} else {
+			newPath.components.last += $
+		}
+		return newPath
+	}
+	public this == Path: bool {
+		if this.hasRoot != $.hasRoot
+			return false
+		if this.root != $.root
+			return false
+		if this.components.length != $.components.length
+			return false
+		for i in 0..$.components.length {
+			if this.components[i] != $.components[i]
+				return false
+		}
+		return true
+	}
+
+	public to bool {
+		return this.isValid
+	}
+	public to String {
+		return this.toString()
+	}
+}
+
+export function currentWorkingDirectory(): Path {
+	return new Path(internalCurrentWorkingDirectory())
+}

@@ -79,6 +79,12 @@ jobs:
     inputs:
       artifactName: "altac-linux-amd64-tar-xz"
       targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-linux-arch64.tar.xz"
+  - task: PublishPipelineArtifact@1
+    condition: not(eq(variables['Build.SourceBranch'], 'refs/heads/release'))
+    displayName: "Publish the tar.xz package (debug)"
+    inputs:
+      artifactName: "altac-linux-amd64-tar-xz"
+      targetPath: "$(Build.ArtifactStagingDirectory)/altac-$(Alta.Commit)-linux-arch64.zip"
   # release
   - task: PublishPipelineArtifact@1
     condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
@@ -104,8 +110,19 @@ jobs:
     inputs:
       artifactName: "altac-linux-amd64-tar-xz"
       targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-linux-arch64.tar.xz"
+  - task: PublishPipelineArtifact@1
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/release')
+    displayName: "Publish the tar.xz package (release)"
+    inputs:
+      artifactName: "altac-linux-amd64-tar-xz"
+      targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-linux-arch64.zip"
 
   # upload it to sourceforge
+  - task: SSH@0
+    displayName: "Create the upload directories on SourceForge"
+    inputs:
+      sshEndpoint: 'SourceForge Upload'
+      commands: 'mkdir -p /home/frs/project/alta-builds/automated/$(Alta.Commit); mkdir -p /home/frs/project/alta-builds/release/$(Alta.Version)'
   # automated
   - task: CopyFilesOverSSH@0
     displayName: "Upload the artifacts to SourceForge (automated)"
@@ -213,6 +230,11 @@ jobs:
       targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-windows-arch64.zip"
 
   # upload it to sourceforge
+  - task: SSH@0
+    displayName: "Create the upload directories on SourceForge"
+    inputs:
+      sshEndpoint: 'SourceForge Upload'
+      commands: 'mkdir -p /home/frs/project/alta-builds/automated/$(Alta.Commit); mkdir -p /home/frs/project/alta-builds/release/$(Alta.Version)'
   # automated
   - task: CopyFilesOverSSH@0
     displayName: "Upload the artifacts to SourceForge (automated)"
@@ -306,6 +328,11 @@ jobs:
       targetPath: "$(Build.ArtifactStagingDirectory)/release/altac-$(Alta.Version)-macos-arch64.zip"
 
   # upload it to sourceforge
+  - task: SSH@0
+    displayName: "Create the upload directories on SourceForge"
+    inputs:
+      sshEndpoint: 'SourceForge Upload'
+      commands: 'mkdir -p /home/frs/project/alta-builds/automated/$(Alta.Commit); mkdir -p /home/frs/project/alta-builds/release/$(Alta.Version)'
   # automated
   - task: CopyFilesOverSSH@0
     displayName: "Upload the artifacts to SourceForge (automated)"

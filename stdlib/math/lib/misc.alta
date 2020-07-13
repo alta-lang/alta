@@ -1,0 +1,24 @@
+export generic function power<T>(num: T, to: T): T {
+  # anything to power of zero is 1
+  if to == 0 return 1
+  if to < 0 return 1 / power<T>(num, -to)
+
+  let result = num
+  for i: T in to::1 {
+    result *= num
+  }
+
+  return result
+}
+
+export generic function absoluteValue<T>(number: T): T {
+  return number < 0 ? number * -1 : number
+}
+
+export generic function minimum<T>(a: T, b: T): T {
+  return a < b ? a : b
+}
+
+export generic function maximum<T>(a: T, b: T): T {
+  return a > b ? a : b
+}
