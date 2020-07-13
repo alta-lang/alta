@@ -400,6 +400,13 @@ export class String {
     return this.length + 1
   }
 
+  # Whether this String is empty
+  #
+  # This is exactly equivalent to checking if the length of the String is 0
+  public @read function empty(): bool {
+    return this._length == 0
+  }
+
   public to rawstring {
     return this._data
   }
