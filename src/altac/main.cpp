@@ -1256,7 +1256,7 @@ int main(int argc, char** argv) {
           auto& outstringG = outstringGs[i];
           auto& gOut = gOuts[i];
           auto& gItem = gItems[i];
-          outstringG << gRoot->toString();
+          outstringG << gRoot->toStringWithIndent();
         }
 
         auto mangledModuleName = Talta::mangleName(mod.get());
@@ -1283,7 +1283,7 @@ int main(int argc, char** argv) {
         }
         outstringH << "#endif /* _ALTA_HEADER_DEFS_" << mangledModuleName << " */\n";
 
-        outstringH << hRoot->toString();
+        outstringH << hRoot->toStringWithIndent();
 
         for (size_t i = 0; i < gRoots.size(); i++) {
           auto gBool = gBools[i];
@@ -1296,7 +1296,7 @@ int main(int argc, char** argv) {
         manifest["targets"][target.name][mod->packageInfo.name]["headers"].push_back(hOut.absolutify().normalize().toString());
         manifest["targets"][target.name][mod->packageInfo.name]["definition-headers"].push_back(dOut.absolutify().normalize().toString());
 
-        outstringD << dRoot->toString();
+        outstringD << dRoot->toStringWithIndent();
 
         bool outputH = true;
         if (hOut.exists()) {
