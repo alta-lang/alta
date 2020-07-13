@@ -1,7 +1,7 @@
 import String from "string"
 import Vector from "vector"
 import Size, SizeMaximum from "types"
-import allocate from "memory"
+import allocate, free from "memory"
 import Exception from "exceptions"
 
 ##if platform == "windows"
@@ -16,12 +16,25 @@ import Exception from "exceptions"
 	# but the Windows API docs recommends
 	# `_stat` instead. it's fully compatible with
 	# stat for our purposes here so ¯\_(ツ)_/¯
-	literal @external struct _stat {
+
+	# we need to use `@CTranspiler.name` to be able to use a different Alta name for the structure
+	# because otherwise it conflicts with the function name
+	literal @external @CTranspiler.name("_stat") struct StatStruct {
 		st_mode: int
 	}
-	type StatStruct = _stat
-	declare literal function _stat(path: ptr const byte, buffer: ptr _stat): int
+	declare literal function _stat(path: ptr const byte, buffer: ptr StatStruct): int
 	using statFunc = _stat
+
+	declare literal var _S_IFMT: int
+
+	declare literal var _S_IFREG: int
+	declare literal var _S_IFDIR: int
+	declare literal var _S_IFCHR: int
+
+	using S_IFMT = _S_IFMT
+	using S_IFREG = _S_IFREG
+	using S_IFDIR = _S_IFDIR
+	using S_IFCHR = _S_IFCHR
 
 	type HANDLE = any
 	declare literal var INVALID_HANDLE_VALUE: HANDLE
@@ -47,12 +60,22 @@ import Exception from "exceptions"
 	declare literal var MAXPATHLEN: Size
 	declare literal function getcwd(buf: ptr byte, size: Size): ptr byte
 
-	literal @external struct stat {
+	# we need to do this for the same reason as the `_stat` structure on Windows
+	literal @external @CTranspiler.name("stat") struct StatStruct {
 		st_mode: int;
 	}
-	type StatStruct = stat
-	declare literal function stat(path: ptr const byte, buffer: ptr stat): int
+	declare literal function stat(path: ptr const byte, buffer: ptr StatStruct): int
 	using statFunc = stat
+
+	declare literal var S_IFMT: int
+
+	declare literal var S_IFSOCK: int
+	declare literal var S_IFLNK: int
+	declare literal var S_IFREG: int
+	declare literal var S_IFBLK: int
+	declare literal var S_IFDIR: int
+	declare literal var S_IFCHR: int
+	declare literal var S_IFIFO: int
 
 	type DIR = any
 	literal @external struct dirent {
@@ -65,8 +88,6 @@ import Exception from "exceptions"
 	export var defaultPathComponentSeparator: const ptr const char = "/"
 	export var defaultPathSeparator: const ptr const char = ":"
 ##end if
-
-declare var S_IFDIR: int
 
 export class WindowsAPIError extends Exception {}
 export class InvalidOperationTarget extends Exception {}
@@ -85,10 +106,10 @@ function internalCurrentWorkingDirectory(): String {
 	let str = new String(buf)
 ##else
 	let buf = allocate<byte>(MAXPATHLEN)
-	let str = getcwd(tmp, MAXPATHLEN) ? new String(tmp) : new String
+	let str = getcwd(buf, MAXPATHLEN) ? new String(buf) : new String
 ##end if
 
-	free(buf)
+	free<byte>(buf)
 	return str
 }
 
@@ -100,13 +121,13 @@ export class Path {
 	private function resolveInPlace(relativeTo: Path): void {
 		if this.hasRoot
 			return;
-		for component: String in components.items {
+		for component: String in this.components.items {
 			if component == "." {
 				# ignore
 			} else if component == ".." {
 				if relativeTo.components.length > 0
 					relativeTo.components.pop()
-			} else if !component.empty() {
+			} else if !component.empty {
 				relativeTo.components.push(component)
 			}
 		}
@@ -133,7 +154,7 @@ export class Path {
 				let ok = false
 				if path[i] == separator[0] {
 					let k: Size = 1
-					for j: Size in 1..path.length() {
+					for j: Size in i..path.length {
 						if k >= separatorLength {
 							if hasContent {
 								this.components.push(path.substring(from: startOfLatestComponent, length: endOfLatestComponent - startOfLatestComponent + 1))
@@ -224,11 +245,11 @@ export class Path {
 			newPath.shift()
 			to.shift()
 		}
-		if to.components.length > 0
-			to.shift()
 		for component: String in to.components.items {
 			newPath.unshift("..")
 		}
+		if !newPath.hasComponents
+			newPath.unshift(".")
 		newPath.hasRoot = false
 		newPath.root = ""
 		return newPath
@@ -246,7 +267,7 @@ export class Path {
 		}
 
 		let isFirst = true
-		for component: String in components.items {
+		for component: String in this.components.items {
 			if isFirst {
 				isFirst = false
 			} else {
@@ -261,13 +282,13 @@ export class Path {
 		return this.toString(new String(&separator, 1))
 	}
 	public function toString(): String {
-		return this.toString(defaultPathSeparator)
+		return this.toString(defaultPathComponentSeparator)
 	}
 
 	public @read function basename(): String {
 		if !this.hasComponents
 			return ""
-		let len = components.length
+		let len = this.components.length
 		if len < 1
 			return ""
 		return this.components[len - 1]
@@ -285,7 +306,7 @@ export class Path {
 		if !this.hasComponents
 			return ""
 		let base = this.basename
-		return base.substring(from: base.find_last_of('.') + 1) # doesn't include the '.'
+		return base.substring(from: base.lastIndexOf('.') + 1) # doesn't include the '.'
 	}
 	public @read function dirname(): Path {
 		if !this.hasComponents
@@ -303,7 +324,7 @@ export class Path {
 	}
 
 	public function push(component: String): ref Path {
-		if component.empty()
+		if component.empty
 			return;
 		this.components.push(component)
 		return this
@@ -314,13 +335,13 @@ export class Path {
 		return this.components.pop()
 	}
 	public function unshift(component: String): ref Path {
-		if component.empty()
+		if component.empty
 			return;
 		this.components.unshift(component)
 		return this
 	}
 	public function shift(): String {
-		if !hasComponents
+		if !this.hasComponents
 			return ""
 		return this.components.shift()
 	}
@@ -340,19 +361,41 @@ export class Path {
 	public @read function isAbsolute(): bool {
 		return this.hasRoot
 	}
-	public @read function isDirectory(): bool {
+	private @read function statMode(): int {
 		let path = this.resolve() as String
 		let buf: StatStruct
+		# this will actually break on Windows if one of the path components is a symbolic link
+		# TODO: fix this
 		if statFunc(path.data, &buf) != 0
+			return 0
+		return buf.st_mode & S_IFMT
+	}
+	public @read function isDirectory(): bool {
+		return this.statMode == S_IFDIR
+	}
+	public @read function isRegularFile(): bool {
+		return this.statMode == S_IFREG
+	}
+	public @read function isSymbolicLink(): bool {
+		##if platform == "windows"
+			# TODO: test if the file is a symbol link or junction on Windows
 			return false
-		return buf.st_mode & S_IFDIR
+		##else
+			return this.statMode == S_IFLNK
+		##end if
+	}
+	public @read function isUnixSocket(): bool {
+		##if platform == "windows"
+			return false
+		##else
+			return this.statMode == S_IFSOCK
+		##end if
 	}
 	public @read function exists(): bool {
 		if !this.isValid
 			return false
 
 		let path = this.resolve() as String
-		let cstrPath = path.c_str();
 		let buf: StatStruct
 		return statFunc(path.data, &buf) == 0
 	}
@@ -426,11 +469,11 @@ export class Path {
 		return true
 	}
 
-	public to bool {
-		return this.isValid
-	}
 	public to String {
 		return this.toString()
+	}
+	public to bool {
+		return this.isValid
 	}
 }
 
