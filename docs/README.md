@@ -9,3 +9,7 @@ If you're looking for Alta's syntax and feature reference, you'll find that [her
 
 ## API Reference
 If you're just here for Alta's standard library API reference, [right this way](stdlib/README.md).
+
+## Editor Integration
+
+To add some custom support for Alta to your editor, see [this page](editor-integration.md)
