@@ -735,12 +735,25 @@ int main(int argc, char** argv) {
     rootCmakeLists << "endif()\n";
 
     // modified from code by Marcus Hanwell (https://blog.kitware.com/cmake-and-the-default-build-type/)
-    rootCmakeLists << "# set the default build type if it is not specified";
-    rootCmakeLists << "if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)";
-    rootCmakeLists << "  message(STATUS \"Setting build type to \\\"Release\\\" as none was specified.\")";
-    rootCmakeLists << "  set(CMAKE_BUILD_TYPE \"Release\" CACHE STRING \"Choose the type of build.\" FORCE)";
-    rootCmakeLists << "  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS \"Debug\" \"Release\" \"MinSizeRel\" \"RelWithDebInfo\")";
-    rootCmakeLists << "endif()";
+    rootCmakeLists << "# set the default build type if it is not specified\n";
+    rootCmakeLists << "if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)\n";
+    rootCmakeLists << "  message(STATUS \"Setting build type to \\\"Release\\\" as none was specified.\")\n";
+    rootCmakeLists << "  set(CMAKE_BUILD_TYPE \"Release\" CACHE STRING \"Choose the type of build.\" FORCE)\n";
+    rootCmakeLists << "  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS \"Debug\" \"Release\" \"MinSizeRel\" \"RelWithDebInfo\")\n";
+    rootCmakeLists << "endif()\n";
+
+    // set the output directories for the various output types
+    // we do this to ensure consistency across platforms
+    rootCmakeLists << "set(CMAKE_RUNTIME_OUTPUT_DIRECTORY \"${CMAKE_BINARY_DIR}/bin\")\n";
+    rootCmakeLists << "set(CMAKE_LIBRARY_OUTPUT_DIRECTORY \"${CMAKE_BINARY_DIR}/lib\")\n";
+    rootCmakeLists << "set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY \"${CMAKE_BINARY_DIR}/lib\")\n";
+    // ...especially with this part
+    // this ensures that multi-configuration generators will do what we want
+    rootCmakeLists << "foreach(CONFIG IN ITEMS \"Debug\" \"Release\" \"MinSizeRel\" \"RelWithDebInfo\")\n";
+    rootCmakeLists << "  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG} \"${CMAKE_BINARY_DIR}/bin\")\n";
+    rootCmakeLists << "  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG} \"${CMAKE_BINARY_DIR}/lib\")\n";
+    rootCmakeLists << "  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG} \"${CMAKE_BINARY_DIR}/lib\")\n";
+    rootCmakeLists << "endforeach()\n";
 
     // modified from code by Austin Lasher (https://medium.com/@alasher/colored-c-compiler-output-with-ninja-clang-gcc-10bfe7f2b949)
     rootCmakeLists << "option(FORCE_COLORED_OUTPUT \"Always produce ANSI-colored output (GNU/Clang only).\" TRUE)\n";
