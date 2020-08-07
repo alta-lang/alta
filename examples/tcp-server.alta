@@ -1,0 +1,49 @@
+import Socket, SocketType from "net"
+import printLine, format from "io"
+import Vector from "vector"
+import uint8, uint16 from "types"
+import Address from "ip"
+import String from "string"
+import parseNumber from "util"
+
+literal function main(argc: int, argv: ptr ptr byte): int {
+	let args = new Vector<String>
+	for i: int in 0..argc {
+		args.push(argv[i])
+	}
+
+	let port = 8888
+
+	if args.length > 1
+		port = parseNumber<uint16>(args[1])
+
+	let server = new Socket(SocketType.Stream)
+
+	server.bind("0.0.0.0" as Address, port)
+
+	server.listen(1)
+
+	printLine("Server listening on port ", port)
+
+	while true {
+		printLine("Waiting for a client...")
+
+		let clientInfo = server.accept()
+		let client = clientInfo.first
+		let clientLocation = clientInfo.second
+
+		printLine("Got a new client from ", clientLocation.first, ':', clientLocation.second)
+
+		let message = format("Hello there, ", clientLocation.first, ':', clientLocation.second, '!')
+		client.send(message.data, message.length)
+
+		let clientMessage = client.receive()
+
+		if clientMessage.length > 0
+			printLine("Got a message from the client: ", new String(clientMessage.data, clientMessage.length))
+		else
+			printLine("Empty message from the client (usually indicates the connection was terminated)")
+	}
+
+	return 0
+}

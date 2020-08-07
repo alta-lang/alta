@@ -16,3 +16,9 @@ targets:
 - name: read-file
   main: read-file.alta
   type: exe
+- name: tcp-server
+  main: tcp-server.alta
+  type: exe
+- name: tcp-client
+  main: tcp-client.alta
+  type: exe
