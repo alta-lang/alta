@@ -1,0 +1,46 @@
+import "./declarations.alta" as posix
+import Address from "ip"
+#import URI from "uri"
+import uint16 from "types"
+import Exception from "exceptions"
+import String from "string"
+import Vector from "vector"
+
+export class GetaddrinfoFailure extends Exception {}
+
+export class AddressInfo {
+	public var address: Address
+	public var port: uint16? = null
+
+	public constructor() {}
+	public constructor(address: Address) {
+		this.address = address
+	}
+	public constructor(address: Address, port: uint16) {
+		this.address = address
+		this.port = port
+	}
+}
+
+export function lookup(hostname: String): Vector<AddressInfo> {
+	let result = new Vector<AddressInfo>
+	let orig: ptr posix.addrinfo
+	let info: ptr posix.addrinfo
+
+	if posix.getaddrinfo(hostname.data, nullptr, nullptr, &orig) != 0
+		throw new GetaddrinfoFailure
+
+	info = orig
+
+	while info {
+		if info.ai_family == posix.AF_INET {
+			let addr = info.ai_addr as ptr posix.sockaddr_in
+			result.push(new AddressInfo(addr.sin_addr.s_addr as Address))
+		}
+		info = info.ai_next
+	}
+
+	posix.freeaddrinfo(orig)
+
+	return result
+}

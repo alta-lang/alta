@@ -2,6 +2,8 @@ export generic class Pair<T1, T2> {
   public var first: T1
   public var second: T2
 
+  public constructor() {}
+
   public constructor(first: T1, second: T2) {
     this.first @strict = first
     this.second @strict = second

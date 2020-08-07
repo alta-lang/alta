@@ -293,6 +293,29 @@ export class String {
 ##end if
   }
 
+  # Constructs a new String given an unsigned byte array (ptr const uint8) and a length
+  #
+  # @param data   The unsigned byte array to use
+  # @param length The length of the unsigned byte array
+  #
+  # @note This is a convenience constructor provided for creating Strings from unsigned byte array,
+  #       commonly used in applications such as network communication. It is the same as creating a
+  #       string from a rawstring, but it eliminates the need to manually cast the pointer.
+  public constructor(data: ptr const uint8, length: Size) {
+    this._length = length
+    this._data = allocate<byte>(this._length + 1)
+
+    for i: Size in 0..this._length {
+      this._data[i] = data[i] as byte
+    }
+
+    this._data[this._length] = '\0'
+
+##if STRING_DEBUG
+    printf("constructed a new String (%llu)\n", this.uuid)
+##end if
+  }
+
   public constructor(length: Size) {
     this._length = length
     this._data = allocate<byte>(this._length + 1)

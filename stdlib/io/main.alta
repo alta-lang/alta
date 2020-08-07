@@ -162,3 +162,11 @@ export function printError(message: rawconststring): void {
   ensureUTF8Output()
   stdio.fprintf(stdio.stderr, "%s\n", message)
 }
+
+export function format(data: ConsoleData...): String {
+  let result = new String
+  for i: Size in 0..data.length {
+    result += toString(data[i])
+  }
+  return result
+}

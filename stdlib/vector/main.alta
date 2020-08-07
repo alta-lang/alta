@@ -54,6 +54,14 @@ export generic class Vector<T> {
     free<T>(this._data)
   }
 
+  # @brief The number of elements allocated for this vector
+  # @desc This can also be interpreted as the total number of elements that can be used
+  #       before the vector will have to allocate more.
+  public @read function reservedLength(): Size {
+    return this._size
+  }
+
+  # @brief The number of elements present in this vector
   public @read function length(): Size {
     return this._length
   }
@@ -150,15 +158,18 @@ export generic class Vector<T> {
   }
 
   public function from(index: Size): Vector<T> {
-    let other = new Vector<T>(this._length - index)
+    let other = new Vector<T>(index >= this._length ? 0 : this._length - index)
+    other._length = other._size
     for i: Size in 0..other._length {
       other._data[i] @strict = this._data[i + index]
     }
     return other
   }
 
+  # @returns A copy of this vector with all the elements up to and including `index`
   public function to(index: Size): Vector<T> {
-    let other = new Vector<T>(index + 1)
+    let other = new Vector<T>(index >= this._length ? this._length : index + 1)
+    other._length = other._size
     for i: Size in 0..other._length {
       other._data[i] @strict = this._data[i]
     }

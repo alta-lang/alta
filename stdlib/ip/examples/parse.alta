@@ -1,0 +1,17 @@
+import "../" as ip
+import printLine from "io"
+import String from "string"
+
+literal function main(argc: int, argv: ptr ptr byte): int {
+  let ipString = "0.0.0.0"
+
+  if argc > 1 {
+    ipString = argv[1]
+  }
+
+  let ipObj = new ip.Address(ipString)
+
+  printLine("basic ip: ", ipObj)
+
+  return 0
+}

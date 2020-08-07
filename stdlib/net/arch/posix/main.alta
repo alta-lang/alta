@@ -1,0 +1,147 @@
+import "./declarations.alta" as posix
+import Address from "ip"
+import Exception from "exceptions"
+import uint32, uint16, Size, uint8 from "types"
+import Vector from "vector"
+import Pair, BucketList from "util"
+
+#
+# TODO: check errno and throw the appropriate errors with more information
+#
+
+export class SocketAllocationFailure extends Exception {}
+export class SocketBindFailure extends Exception {}
+export class SocketListenFailure extends Exception {}
+export class SocketAcceptFailure extends Exception {}
+export class SocketConnectFailure extends Exception {}
+export class SocketSendFailure extends Exception {}
+export class IOCTLFailure extends Exception {}
+export class SocketReceiveFailure extends Exception {}
+export class SocketCloseFailure extends Exception {}
+export class PollFailure extends Exception {}
+
+export enum SocketType: int {
+	None = -1,
+	Stream = posix.SOCK_STREAM,
+	Datagram = posix.SOCK_DGRAM,
+	PacketSequence = posix.SOCK_SEQPACKET,
+}
+
+#
+# @brief An internet socket class
+# @note This is *not* a general purpose POSIX socket wrapper.
+#       Instead, it is specifically for internet sockets.
+#
+export class Socket {
+	private var handle: int = -1
+	private var _type: SocketType = SocketType.None
+	private var dtor: BucketList
+
+	public constructor() {}
+
+	public constructor(type: SocketType) {
+		this._type = type
+
+		this.handle = posix.socket(posix.AF_INET, this._type, 0)
+
+		if this.handle == -1
+			throw new SocketAllocationFailure
+
+		let handle = this.handle
+		this.dtor = new BucketList(@copy(handle) () => void {
+			if posix.close(handle) == -1
+				throw new SocketCloseFailure
+		})
+	}
+
+	private constructor(handle: int, type: SocketType) {
+		this._type = type
+		this.handle = handle
+
+		this.dtor = new BucketList(@copy(handle) () => void {
+			if posix.close(handle) == -1
+				throw new SocketCloseFailure
+		})
+	}
+
+	public destructor() {
+		this.handle = -1
+	}
+
+	public function bind(address: Address, port: uint16): void {
+		let addr = new posix.sockaddr_in
+		addr.sin_family = posix.AF_INET
+		addr.sin_port = posix.htons(port)
+		addr.sin_addr.s_addr = posix.htonl(address as uint32)
+		if posix.bind(this.handle, &addr as ptr posix.sockaddr, sizeof posix.sockaddr_in) == -1
+			throw new SocketBindFailure
+	}
+
+	public function listen(maximumConnections: unsigned int): void {
+		if posix.listen(this.handle, maximumConnections) == -1
+			throw new SocketListenFailure
+	}
+
+	public function accept(): Pair<Socket, Pair<Address, uint16>> {
+		let addr = new posix.sockaddr_in
+		let len: posix.socklen_t = sizeof posix.sockaddr_in
+		let client = posix.accept(this.handle, &addr as ptr posix.sockaddr, &len)
+		if client == -1
+			throw new SocketAcceptFailure
+		return new Pair<Socket, Pair<Address, uint16>>(new Socket(client, this._type), new Pair<Address, uint16>(posix.ntohl(addr.sin_addr.s_addr), posix.ntohs(addr.sin_port)))
+	}
+
+	public function connect(address: Address, port: uint16): void {
+		let addr = new posix.sockaddr_in
+		addr.sin_family = posix.AF_INET
+		addr.sin_port = posix.htons(port)
+		addr.sin_addr.s_addr = posix.htonl(address as uint32)
+		if posix.connect(this.handle, &addr as ptr posix.sockaddr, sizeof posix.sockaddr_in) == -1
+			throw new SocketConnectFailure
+	}
+
+	public function send(data: ptr uint8, length: Size): Size {
+		let sent = posix.send(this.handle, data as ptr void, length, 0)
+		if sent == -1
+			throw new SocketSendFailure
+		return sent as Size
+	}
+	public function send(data: ptr byte, length: Size): Size {
+		return this.send(data as ptr uint8, length)
+	}
+	public function send(data: Vector<uint8>): Size {
+		return this.send(data.data, data.length)
+	}
+
+	# @param max The maximum number of bytes to read
+	public function receive(max: Size): Vector<uint8> {
+		let buf = new Vector<uint8>(max, 0)
+		let received = posix.recv(this.handle, buf.data as ptr void, buf.length, 0)
+		if received == -1
+			throw new SocketReceiveFailure
+		if received == 0
+			return new Vector<uint8>
+		if received < buf.length
+			return buf.to(received)
+		return buf
+	}
+	public function receive(wait: bool): Vector<uint8> {
+		let len: int = 0
+		if posix.ioctl(this.handle, posix.FIONREAD, &len) == -1
+			throw new IOCTLFailure
+		if len == 0 && wait {
+			let fd = new posix.pollfd
+			fd.fd = this.handle
+			fd.events = posix.POLLIN
+			let ret = posix.poll(&fd, 1, -1)
+			if ret == -1 || ret == 0 || (fd.revents & posix.POLLIN) == 0
+				throw new PollFailure
+			if posix.ioctl(this.handle, posix.FIONREAD, &len) == -1
+				throw new IOCTLFailure
+		}
+		return this.receive(len)
+	}
+	public function receive(): Vector<uint8> {
+		return this.receive(wait: true)
+	}
+}

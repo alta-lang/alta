@@ -1,0 +1,475 @@
+import String, CodePoint from "string"
+import Address from "ip"
+import Exception from "exceptions"
+import Size, SizeMaximum, uint16, uint8 from "types"
+import Vector from "vector"
+import Pair, parseNumber, numberToString from "util"
+import detectRequiredUTF8Bytes, utf8ToUTF32 from "unicode"
+import Map from "map"
+
+# @brief Indicates that container was invalid for the desired operation
+# @desc This is thrown by the Host class when an attempt is made
+#       to perform an operation on Host that doesn't have the necessary
+#       properties for the operation. For example, if no address
+#       is present in the Host but an attempt is made to cast the Host
+#       to an `[ip].Address`, this exception will be thrown
+export class InvalidContainer extends Exception {}
+
+# @brief Indicates that the given hostname was malformed
+# @desc This is thrown by the Host class when parsing a string provided to
+#       the `[string].String` cast constructor and an opening brace (such
+#       as one that would need to be provided to indicate an IPv6 address)
+#       is present but no closing brace is found
+export class InvalidHostname extends Exception {}
+
+# @brief Encodes the given string using percent-encoding
+# @param data A string to encode
+# @returns A percent-encoded string equivalent to the
+#          input string `data`
+export function encode(data: String): String {
+  let result: String
+
+  for i: Size in 0..data.length {
+    let char = data[i]
+    for j: uint8 in 0..char.byteLength {
+      let byte = char.bytes[char.byteIndex + j as Size]
+      if (byte >= 'A' && byte <= 'Z') ||
+         (byte >= 'a' && byte <= 'z') ||
+         (byte >= '0' && byte <= '9') ||
+         (byte == '-') ||
+         (byte == '_') ||
+         (byte == '.') ||
+         (byte == '~')
+      {
+        result += byte
+      } else {
+        result += '%'
+        result += numberToString<uint8>(byte, radix: 16)
+      }
+    }
+  }
+
+  return result
+}
+
+# @brief Decodes the given percent-encoded string
+# @param data A percent-encoded string to decode
+# @returns A regular, non-percent-encoded string equivalent
+#          to the input string `data`
+export function decode(data: String): String {
+  let result: String
+
+  for i: Size in 0..data.length {
+    let char = data[i]
+
+    if char == '%' {
+      let lead = parseNumber<uint8>(data.substring(from: i + 1, length: 2), radix: 16)
+      let req = detectRequiredUTF8Bytes(lead)
+      let bytes = new Vector<uint8>(req)
+      bytes.push(lead)
+      i += 3
+      for j: Size in 1..req {
+        bytes.push(parseNumber<uint8>(data.substring(from: i + 1, length: 2), radix: 16))
+        i += 3
+      }
+      result += utf8ToUTF32(bytes)
+      ;--i
+    } else {
+      result += char
+    }
+  }
+
+  return result
+}
+
+export class Host {
+  # @brief The hostname for this Host
+  public var hostname: String?
+  # @brief The address for this Host
+  public var address: Address?
+
+  # @brief Constructs a new, empty Host (with no hostname or address)
+  public constructor() {}
+
+  # @brief Constructs a new Host with the given Address
+  # @param address The address of the host
+  public @from constructor(address: Address) {
+    this.address = address
+  }
+
+  # @brief Constructs a new Host by parsing the given string
+  # @param data The string to parse
+  # @note The string will first try to be parsed as an address
+  #       and will only be interpreted as a hostname if parsing it
+  #       as an address fails
+  public @from constructor(data: String) {
+    if data.indexOf(':') != SizeMaximum {
+      let trim = data[0] == '['
+      if trim && data[data.length - 1] != ']'
+        throw new InvalidHostname
+      this.address = new Address(trim ? data.substring(from: 1, length: data.length - 2) : data)
+    } else {
+      let first = data.indexOf('.')
+      let second = data.indexOf('.', after: first)
+      let third = data.indexOf('.', after: second)
+      if (
+        first == SizeMaximum  ||
+        second == SizeMaximum ||
+        third == SizeMaximum  ||
+        (
+          first != SizeMaximum  &&
+          second != SizeMaximum &&
+          third != SizeMaximum  &&
+          data.indexOf('.', after: third) == SizeMaximum
+        )
+      ) {
+        # if it doesn't include any non-digit and non-dot characters
+        # (i.e. it's comprised entirely of digits and dots)
+        # and we've already determined that there's a maximum of three dots
+        if !data.includes((char: CodePoint) => bool { return !((char >= '0' && char <= '9') || char == '.') })
+          this.address = new Address(data)
+        else
+          this.hostname = data
+      } else {
+        this.hostname = data
+      }
+    }
+  }
+
+  # @returns A string representation of this host
+  # @note If neither an address nor hostname is present,
+  #       this method will throw an `InvalidContainer` exception
+  public to String {
+    if this.address {
+      if (*this.address).isIPv6 {
+        return '[' + *this.address as String + ']'
+      }
+      return *this.address
+    }
+    if this.hostname {
+      return *this.hostname
+    }
+    throw new InvalidContainer
+  }
+
+  # @returns An Address representing the address of this Host
+  # @note If an address is not present for this Host, this method
+  #       will throw an `InvalidContainer` exception
+  public to Address {
+    if this.address
+      return *this.address
+    throw new InvalidContainer
+  }
+
+  # @brief If true, this Host contains a hostname
+  public @read function isHostname(): bool {
+    return this.hostname
+  }
+
+  # @brief If true, this Host contains an address
+  public @read function isAddress(): bool {
+    return this.address
+  }
+}
+
+export class UserInformation {
+  # @brief A username for the user
+  public var username: String
+  # @brief A password for the user
+  public var password: String?
+
+  # @brief Constructs an empty UserInformation instance
+  public constructor() {}
+
+  # @brief Constructs a UserInformation instance by parsing a string
+  # @param data The string to parse
+  public @from constructor(data: String) {
+    if data.indexOf(':') != SizeMaximum {
+      let idx = data.indexOf(':')
+      this.username = decode(data.substring(from: 0, to: idx))
+      this.password = decode(data.substring(from: idx + 1, to: data.length))
+    } else {
+      this.username = decode(data)
+    }
+  }
+
+  # @returns A string representation of the information in this instance
+  # @note Information will be automatically encoded in the resulting string
+  public to String {
+    if this.password
+      return encode(this.username) + ':' + encode(*this.password)
+    return encode(this.username)
+  }
+}
+
+export class Authority {
+  # @brief Contains some user information, such as username and password
+  public var userInformation: UserInformation?
+  # @brief Indicates the location of the host (i.e. hostname or address)
+  public var host: Host
+  # @brief The target port on the host
+  public var port: uint16?
+
+  # @brief Constructs an empty Authority
+  public constructor() {}
+
+  # @brief Constructs an Authority by parsing a string
+  # @param data The string to parse
+  public @from constructor(data: String) {
+    if data.length > 2 && data[0] == '/' && data[1] == '/'
+      data = data.substring(from: 2, to: data.length)
+    let idx = SizeMaximum
+    if (idx = data.indexOf('@')) != SizeMaximum
+      this.userInformation = data.substring(from: 0, to: idx)
+    let rest = data.substring(from: idx + 1, to: data.length)
+    let colonIdx = rest.indexOf(':')
+    let endBracketIdx = rest.indexOf(']')
+    if colonIdx != SizeMaximum && endBracketIdx != SizeMaximum && colonIdx < endBracketIdx
+      colonIdx = rest.indexOf(':', after: endBracketIdx)
+    if colonIdx != SizeMaximum
+      this.port = parseNumber<uint16>(rest.substring(from: colonIdx + 1, to: rest.length))
+    this.host = rest.substring(from: 0, to: colonIdx == SizeMaximum ? rest.length : colonIdx)
+  }
+
+  # @returns A cannonical string representation for this authority
+  # @note Components will be automatically encoded in the resulting string
+  public to String {
+    let result = "//" + this.host as String
+
+    if this.userInformation
+      result ^= *this.userInformation as String + '@'
+
+    if this.port
+      result += ':' + numberToString<uint16>(*this.port)
+
+    return result
+  }
+}
+
+export class Path extends Vector<String> {
+  # @brief Constructs an empty Path (i.e. a path with no components)
+  public constructor() {
+    super()
+  }
+
+  # @brief Constructs a new Path by parsing the given string
+  # @param data The string to parse
+  public @from constructor(data: String) {
+    super()
+
+    let idx: Size = SizeMaximum
+    if data.length > 0 && data[0] == '/'
+      idx = 0
+    while (let next = data.indexOf('/', after: idx)) != SizeMaximum {
+      let sub = data.substring(from: idx + 1, to: next)
+      if sub.length > 0
+        this.push(decode(sub))
+      idx = next
+    }
+    if idx != SizeMaximum || (idx == SizeMaximum && data.length > 0) {
+      let sub = data.substring(from: idx + 1, to: data.length)
+      if sub.length > 0
+        this.push(decode(sub))
+    }
+  }
+
+  # @brief Constructs a new Path by copying entries from the given string vector
+  # @param path The string vector to copy from
+  public @from constructor(path: ref Vector<String>) {
+    super(path)
+  }
+
+  # @returns A cannonical string representation for this path
+  # @note Path components will be automatically encoded in the resulting string
+  public to String {
+    if this.length == 0
+      return "/"
+    let result = new String
+    for i: Size in 0..this.length {
+      result += '/' + encode(this[i])
+    }
+    return result
+  }
+}
+
+export class QueryValue extends Vector<String> {
+  # @brief Constructs an empty QueryValue
+  public constructor() {
+    super()
+  }
+
+  # @brief Constructs a new QueryValue and adds the given string
+  #        as a new entry
+  public @from constructor(data: String) {
+    super()
+    this.push(data)
+  }
+
+  # @brief Constructs a new QueryValue by copying entries from a
+  #        string vector
+  public @from constructor(data: ref Vector<String>) {
+    super(data)
+  }
+
+  # @returns The first entry in this container
+  # @note This will throw an `InvalidContainer` exception if there is
+  #       not *exactly* one entry in this container
+  public to String {
+    if this.length == 1
+      return this.first
+    throw new InvalidContainer
+  }
+}
+
+export class Query extends Map<String, QueryValue> {
+  # @brief The character to use as a key delimiter; that is, it will be used to determine where
+  #        one entry stops and another one starts
+  # @note This is typically either `&` or `;`
+  public var keyDelimiter: byte = '&'
+
+  # @brief Constructs a new Query with no entries
+  public constructor() {
+    super()
+  }
+
+  # @brief Constructs a new Query, filling it with entries by parsing the given string
+  # @param data The string to parse and create entries from
+  public @from constructor(data: String) {
+    super()
+    this.fillWith(data)
+  }
+
+  private function fillWith(data: String): void {
+    if data.length > 0 && data[0] == '?'
+      data = data.substring(from: 1)
+
+    let processEntry = (entry: String) => void {
+      let key: String
+      let value: String
+      if (let idx = entry.indexOf('=')) != SizeMaximum
+        key = decode(entry.substring(from: 0, to: idx))
+      else
+        key = decode(entry)
+      if (let idx = entry.indexOf('=')) != SizeMaximum
+        value = decode(entry.substring(from: idx + 1, to: entry.length))
+      if this.has(key) && value
+        this[key].push(value)
+      else
+        if value
+          this[key] = value
+        else
+          this[key] = new QueryValue
+    }
+
+    let idx = SizeMaximum
+    while (let next = data.indexOf(this.keyDelimiter, after: idx)) != SizeMaximum {
+      processEntry(data.substring(from: idx + 1, to: next))
+      idx = next
+    }
+    if idx != SizeMaximum || (idx == SizeMaximum && this.keys.length == 0)
+      processEntry(data.substring(from: idx + 1))
+  }
+
+  # @brief Parses the given string and replaces all of this Query's entries
+  #        with new ones from the parsed string
+  # @param $ The desired new value for this Query
+  # @returns A reference to the current Query
+  public this = String: ref Query {
+    this.clear()
+    this.fillWith($)
+    return this
+  }
+
+  # @returns A string representation of this Query
+  # @note Keys and values will be encoded automatically in the
+  #       resulting string
+  public to String {
+    if this.keys.length == 0
+      return new String
+    let result: String = "?"
+    let isFirst = true
+    for i: Size in 0..this.keys.length {
+      let key = this.keys[i]
+      let value = this[key]
+      if value.length == 0 {
+        result += encode(key)
+      } else {
+        let encoded = encode(key)
+        for j: Size in 0..value.length {
+          if isFirst
+            isFirst = false
+          else
+            result += this.keyDelimiter
+          result += encoded + '=' + encode(value[j])
+        }
+      }
+    }
+    return result
+  }
+}
+
+export class URI {
+  # @brief The scheme of this URI
+  # @note ... as defined by [RFC 2396](https://www.ietf.org/rfc/rfc2396.txt), section 3.1
+  public var scheme: String
+  # @brief The authority component of this URI
+  public var authority: Authority?
+  # @brief The path components of this URI
+  public var path: Path
+  # @brief The query component of this URI
+  public var query: Query?
+  # @brief The fragment component of this URI
+  public var fragment: String?
+
+  # @brief Constructs a new, completely empty URI
+  public constructor() {}
+
+  # @brief Constructs a new URI by parsing the given string
+  public @from constructor(data: String) {
+    let first = data.indexOf(':')
+    this.scheme = data.substring(from: 0, to: first)
+    let firstPathSlash = data.indexOf('/')
+    if data.length > first + 2 && data[first + 1] == '/' && data[first + 2] == '/' {
+      firstPathSlash = data.indexOf('/', after: first + 2)
+      this.authority = data.substring(from: first + 1, to: firstPathSlash == SizeMaximum ? data.length : firstPathSlash)
+    }
+    let hashtag = data.lastIndexOf('#')
+    let questionMark = data.indexOf('?')
+    let pathEnd: Size
+    if hashtag != SizeMaximum
+      if questionMark == SizeMaximum
+        pathEnd = hashtag
+      else
+        pathEnd = hashtag < questionMark ? hashtag : questionMark
+    else
+      if questionMark == SizeMaximum
+        pathEnd = data.length
+      else
+        pathEnd = questionMark
+    if firstPathSlash != SizeMaximum || !this.authority
+      this.path = data.substring(from: firstPathSlash == SizeMaximum ? first + 1 : firstPathSlash, to: pathEnd)
+    if hashtag != SizeMaximum
+      this.fragment = decode(data.substring(from: hashtag + 1, to: data.length))
+    if (let questionMark = data.indexOf('?')) != SizeMaximum
+      this.query = data.substring(from: questionMark, to: hashtag == SizeMaximum ? data.length : hashtag)
+  }
+
+  # @returns A fully encoded and valid string representation of this URI
+  # @note The generated string fully conforms to [RFC 2396](https://www.ietf.org/rfc/rfc2396.txt)
+  public to String {
+    let result = this.scheme + ':'
+
+    if this.authority
+      result += *this.authority
+
+    result += this.path
+
+    if this.query
+      result += *this.query
+
+    if this.fragment
+      result += '#' + encode(*this.fragment)
+
+    return result
+  }
+}

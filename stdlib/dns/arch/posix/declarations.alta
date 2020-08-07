@@ -1,0 +1,32 @@
+@@CTranspiler.include("netdb.h");
+
+# should be able to just do `net/arch/posix/declarations.alta`, but Alta's module resolution is acting up
+import "../../../net/arch/posix/declarations.alta" as posix
+
+export posix.sockaddr
+export posix.socklen_t
+export posix.sockaddr_in
+export posix.AF_INET
+export posix.AF_INET6
+
+export literal @external struct addrinfo {
+	ai_flags: int;
+	ai_family: int;
+	ai_socktype: int;
+	ai_protocol: int
+	ai_addrlen: posix.socklen_t;
+	ai_addr: ptr posix.sockaddr;
+	ai_canonname: ptr char;
+	ai_next: ptr addrinfo;
+}
+
+declare literal export var AI_PASSIVE: const int
+declare literal export var AI_CANONNAME: const int
+declare literal export var AI_NUMERICHOST: const int
+declare literal export var AI_NUMERICSERV: const int
+declare literal export var AI_V4MAPPED: const int
+declare literal export var AI_ALL: const int
+declare literal export var AI_ADDRCONFIG: const int
+
+declare literal export function freeaddrinfo(info: ptr addrinfo): void
+declare literal export function getaddrinfo(hostname: ptr const char, service: ptr const char, hints: ptr const addrinfo, res: ptr ptr addrinfo): int
