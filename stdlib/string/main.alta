@@ -365,6 +365,10 @@ export class String {
   }
 
   public destructor() {
+##if STRING_DEBUG
+    printf("destroying a String (%llu)...\n", this.uuid)
+##end if
+
     free<byte>(this._data)
 
 ##if STRING_DEBUG

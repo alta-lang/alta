@@ -1,6 +1,6 @@
 execute_process(
   COMMAND git describe --long --tags
-  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
   OUTPUT_VARIABLE ALTA_GIT_DESC
   OUTPUT_STRIP_TRAILING_WHITESPACE
   ERROR_QUIET
@@ -46,6 +46,7 @@ else()
 
   execute_process(
     COMMAND git diff --quiet --exit-code
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     RESULT_VARIABLE ALTA_MODIFIED
   )
   if ("${ALTA_MODIFIED}" EQUAL "1")

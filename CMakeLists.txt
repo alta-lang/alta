@@ -12,7 +12,7 @@ project(alta
 add_custom_command(
   OUTPUT "${PROJECT_BINARY_DIR}/gen/include/alta/version.hpp"
          "${PROJECT_BINARY_DIR}/gen/include/alta/_version.hpp"
-  COMMAND ${CMAKE_COMMAND} "-DPROJECT_BINARY_DIR=${PROJECT_BINARY_DIR}" -P "${PROJECT_SOURCE_DIR}/CMake/version.cmake"
+  COMMAND ${CMAKE_COMMAND} "-DPROJECT_BINARY_DIR=${PROJECT_BINARY_DIR}" "-DPROJECT_SOURCE_DIR=${PROJECT_SOURCE_DIR}" -P "${PROJECT_SOURCE_DIR}/CMake/version.cmake"
 )
 add_custom_target(alta-version-header
   DEPENDS "${PROJECT_BINARY_DIR}/gen/include/alta/version.hpp"
