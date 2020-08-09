@@ -2,6 +2,7 @@ import allocate, reallocate, free from "memory"
 import Size, rawstring, rawconststring, uint32, uint8, SizeMaximum from "types"
 import printf from "libc/lib/stdio"
 import strlen from "libc/lib/string"
+import tolower from "libc/lib/ctype"
 import Exception, IndexOutOfBounds from "exceptions"
 import "unicode" as unicode
 import Vector from "vector"
@@ -646,6 +647,18 @@ export class String {
   }
   public function lastIndexOf(data: CodePoint | byte): Size {
     return this.lastIndexOf(data, SizeMaximum)
+  }
+
+  public function toLowerCase(): String {
+    # the C `tolower` function is locale-dependent; this shouldn't be
+    # TODO: make this locale-independent
+    let copy = new String(this)
+    # we don't access members directly because we want to properly handle UTF-8 characters
+    for i: Size in 0..copy.length {
+      if copy[i].byteLength == 1
+        copy[i] = tolower(copy[i])
+    }
+    return copy
   }
 
   public this + String: String {
