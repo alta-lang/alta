@@ -1,4 +1,4 @@
-import Socket, SocketType from "net"
+import TCPSocket from "net"
 import printLine, format from "io"
 import Vector from "vector"
 import uint8, uint16 from "types"
@@ -17,7 +17,7 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 	if args.length > 1
 		port = parseNumber<uint16>(args[1])
 
-	let server = new Socket(SocketType.Stream)
+	let server = new TCPSocket
 
 	server.bind("0.0.0.0" as Address, port)
 

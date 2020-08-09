@@ -27,6 +27,16 @@ export enum SocketType: int {
 	PacketSequence = posix.SOCK_SEQPACKET,
 }
 
+export enum Protocol: int {
+	None = -1,
+	GenericIPv4 = posix.IPPROTO_IP,
+	GenericIPv6 = posix.IPPROTO_IPV6,
+	ICMP = posix.IPPROTO_ICMP,
+	Raw = posix.IPPROTO_RAW,
+	TCP = posix.IPPROTO_TCP,
+	UDP = posix.IPPROTO_UDP,
+}
+
 #
 # @brief An internet socket class
 # @note This is *not* a general purpose POSIX socket wrapper.
@@ -35,33 +45,43 @@ export enum SocketType: int {
 export class Socket {
 	private var handle: int = -1
 	private var _type: SocketType = SocketType.None
+	private var _protocol: Protocol = Protocol.None
 	private var dtor: BucketList
 
 	public constructor() {}
 
-	public constructor(type: SocketType) {
+	# TODO: Alta needs to be able to delegate constructors so that we don't have to do this
+	private function construct(handle: int, type: SocketType, protocol: Protocol): void {
 		this._type = type
-
-		this.handle = posix.socket(posix.AF_INET, this._type, 0)
-
-		if this.handle == -1
-			throw new SocketAllocationFailure
-
-		let handle = this.handle
-		this.dtor = new BucketList(@copy(handle) () => void {
-			if posix.close(handle) == -1
-				throw new SocketCloseFailure
-		})
-	}
-
-	private constructor(handle: int, type: SocketType) {
-		this._type = type
+		this._protocol = protocol
 		this.handle = handle
 
 		this.dtor = new BucketList(@copy(handle) () => void {
 			if posix.close(handle) == -1
 				throw new SocketCloseFailure
 		})
+	}
+
+	public constructor(type: SocketType, protocol: Protocol) {
+		let handle = posix.socket(posix.AF_INET, type, protocol)
+
+		if handle == -1
+			throw new SocketAllocationFailure
+
+		this.construct(handle, type, protocol)
+	}
+
+	public constructor(type: SocketType) {
+		let handle = posix.socket(posix.AF_INET, type, 0)
+
+		if handle == -1
+			throw new SocketAllocationFailure
+
+		this.construct(handle, type, 0) # let the OS determine what protocol to use
+	}
+
+	private constructor(handle: int, type: SocketType, protocol: Protocol) {
+		this.construct(handle, type, protocol)
 	}
 
 	public destructor() {
@@ -88,7 +108,7 @@ export class Socket {
 		let client = posix.accept(this.handle, &addr as ptr posix.sockaddr, &len)
 		if client == -1
 			throw new SocketAcceptFailure
-		return new Pair<Socket, Pair<Address, uint16>>(new Socket(client, this._type), new Pair<Address, uint16>(posix.ntohl(addr.sin_addr.s_addr), posix.ntohs(addr.sin_port)))
+		return new Pair<Socket, Pair<Address, uint16>>(new Socket(client, this._type, this._protocol), new Pair<Address, uint16>(posix.ntohl(addr.sin_addr.s_addr), posix.ntohs(addr.sin_port)))
 	}
 
 	public function connect(address: Address, port: uint16): void {
@@ -125,7 +145,7 @@ export class Socket {
 			return buf.to(received)
 		return buf
 	}
-	public function receive(wait: bool): Vector<uint8> {
+	public function receive(wait: bool = true): Vector<uint8> {
 		let len: int = 0
 		if posix.ioctl(this.handle, posix.FIONREAD, &len) == -1
 			throw new IOCTLFailure
@@ -141,7 +161,10 @@ export class Socket {
 		}
 		return this.receive(len)
 	}
-	public function receive(): Vector<uint8> {
-		return this.receive(wait: true)
+}
+
+export class TCPSocket extends Socket {
+	public constructor() {
+		super(SocketType.Stream, Protocol.TCP)
 	}
 }

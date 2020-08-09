@@ -1,4 +1,4 @@
-import Socket, SocketType from "net"
+import TCPSocket from "net"
 import printLine, format from "io"
 import String from "string"
 import Vector from "vector"
@@ -23,7 +23,7 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 		port = parseNumber<uint16>(args[2])
 	}
 
-	let conn = new Socket(SocketType.Stream)
+	let conn = new TCPSocket
 
 	conn.connect(args[1] as Address, port)
 
