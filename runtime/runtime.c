@@ -231,9 +231,8 @@ _Alta_runtime_export void _Alta_reset_error(size_t index) {
   ) {
     if (!err->isNative) {
       _Alta_object_destroy((_Alta_object*)err->value);
-    } else {
-      free(err->value);
     }
+    free(err->value);
     err->isNative = _Alta_bool_true;
     err->typeName = "";
     err->value = NULL;

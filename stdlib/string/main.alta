@@ -81,6 +81,12 @@ export class CodePoint {
     }
   }
 
+  public destructor() {
+    if this.selfData {
+      free<byte>(this.selfData)
+    }
+  }
+
   private function findByteIndex(): Size {
     let i: Size = 0
     for strIdx: Size in 0..(*this._index) {

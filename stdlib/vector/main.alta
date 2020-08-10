@@ -51,6 +51,10 @@ export generic class Vector<T> {
   }
 
   public destructor() {
+    for i: Size in 0..this._length {
+      delete this._data[i]
+    }
+
     free<T>(this._data)
   }
 
