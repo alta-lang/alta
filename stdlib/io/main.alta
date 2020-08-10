@@ -50,6 +50,10 @@ export class File {
     this.open(other.path, other.mode)
   }
 
+  public destructor() {
+    this.close()
+  }
+
   public function open(path: rawconststring, mode: rawconststring): void {
     this.handle = stdio.fopen(path, mode)
     if !this.handle {
