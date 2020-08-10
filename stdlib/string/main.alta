@@ -626,7 +626,7 @@ export class String {
   # Basically just a direct-expression-of-intent wrapper for code that tests whether
   # a character matches some conditions they set forth
   public function indexOf(test: (CodePoint) => bool, after: Size): Size {
-    for i: Size in 0..this._length {
+    for i: Size in after + 1..this._length {
       if test(this[i])
         return i
     }
