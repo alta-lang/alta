@@ -1,0 +1,3 @@
+@@CTranspiler.include("sys/types.h");
+
+export type ssize_t = any

@@ -1,0 +1,28 @@
+@@CTranspiler.include("netinet/in.h");
+
+import uint32, uint16 from "types"
+
+export type in_port_t = uint16
+export type in_addr_t = uint32
+export type sa_family_t = any
+
+export literal @external struct in_addr {
+	s_addr: in_addr_t;
+}
+
+export literal @external struct sockaddr {
+	sin_family: sa_family_t;
+}
+
+export literal @external struct sockaddr_in {
+	sin_family: sa_family_t;
+	sin_port: in_port_t;
+	sin_addr: in_addr;
+}
+
+declare literal export var IPPROTO_IP: const int
+declare literal export var IPPROTO_IPV6: const int
+declare literal export var IPPROTO_ICMP: const int
+declare literal export var IPPROTO_RAW: const int
+declare literal export var IPPROTO_TCP: const int
+declare literal export var IPPROTO_UDP: const int

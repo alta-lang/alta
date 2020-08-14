@@ -1,0 +1,5 @@
+@@CTranspiler.include("sys/ioctl.h");
+
+declare literal export var FIONREAD: const unsigned long int
+
+declare literal export function ioctl(fd: int, request: unsigned long int, @CTranspiler.vararg args: any...): int

@@ -1,0 +1,8 @@
+@@CTranspiler.include("sys/uio.h");
+
+import Size from "types"
+
+export literal @external struct iovec {
+	iov_base: ptr void;
+	iov_len: Size;
+}
