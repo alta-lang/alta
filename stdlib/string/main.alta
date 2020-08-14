@@ -514,7 +514,7 @@ export class String {
   public function substring(from: Size, to: Size): String {
     let sub = new String
     for i: Size in from..to {
-      if i >= this._length break
+      if i >= this.length break
       sub.append(this.charAt(i))
     }
     return sub
@@ -525,7 +525,7 @@ export class String {
     return this.substring(from, to: from + length)
   }
   public function substring(from: Size): String {
-    return this.substring(from, to: this._length)
+    return this.substring(from, to: this.length)
   }
   # possible for the same reason as above
   public function substring(to: Size): String {
@@ -584,7 +584,7 @@ export class String {
     # for every character in this string, which means that a character that
     # is present would need to go through fewer characters in this string
     # before being found
-    for i: Size in 0..this._length {
+    for i: Size in 0..this.length {
       for j: Size in 0..data.length {
         let isCP = data[j] instanceof CodePoint
         if isCP {
@@ -610,7 +610,7 @@ export class String {
 
   public function indexOf(data: CodePoint | byte, after: Size): Size {
     let isCP = data instanceof CodePoint
-    for i: Size in after + 1..this._length {
+    for i: Size in after + 1..this.length {
       # TODO: automatic union method and operator method handling
       # basically, if the target functions are overloaded with methods
       # that can handle all types present in the union, Alta will automatically
@@ -632,7 +632,7 @@ export class String {
   # Basically just a direct-expression-of-intent wrapper for code that tests whether
   # a character matches some conditions they set forth
   public function indexOf(test: (CodePoint) => bool, after: Size): Size {
-    for i: Size in after + 1..this._length {
+    for i: Size in after + 1..this.length {
       if test(this[i])
         return i
     }
