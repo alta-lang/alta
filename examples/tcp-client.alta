@@ -6,6 +6,10 @@ import uint8, uint16 from "types"
 import Address from "ip"
 import parseNumber from "util"
 
+#
+# note that this is an example of a *blocking* TCP client
+#
+
 literal function main(argc: int, argv: ptr ptr byte): int {
 	let args = new Vector<String>
 	for i: int in 0..argc {
@@ -25,11 +29,11 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 
 	let conn = new TCPSocket
 
-	conn.connect(args[1] as Address, port)
+	conn.connect(args[1], port, block: true)
 
 	printLine("Connected to ", args[1], ':', port)
 
-	let serverMessage = conn.receive()
+	let serverMessage = *conn.receive(block: true)
 
 	if serverMessage.length > 0 {
 		printLine("Got a message from the server: ", new String(serverMessage.data, serverMessage.length))
@@ -38,7 +42,7 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 	}
 
 	let message: String = format("Bonjour, ", args[1], ':', port)
-	conn.send(message.data, message.length)
+	conn.send(message.data, message.length, block: true)
 
 	return 0
 }
