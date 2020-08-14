@@ -5,7 +5,7 @@ export generic class Pair<T1, T2> {
   public constructor() {}
 
   public constructor(first: T1, second: T2) {
-    this.first @strict = first
-    this.second @strict = second
+    this.first = first
+    this.second = second
   }
 }
