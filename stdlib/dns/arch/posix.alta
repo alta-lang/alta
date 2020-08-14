@@ -1,4 +1,4 @@
-import "./declarations.alta" as posix
+import native as posix from "posix"
 import Address from "ip"
 #import URI from "uri"
 import uint16 from "types"

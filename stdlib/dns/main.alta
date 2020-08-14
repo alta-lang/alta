@@ -1,1 +1,1 @@
-export * from "./arch/posix/main.alta"
+export * from "./arch/posix.alta"

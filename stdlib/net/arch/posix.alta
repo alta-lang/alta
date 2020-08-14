@@ -1,0 +1,269 @@
+import native as posix from "posix"
+import Address from "ip"
+import Exception from "exceptions"
+import uint32, uint16, Size, uint8 from "types"
+import Vector from "vector"
+import Pair, BucketList from "util"
+
+#
+# TODO: check errno and throw the appropriate errors with more information
+#
+
+export class SocketAllocationFailure extends Exception {}
+export class SocketBindFailure extends Exception {}
+export class SocketListenFailure extends Exception {}
+export class SocketAcceptFailure extends Exception {}
+export class SocketConnectFailure extends Exception {}
+export class SocketSendFailure extends Exception {}
+export class IOCTLFailure extends Exception {}
+export class SocketReceiveFailure extends Exception {}
+export class SocketCloseFailure extends Exception {}
+export class PollFailure extends Exception {}
+export class FcntlFailure extends Exception {}
+export class GetsockoptFailure extends Exception {}
+
+export enum SocketType: int {
+	None = -1,
+	Stream = posix.SOCK_STREAM,
+	Datagram = posix.SOCK_DGRAM,
+	PacketSequence = posix.SOCK_SEQPACKET,
+}
+
+export enum Protocol: int {
+	None = -1,
+	GenericIPv4 = posix.IPPROTO_IP,
+	GenericIPv6 = posix.IPPROTO_IPV6,
+	ICMP = posix.IPPROTO_ICMP,
+	Raw = posix.IPPROTO_RAW,
+	TCP = posix.IPPROTO_TCP,
+	UDP = posix.IPPROTO_UDP,
+}
+
+#
+# @brief An asynchronous internet socket class
+# @note This is *not* a general purpose POSIX socket wrapper.
+#       Instead, it is specifically for internet sockets.
+# @note This socket is *always* internally non-blocking. Certain methods may act as blocking,
+#       but internally, they just wait until the call is ready.
+export class Socket {
+	private var handle: int = -1
+	private var _type: SocketType = SocketType.None
+	private var _protocol: Protocol = Protocol.None
+	private var dtor: BucketList
+
+	public constructor() {}
+
+	# TODO: Alta needs to be able to delegate constructors so that we don't have to do this
+	private function construct(handle: int, type: SocketType, protocol: Protocol): void {
+		this._type = type
+		this._protocol = protocol
+		this.handle = handle
+
+		this.dtor = new BucketList(@copy(handle) () => void {
+			if posix.close(handle) == -1
+				throw new SocketCloseFailure
+		})
+
+		# always make the socket non-blocking
+
+		let flags = posix.fcntl(this.handle, posix.F_GETFL)
+		if flags == -1
+			throw new FcntlFailure
+
+		if posix.fcntl(this.handle, posix.F_SETFL, flags | posix.O_NONBLOCK) == -1
+			throw new FcntlFailure
+	}
+
+	private function construct(type: SocketType, protocol: Protocol): void {
+		let handle = posix.socket(posix.AF_INET, type, protocol)
+
+		if handle == -1
+			throw new SocketAllocationFailure
+
+		this.construct(handle, type, protocol)
+	}
+
+	public constructor(type: SocketType, protocol: Protocol) {
+		this.construct(type, protocol)
+	}
+
+	public constructor(type: SocketType) {
+		this.construct(type, 0) # let the OS determine what protocol to use
+	}
+
+	private constructor(handle: int, type: SocketType, protocol: Protocol) {
+		this.construct(handle, type, protocol)
+	}
+
+	public destructor() {
+		this.handle = -1
+
+		# BucketList will automatically take care of closing the file handle for us when it needs to be closed
+		# (i.e. when the last reference to it dies)
+		# (remember that Alta destructors *always* call class member destructors, and do so after all visible destructors run)
+	}
+
+	public function bind(address: Address, port: uint16): void {
+		let addr = new posix.sockaddr_in
+		addr.sin_family = posix.AF_INET
+		addr.sin_port = posix.htons(port)
+		addr.sin_addr.s_addr = posix.htonl(address as uint32)
+		if posix.bind(this.handle, &addr as ptr posix.sockaddr, sizeof posix.sockaddr_in) == -1
+			throw new SocketBindFailure
+	}
+
+	public function listen(maximumConnections: unsigned int): void {
+		if posix.listen(this.handle, maximumConnections) == -1
+			throw new SocketListenFailure
+	}
+
+	private function waitFor(read: bool = false, write: bool = false): void {
+		let fd = new posix.pollfd
+		fd.fd = this.handle
+		fd.events = 0
+		if read
+			fd.events |= posix.POLLIN
+		if write
+			fd.events |= posix.POLLOUT
+		let ret = posix.poll(&fd, 1, -1)
+		if ret == -1 || ret == 0 || (read && (fd.revents & posix.POLLIN) == 0) || (write && (fd.revents & posix.POLLOUT) == 0)
+			throw new PollFailure
+	}
+
+	private function checkIfCan(read: bool = false, write: bool = false): bool {
+		let fd = new posix.pollfd
+		fd.fd = this.handle
+		fd.events = 0
+		if read
+			fd.events |= posix.POLLIN
+		if write
+			fd.events |= posix.POLLOUT
+		let ret = posix.poll(&fd, 1, -1)
+		if ret == -1
+			throw new PollFailure
+		if ret == 0
+			return false
+		return (read && (fd.revents & posix.POLLIN) != 0) || (write && (fd.revents & posix.POLLOUT) != 0)
+	}
+
+	public function accept(block: bool = false): Pair<Socket, Pair<Address, uint16>>? {
+		if block
+			this.waitFor(read: true)
+		# there *should* be a client ready to be `accept`ed now
+
+		let addr = new posix.sockaddr_in
+		let len: posix.socklen_t = sizeof posix.sockaddr_in
+		let client = posix.accept(this.handle, &addr as ptr posix.sockaddr, &len)
+		if client == -1 {
+			let err = posix.errno
+			if err == posix.EAGAIN || err == posix.EWOULDBLOCK
+				if !block # if it *is* supposed to be blocking, throw an error because this shouldn't happen
+					return null
+			throw new SocketAcceptFailure
+		}
+		return new Pair<Socket, Pair<Address, uint16>>(new Socket(client, this._type, this._protocol), new Pair<Address, uint16>(posix.ntohl(addr.sin_addr.s_addr), posix.ntohs(addr.sin_port)))
+	}
+
+	public function connect(address: Address, port: uint16, block: bool = false): void {
+		let addr = new posix.sockaddr_in
+		addr.sin_family = posix.AF_INET
+		addr.sin_port = posix.htons(port)
+		addr.sin_addr.s_addr = posix.htonl(address as uint32)
+		if posix.connect(this.handle, &addr as ptr posix.sockaddr, sizeof posix.sockaddr_in) == -1 {
+			let err = posix.errno
+			if err == posix.EINPROGRESS {
+				if block {
+					this.waitFor(write: true)
+					err = 0
+					let len = sizeof int
+					if posix.getsockopt(this.handle, posix.SOL_SOCKET, posix.SO_ERROR, &err as ptr void, &len as ptr posix.socklen_t) == -1
+						throw new GetsockoptFailure
+					if err != 0
+						throw new SocketConnectFailure
+				}
+			} else {
+				throw new SocketConnectFailure
+			}
+		}
+	}
+
+	public @read function canRead(): bool {
+		return this.checkIfCan(read: true)
+	}
+
+	public @read function canWrite(): bool {
+		return this.checkIfCan(write: true)
+	}
+
+	public function send(data: ptr const uint8, length: Size, block: bool = false): Size? {
+		if block
+			this.waitFor(write: true)
+		let sent = posix.send(this.handle, data as ptr const void, length, 0)
+		if sent == -1 {
+			let err = posix.errno
+			if err == posix.EAGAIN || err == posix.EWOULDBLOCK
+				if !block # the `waitFor` call should make it writable, so if it's not, then throw an error
+					return null
+			throw new SocketSendFailure
+		}
+		return sent as Size
+	}
+	public function send(data: ptr const byte, length: Size, block: bool = false): Size? {
+		return this.send(data as ptr const uint8, length, block)
+	}
+	public function send(data: Vector<uint8>, block: bool = false): Size? {
+		return this.send(data.data, data.length, block)
+	}
+
+	# @param max The maximum number of bytes to read
+	public function receive(max: Size, block: bool = false): Vector<uint8>? {
+		if block
+			this.waitFor(read: true)
+
+		let buf = new Vector<uint8>(max, 0)
+		let received = posix.recv(this.handle, buf.data as ptr void, buf.length, 0)
+		if received == -1 {
+			let err = posix.errno
+			if err == posix.EAGAIN || err == posix.EWOULDBLOCK
+				if !block # `waitFor` should've already waited for data if we were asked to block
+					return null
+			throw new SocketReceiveFailure
+		}
+
+		if received == 0
+			return new Vector<uint8>
+		if received < buf.length
+			return buf.to(received)
+
+		return buf
+	}
+	public function receive(block: bool = false): Vector<uint8>? {
+		if !block && !this.canRead
+			return null
+
+		if block
+			this.waitFor(read: true)
+
+		let len: int = 0
+		if posix.ioctl(this.handle, posix.FIONREAD, &len) == -1
+			throw new IOCTLFailure
+
+		return this.receive(len, block)
+	}
+}
+
+export class TCPSocket extends Socket {
+	public constructor() {
+		super(SocketType.Stream, Protocol.TCP)
+	}
+	private @from constructor(socket: ref Socket) {
+		super(socket)
+	}
+
+	public function accept(block: bool = false): Pair<TCPSocket, Pair<Address, uint16>>? {
+		let maybe = super.accept(block: block)
+		if maybe
+			return new Pair<TCPSocket, Pair<Address, uint16>>((*maybe).first as TCPSocket, (*maybe).second)
+		return null
+	}
+}
