@@ -1081,12 +1081,16 @@ int main(int argc, char** argv) {
         auto mangledModuleName = Talta::mangleName(mod.get());
         for (auto& dependent: mod->dependents) {
           auto name = "_ALTA_MODULE_" + Talta::mangleName(dependent.get()) + "_0_INCLUDE_" + mangledModuleName;
-          auto headerPath = hOut.relativeTo(outDir / dependent->name).toString('/');
+          auto headerPath = hOut.relativeTo(outDir / (dependent->name + ".h")).toString('/');
+          if (headerPath.empty())
+            headerPath = hOut.components.back();
           depIndex[dependent->id].insert("#define " + name + " \"" + headerPath + '"');
           includeMap[name] = headerPath;
         }
         auto name = "_ALTA_MODULE_" + mangledModuleName + "_0_INCLUDE_" + mangledModuleName;
-        auto headerPath = hOut.relativeTo(outDir / mod->name).toString('/');
+        auto headerPath = hOut.relativeTo(outDir / (mod->name + ".h")).toString('/');
+        if (headerPath.empty())
+          headerPath = hOut.components.back();
         depIndex[mod->id].insert("#define " + name + " \"" + headerPath + '"');
         includeMap[name] = headerPath;
       }

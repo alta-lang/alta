@@ -232,7 +232,7 @@ _Alta_runtime_export void _Alta_reset_error(size_t index) {
     if (!err->isNative) {
       _Alta_object_destroy((_Alta_object*)err->value);
     }
-    free(err->value);
+    free(_Alta_get_root_instance(err->value));
     err->isNative = _Alta_bool_true;
     err->typeName = "";
     err->value = NULL;
