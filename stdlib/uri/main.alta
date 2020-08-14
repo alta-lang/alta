@@ -290,6 +290,19 @@ export class Path extends Vector<String> {
     }
     return result
   }
+
+  public this == Path: bool {
+    if this.length != $.length
+      return false
+    for i: Size in 0..this.length {
+      if this[i] != $[i]
+        return false
+    }
+    return true
+  }
+  public Path == this: bool {
+    return $ == this
+  }
 }
 
 export class QueryValue extends Vector<String> {
