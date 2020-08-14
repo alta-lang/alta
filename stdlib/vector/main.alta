@@ -32,7 +32,7 @@ export generic class Vector<T> {
       this._data[i] @strict = items[i]
     }
   }
-  public constructor(pointer: ptr T, length: Size) {
+  public constructor(pointer: ptr const T, length: Size) {
     this._size = this._length = length
     this._data = allocate<T>(this._length)
 
@@ -119,6 +119,24 @@ export generic class Vector<T> {
     this._data[this._length - 1] @strict = value
     return elm
   }
+  public function push(pointer: ptr const T, length: Size): ref Vector<T> {
+    let idx = this._length
+    this._length += length
+    this.ensureSize(this._length)
+    for i: Size in 0..length {
+      this._data[idx++] @strict = pointer[i]
+    }
+    return this
+  }
+  public function push(items: T...): ref Vector<T> {
+    let idx = this._length
+    this._length += items.length
+    this.ensureSize(this._length)
+    for i: Size in 0..items.length {
+      this._data[idx++] @strict = items[i]
+    }
+    return this
+  }
 
   public function pop(): T {
     let value: T = this.last
@@ -154,11 +172,25 @@ export generic class Vector<T> {
   public function remove(index: Size): T {
     let value: T = this[index]
     for i: Size in index..this._length - 1 {
-      this._data[index] = this._data[index + 1]
+      this._data[index + i] = this._data[index + i + 1]
     }
     delete this[this._length - 1]
     --this._length
     return value
+  }
+
+  public function remove(from: Size, length: Size): ref Vector<T> {
+    for i: Size in from..this._length - length {
+      this._data[from + i] = this._data[from + i + length]
+    }
+    for i: Size in 0..length {
+      delete this[this._length - length]
+    }
+    this._length -= length
+    return this
+  }
+  public function remove(from: Size, to: Size): ref Vector<T> {
+    return this.remove(from, to - from)
   }
 
   public function from(index: Size): Vector<T> {
