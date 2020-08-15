@@ -4,6 +4,7 @@ import Exception from "exceptions"
 import uint32, uint16, Size, uint8 from "types"
 import Vector from "vector"
 import Pair, BucketList from "util"
+import Box, allocate from "memory"
 
 #
 # TODO: check errno and throw the appropriate errors with more information
@@ -39,6 +40,13 @@ export enum Protocol: int {
 	UDP = posix.IPPROTO_UDP,
 }
 
+enum SocketState: int {
+	Initial,
+	Connecting,
+	Connected,
+	FailedToConnect,
+}
+
 #
 # @brief An asynchronous internet socket class
 # @note This is *not* a general purpose POSIX socket wrapper.
@@ -50,14 +58,18 @@ export class Socket {
 	private var _type: SocketType = SocketType.None
 	private var _protocol: Protocol = Protocol.None
 	private var dtor: BucketList
+	# we need to keep the state in a Box because it needs to be shared by all copies of this socket
+	private var _state: Box<SocketState> = nullptr
 
 	public constructor() {}
 
 	# TODO: Alta needs to be able to delegate constructors so that we don't have to do this
-	private function construct(handle: int, type: SocketType, protocol: Protocol): void {
+	private function construct(handle: int, type: SocketType, protocol: Protocol, state: SocketState): void {
 		this._type = type
 		this._protocol = protocol
 		this.handle = handle
+		this._state = allocate<SocketState>(1)
+		this._state as ref SocketState = state
 
 		this.dtor = new BucketList(@copy(handle) () => void {
 			if posix.close(handle) == -1
@@ -80,7 +92,7 @@ export class Socket {
 		if handle == -1
 			throw new SocketAllocationFailure
 
-		this.construct(handle, type, protocol)
+		this.construct(handle, type, protocol, SocketState.Initial)
 	}
 
 	public constructor(type: SocketType, protocol: Protocol) {
@@ -91,8 +103,8 @@ export class Socket {
 		this.construct(type, 0) # let the OS determine what protocol to use
 	}
 
-	private constructor(handle: int, type: SocketType, protocol: Protocol) {
-		this.construct(handle, type, protocol)
+	private constructor(handle: int, type: SocketType, protocol: Protocol, state: SocketState) {
+		this.construct(handle, type, protocol, state)
 	}
 
 	public destructor() {
@@ -101,6 +113,10 @@ export class Socket {
 		# BucketList will automatically take care of closing the file handle for us when it needs to be closed
 		# (i.e. when the last reference to it dies)
 		# (remember that Alta destructors *always* call class member destructors, and do so after all visible destructors run)
+	}
+
+	private @read function state(): ref SocketState {
+		return this._state as ref SocketState
 	}
 
 	public function bind(address: Address, port: uint16): void {
@@ -161,7 +177,7 @@ export class Socket {
 					return null
 			throw new SocketAcceptFailure
 		}
-		return new Pair<Socket, Pair<Address, uint16>>(new Socket(client, this._type, this._protocol), new Pair<Address, uint16>(posix.ntohl(addr.sin_addr.s_addr), posix.ntohs(addr.sin_port)))
+		return new Pair<Socket, Pair<Address, uint16>>(new Socket(client, this._type, this._protocol, SocketState.Connected), new Pair<Address, uint16>(posix.ntohl(addr.sin_addr.s_addr), posix.ntohs(addr.sin_port)))
 	}
 
 	public function connect(address: Address, port: uint16, block: bool = false): void {
@@ -169,22 +185,52 @@ export class Socket {
 		addr.sin_family = posix.AF_INET
 		addr.sin_port = posix.htons(port)
 		addr.sin_addr.s_addr = posix.htonl(address as uint32)
+		this.state = SocketState.Connecting
 		if posix.connect(this.handle, &addr as ptr posix.sockaddr, sizeof posix.sockaddr_in) == -1 {
 			let err = posix.errno
 			if err == posix.EINPROGRESS {
 				if block {
 					this.waitFor(write: true)
-					err = 0
-					let len = sizeof int
-					if posix.getsockopt(this.handle, posix.SOL_SOCKET, posix.SO_ERROR, &err as ptr void, &len as ptr posix.socklen_t) == -1
-						throw new GetsockoptFailure
-					if err != 0
+					if !this.connected
 						throw new SocketConnectFailure
 				}
 			} else {
 				throw new SocketConnectFailure
 			}
 		}
+	}
+
+	public @read function connected(): bool {
+		if this.state == SocketState.Connected
+			return true
+		if this.state == SocketState.Initial
+			return false
+		if !this.canWrite
+			return false
+		let err = 0
+		let len = sizeof int
+		if posix.getsockopt(this.handle, posix.SOL_SOCKET, posix.SO_ERROR, &err as ptr void, &len as ptr posix.socklen_t) == -1
+			throw new GetsockoptFailure
+		if err != 0 {
+			this.state = SocketState.FailedToConnect
+			return false
+		}
+		this.state = SocketState.Connected
+		return true
+	}
+
+	public @read function connecting(): bool {
+		# this is not just to save work, it's also because this getter checks and updates some internal state for us
+		if this.connected
+			return false
+		return this.state == SocketState.Connecting
+	}
+
+	public @read function connectionFailure(): bool {
+		# same as in the `connecting` getter
+		if this.connected
+			return false
+		return this.state == SocketState.FailedToConnect
 	}
 
 	public @read function canRead(): bool {
