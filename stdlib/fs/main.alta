@@ -325,7 +325,7 @@ export class Path {
 
 	public function push(component: String): ref Path {
 		if component.empty
-			return;
+			return this
 		this.components.push(component)
 		return this
 	}
@@ -336,7 +336,7 @@ export class Path {
 	}
 	public function unshift(component: String): ref Path {
 		if component.empty
-			return;
+			return this
 		this.components.unshift(component)
 		return this
 	}
