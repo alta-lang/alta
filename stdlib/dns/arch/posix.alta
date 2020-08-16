@@ -35,7 +35,7 @@ export function lookup(hostname: String): Vector<AddressInfo> {
 	while info {
 		if info.ai_family == posix.AF_INET {
 			let addr = info.ai_addr as ptr posix.sockaddr_in
-			result.push(new AddressInfo(addr.sin_addr.s_addr as Address))
+			result.push(new AddressInfo(posix.ntohl(addr.sin_addr.s_addr) as Address))
 		}
 		info = info.ai_next
 	}
