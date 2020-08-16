@@ -667,6 +667,18 @@ export class String {
     return copy
   }
 
+  public function startsWith(other: String): bool {
+    if other.length > this.length
+      return false
+    return this.substring(length: other.length) == other
+  }
+
+  public function endsWith(other: String): bool {
+    if other.length > this.length
+      return false
+    return this.substring(from: this.length - other.length) == other
+  }
+
   public this + String: String {
     let other = new String(this)
     other.append($)
