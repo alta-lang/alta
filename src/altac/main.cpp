@@ -856,6 +856,10 @@ int main(int argc, char** argv) {
         std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": lexed \"" << fn.toString() << "\" in " << duration.count() << "ms" << std::endl;
       }
 
+      if (lexer.tokens.size() > 0 && lexer.tokens.back().type == AltaCore::Lexer::TokenType::PreprocessorDirective && lexer.tokens.back().raw == "#") {
+        lexer.tokens.pop_back();
+      }
+
       if (verboseSwitch) {
         printf("%sTokens:%s\n", CLI::COLOR_BLUE, CLI::COLOR_NORMAL);
         for (const auto& token: lexer.tokens) {
@@ -904,6 +908,10 @@ int main(int argc, char** argv) {
           }
 
           file.close();
+
+          if (lexer.tokens.size() > 0 && lexer.tokens.back().type == AltaCore::Lexer::TokenType::PreprocessorDirective && lexer.tokens.back().raw == "#") {
+            lexer.tokens.pop_back();
+          }
 
           Parser::Parser parser(lexer.tokens, *parsingDefinitions, modPath);
           parser.parse();

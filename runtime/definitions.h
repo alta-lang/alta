@@ -178,7 +178,10 @@ typedef struct __Alta_basic_generator_state {
   _Alta_basic_class* self;
 } _Alta_basic_generator_state;
 
-typedef struct __Alta_basic_coroutine_state {
+typedef struct __Alta_basic_coroutine_state _Alta_basic_coroutine_state;
+typedef void (*_Alta_basic_coroutine_runner)(_Alta_basic_coroutine_state* coroutineState);
+
+struct __Alta_basic_coroutine_state {
   void* stack;
   size_t stackSize;
   void* input;
@@ -187,7 +190,8 @@ typedef struct __Alta_basic_coroutine_state {
   void* parameters;
   _Alta_basic_class* self;
   void* value;
-  struct __Alta_basic_coroutine_state* waitingFor;
-} _Alta_basic_coroutine_state;
+  _Alta_basic_coroutine_state* waitingFor;
+  _Alta_basic_coroutine_runner next;
+};
 
 #endif // _ALTA_RUNTIME_DEFINITIONS_H
