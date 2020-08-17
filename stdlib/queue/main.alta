@@ -1,5 +1,5 @@
 import List from "list"
-import Size from "size"
+import Size from "types"
 
 export generic class Queue<T> {
   private var list: List<T>
