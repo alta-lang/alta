@@ -166,6 +166,36 @@ export literal @external @typed struct _Alta_symbol_table {
 #
 
 #
+# @section generators and coroutines
+#
+export literal @external @typed struct _Alta_basic_generator_state {
+  stack: ptr void;
+  stackSize: Size;
+  input: ptr void;
+  index: Size;
+  done: bool;
+  parameters: ptr void;
+  self: ptr _Alta_basic_class;
+}
+
+export literal @external @typed struct _Alta_basic_coroutine_state {
+  stack: ptr void;
+  stackSize: Size;
+  input: ptr void;
+  index: Size;
+  done: bool;
+  parameters: ptr void;
+  self: ptr _Alta_basic_class;
+  waitingFor: ptr _Alta_basic_coroutine_state;
+  next: (ptr _Alta_basic_coroutine_state) -> void;
+}
+
+export type _Alta_basic_coroutine_runner = (ptr _Alta_basic_coroutine_state) -> void
+#
+# @end section
+#
+
+#
 # @section errors
 #
 export literal @external @typed struct _Alta_error_handler_node {
