@@ -186,6 +186,7 @@ export literal @external @typed struct _Alta_basic_coroutine_state {
   done: bool;
   parameters: ptr void;
   self: ptr _Alta_basic_class;
+  value: ptr void;
   waitingFor: ptr _Alta_basic_coroutine_state;
   next: (ptr _Alta_basic_coroutine_state) -> void;
 }
