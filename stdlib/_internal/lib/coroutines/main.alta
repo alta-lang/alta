@@ -2,7 +2,7 @@
 #           import Runtime.Native._Alta_basic_class from "meta"
 import "meta/lib/runtime/native" as native
 import Queue from "queue"
-import allocate, free from "memory"
+import free from "memory"
 import List from "list"
 import Size from "types"
 
@@ -64,6 +64,7 @@ export class Scheduler {
 			for i: Size in 0..this.owned.length {
 				let item: ref native._Alta_basic_coroutine_state = this.owned[i]
 				if &item == co {
+					free<void>(item.value)
 					this.owned.remove(i)
 					break
 				}
