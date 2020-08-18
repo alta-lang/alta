@@ -33,7 +33,7 @@ export class Scheduler {
 	#       we can make this private once the compiler supports `await`ing coroutines outside
 	#       of coroutines (which it will use `runToCompletion` to do)
 	#       that's no problem for the compiler, btw: it can use the method no matter what visiblity it has
-	public function _schedule(coroutine: Coro): Coro {
+	private function _schedule(coroutine: Coro): Coro {
 		# NOTE: this commented-out code is for if we want to guarantee that the given coroutine will run
 		#       immediately after being scheduled. i'm not sure if we want those semantics or not.
 		#       for now, we have it commented out which has the result of making the semantics effectively
@@ -78,7 +78,7 @@ export class Scheduler {
 		return this.work.length != 0
 	}
 
-	public function runToCompletion(coroutine: Coro): void {
+	public function runToCompletion(coroutine: Coro): Coro {
 		# NOTE: same note as in `_schedule`; i'm not sure if we want this quick-exit behavior
 		#if !coroutine.generator.done
 		#	coroutine.next(coroutine)
@@ -88,6 +88,7 @@ export class Scheduler {
 		this.work.push(coroutine)
 		while !coroutine.generator.done
 			this.tick()
+		return coroutine
 	}
 
 	public function finishAll(): void {
