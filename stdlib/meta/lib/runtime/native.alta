@@ -179,13 +179,9 @@ export literal @external @typed struct _Alta_basic_generator_state {
 }
 
 export literal @external @typed struct _Alta_basic_coroutine_state {
-  stack: ptr void;
-  stackSize: Size;
-  input: ptr void;
-  index: Size;
-  done: bool;
-  parameters: ptr void;
-  self: ptr _Alta_basic_class;
+  objectType: ObjectType;
+  _Alta_class_info_struct: _Alta_class_info;
+  generator: _Alta_basic_generator_state;
   value: ptr void;
   waitingFor: ptr _Alta_basic_coroutine_state;
   next: (ptr _Alta_basic_coroutine_state) -> void;

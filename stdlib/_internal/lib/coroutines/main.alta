@@ -2,6 +2,9 @@
 #           import Runtime.Native._Alta_basic_class from "meta"
 import "meta/lib/runtime/native" as native
 import Queue from "queue"
+import allocate, free from "memory"
+import List from "list"
+import Size from "types"
 
 ##if platform == "windows"
 	import "./arch/windows.alta" as arch
@@ -21,28 +24,53 @@ type Coro = ptr native._Alta_basic_coroutine_state
 #
 
 export class Scheduler {
+	private var owned = new List<native._Alta_basic_coroutine_state>
 	private var work = new Queue<Coro>
 	#private var handles = new Queue<arch.HandleType>
 
-	public function schedule(coroutine: Coro): Coro {
-		if !coroutine.done
-			coroutine.next(coroutine)
-		if coroutine.done
-			return coroutine
-		this.work.push(coroutine)
-		return coroutine
+	# used by us internally and by the compiler
+	# TODO: make this private; we need it to be public for now for the tests
+	#       we can make this private once the compiler supports `await`ing coroutines outside
+	#       of coroutines (which it will use `runToCompletion` to do)
+	#       that's no problem for the compiler, btw: it can use the method no matter what visiblity it has
+	public function _schedule(coroutine: Coro): Coro {
+		# NOTE: this commented-out code is for if we want to guarantee that the given coroutine will run
+		#       immediately after being scheduled. i'm not sure if we want those semantics or not.
+		#       for now, we have it commented out which has the result of making the semantics effectively
+		#       be that the coroutine will run whenever the scheduler decides (which at the moment means it
+		#       depends on how long the workqueue is)
+		#if !coroutine.done
+		#	coroutine.next(coroutine)
+		#if coroutine.done
+		#	return coroutine
+
+		return this.work.push(coroutine)
+	}
+
+	# user-facing variant that copies the structure and makes it persistent
+	public function schedule(coroutine: native._Alta_basic_coroutine_state): Coro {
+		return this.work.push(&this.owned.pushBack(coroutine))
 	}
 
 	public function tick(): bool {
 		if this.work.length == 0
 			return false
 		let co = this.work.pop()
-		if co.waitingFor && co.waitingFor.done
+		if co.waitingFor && co.waitingFor.generator.done
 			co.waitingFor = nullptr
 		if !co.waitingFor
 			co.next(co)
-		if !co.done
+		if co.generator.done {
+			for i: Size in 0..this.owned.length {
+				let item: ref native._Alta_basic_coroutine_state = this.owned[i]
+				if &item == co {
+					this.owned.remove(i)
+					break
+				}
+			}
+		} else {
 			this.work.push(co)
+		}
 		return true
 	}
 
@@ -51,12 +79,18 @@ export class Scheduler {
 	}
 
 	public function runToCompletion(coroutine: Coro): void {
-		if !coroutine.done
-			coroutine.next(coroutine)
-		if coroutine.done
-			return;
+		# NOTE: same note as in `_schedule`; i'm not sure if we want this quick-exit behavior
+		#if !coroutine.generator.done
+		#	coroutine.next(coroutine)
+		#if coroutine.generator.done
+		#	return;
+
 		this.work.push(coroutine)
-		while !coroutine.done
+		while !coroutine.generator.done
 			this.tick()
+	}
+
+	public function finishAll(): void {
+		while this.tick() {}
 	}
 }

@@ -182,13 +182,9 @@ typedef struct __Alta_basic_coroutine_state _Alta_basic_coroutine_state;
 typedef void (*_Alta_basic_coroutine_runner)(_Alta_basic_coroutine_state* coroutineState);
 
 struct __Alta_basic_coroutine_state {
-  void* stack;
-  size_t stackSize;
-  void* input;
-  size_t index;
-  _Alta_bool done;
-  void* parameters;
-  _Alta_basic_class* self;
+  _Alta_object_type objectType;
+  _Alta_class_info _Alta_class_info_struct;
+  _Alta_basic_generator_state generator;
   void* value;
   _Alta_basic_coroutine_state* waitingFor;
   _Alta_basic_coroutine_runner next;
