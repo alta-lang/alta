@@ -21,11 +21,15 @@ _Alta_runtime_export void _Alta_init_global_runtime() {
   _Alta_global_runtime.symbolTable.count = 0;
 
   _Alta_global_runtime.inited = _Alta_bool_true;
+
+  _Alta_global_runtime.scheduler = _ALTA_SCHEDULER_CLASS_CONSTRUCTOR();
 };
 
 _Alta_runtime_export void _Alta_unwind_global_runtime() {
   if (!_Alta_global_runtime.inited) return;
   _Alta_global_runtime.inited = _Alta_bool_false;
+
+  _ALTA_SCHEDULER_CLASS_DESTRUCTOR((_Alta_basic_class*)&_Alta_global_runtime.scheduler, _Alta_bool_false);
 
   _Alta_object_stack_deinit(&_Alta_global_runtime.local);
 

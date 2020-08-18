@@ -1006,6 +1006,55 @@ int main(int argc, char** argv) {
         return 11;
       }
 
+      // generate the bridge (only if modified)
+      // the bridge really should be the same for every module, so it doesn't matter which one we use
+      // it only needs to be generated so that we can modify the `_internal` package in the stdlib
+      // and the runtime/transpilation however we want and have the values for these definitions automatically updated
+      //
+      // in other words, once Alta has a stable ABI, we can get rid of this and have it be a static runtime source
+      {
+        bool output = true;
+        auto tmppath = outdirRuntime / ".bridge.h";
+        auto outpath = outdirRuntime / "bridge.h";
+
+        std::ofstream tmpHeaderOut(tmppath.toString());
+
+        tmpHeaderOut << "// auto-generated. do not modify. resistance is futile.\n";
+        tmpHeaderOut << "#ifndef _ALTA_RUNTIME_BRIDGE_H\n";
+        tmpHeaderOut << "#define _ALTA_RUNTIME_BRIDGE_H\n";
+        tmpHeaderOut << "\n";
+        tmpHeaderOut << "#define _ALTA_SCHEDULER_CLASS_NAME " << Talta::mangleName(root->info->module->internal.schedulerClass.get()) << '\n';
+        tmpHeaderOut << "#define _ALTA_SCHEDULER_CLASS_CONSTRUCTOR _cn_" << Talta::mangleName(root->info->module->internal.schedulerClass->defaultConstructor.get()) << '\n';
+        tmpHeaderOut << "#define _ALTA_SCHEDULER_CLASS_DESTRUCTOR _d_" << Talta::mangleName(root->info->module->internal.schedulerClass->destructor.get()) << '\n';
+        tmpHeaderOut << "\n";
+        tmpHeaderOut << "#define _ALTA_CLASS_" << Talta::mangleName(root->info->module->internal.schedulerClass.get()) << '\n';
+        tmpHeaderOut << "#define _ALTA_FUNCTION_" << Talta::mangleName(root->info->module->internal.schedulerClass->defaultConstructor.get()) << '\n';
+        tmpHeaderOut << "#include _ALTA_INTERNAL_COROUTINES_HEADER_FULL_PATH\n";
+        tmpHeaderOut << "\n";
+        tmpHeaderOut << "#include _ALTA_INTERNAL_MAIN_HEADER_FULL_PATH\n";
+        tmpHeaderOut << "\n";
+        tmpHeaderOut << "#endif // _ALTA_RUNTIME_BRIDGE_H\n";
+
+        tmpHeaderOut.close();
+
+        if (outpath.exists()) {
+          std::ifstream fileIn(tmppath.toString(), std::ios::in | std::ios::binary);
+          std::ifstream fileOut(outpath.toString(), std::ios::in | std::ios::binary);
+          std::vector<unsigned char> hashIn(picosha2::k_digest_size);
+          std::vector<unsigned char> hashOut(picosha2::k_digest_size);
+          picosha2::hash256(fileIn, hashIn.begin(), hashIn.end());
+          picosha2::hash256(fileOut, hashOut.begin(), hashOut.end());
+          auto hashInString = picosha2::bytes_to_hex_string(hashIn.begin(), hashIn.end());
+          auto hashOutString = picosha2::bytes_to_hex_string(hashOut.begin(), hashOut.end());
+          if (hashInString == hashOutString) {
+            output = false;
+          }
+        }
+        if (output) {
+          copyFile(tmppath, outpath);
+        }
+      };
+
       AltaCore::Filesystem::mkdirp(outDir); // ensure the output directory has been created
 
       ALTACORE_MAP<std::string, std::tuple<std::shared_ptr<Ceetah::AST::RootNode>, std::shared_ptr<Ceetah::AST::RootNode>, std::vector<std::shared_ptr<Ceetah::AST::RootNode>>, std::vector<std::shared_ptr<AltaCore::DET::ScopeItem>>, std::vector<bool>, std::shared_ptr<AltaCore::DET::Module>>> transpiledModules;
@@ -1053,6 +1102,10 @@ int main(int argc, char** argv) {
       // setup root cmakelists
       generalCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
       generalCmakeLists << "project(" << indexUUID << ")\n";
+      generalCmakeLists << "add_compile_definitions(\n";
+      generalCmakeLists << "  _ALTA_INTERNAL_COROUTINES_HEADER_FULL_PATH=\"${PROJECT_SOURCE_DIR}/_internal/lib/coroutines/main.h\"\n";
+      generalCmakeLists << "  _ALTA_INTERNAL_MAIN_HEADER_FULL_PATH=\"${PROJECT_SOURCE_DIR}/_internal/main.h\"\n";
+      generalCmakeLists << ")\n";
       if (target.name != "_runtime_init") {
         generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/../_runtime\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/_runtime\")\n";
       }
@@ -1162,9 +1215,11 @@ int main(int argc, char** argv) {
                         if (ok) {
                           if (insertChildren) {
                             auto point = builder.insertionPoint->save();
+                            builder.insertPreprocessorConditional("!defined(_DEFINED_" + defName + ')');
                             for (auto& child: block->nodes) {
                               builder.insert(child->clone());
                             }
+                            builder.exitInsertionPoint();
                             builder.insertionPoint->restore(point);
                           } else {
                             builder.insert(block->clone());

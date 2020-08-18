@@ -33,6 +33,7 @@
 #endif
 
 #include "definitions.h"
+#include "bridge.h"
 
 typedef struct __Alta_error_handler_node {
   const char* typeName;
@@ -62,6 +63,9 @@ typedef struct __Alta_global_runtime_type {
 
   // symbol table used to store information about symbols translated from Alta to C
   _Alta_symbol_table symbolTable;
+
+  // scheduler used to manage coroutines
+  _ALTA_SCHEDULER_CLASS_NAME scheduler;
 } _Alta_global_runtime_type;
 
 extern _Alta_global_runtime_type _Alta_global_runtime;

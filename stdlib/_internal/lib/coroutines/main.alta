@@ -1,0 +1,62 @@
+# TODO: add fine-resolution importing, to allow this for example:
+#           import Runtime.Native._Alta_basic_class from "meta"
+import "meta/lib/runtime/native" as native
+import Queue from "queue"
+
+##if platform == "windows"
+	import "./arch/windows.alta" as arch
+##else
+	import "./arch/posix.alta" as arch
+##end if
+
+type Coro = ptr native._Alta_basic_coroutine_state
+
+#
+# TODO: don't use regular old Queue for our workqueue
+#       it's pretty inefficient since it will reallocate memory every time we `push` and `pop` to/from it
+#
+#       it's fine for Queue to do that for most use cases, but for us, we need to be constantly pushing and popping,
+#       and often we have to pop and then push the same value right back, so it'd be nice for us to have a more
+#       efficient implementation where we manually determine when workitems' lifetimes end
+#
+
+export class Scheduler {
+	private var work = new Queue<Coro>
+	#private var handles = new Queue<arch.HandleType>
+
+	public function schedule(coroutine: Coro): Coro {
+		if !coroutine.done
+			coroutine.next(coroutine)
+		if coroutine.done
+			return coroutine
+		this.work.push(coroutine)
+		return coroutine
+	}
+
+	public function tick(): bool {
+		if this.work.length == 0
+			return false
+		let co = this.work.pop()
+		if co.waitingFor && co.waitingFor.done
+			co.waitingFor = nullptr
+		if !co.waitingFor
+			co.next(co)
+		if !co.done
+			this.work.push(co)
+		return true
+	}
+
+	public @read function hasWork(): bool {
+		return this.work.length != 0
+	}
+
+	public function runToCompletion(coroutine: Coro): void {
+		if !coroutine.done
+			coroutine.next(coroutine)
+		if coroutine.done
+			return;
+		this.work.push(coroutine)
+		while !coroutine.done
+			this.tick()
+	}
+}
