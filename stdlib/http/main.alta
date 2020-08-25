@@ -8,6 +8,7 @@ import TCPSocket from "net"
 import Address from "ip"
 import List from "list"
 import Map from "map"
+import Coroutines from "@internal@"
 
 export class ConnectionFailure extends Exception {}
 export class MessageParsingException extends Exception {}
@@ -310,19 +311,12 @@ export class Message {
 	}
 }
 
-enum IncomingRequestState: uint8 {
-	Initial,
-	Ready,
-	Handled,
-}
-
 export class IncomingRequest {
 	private var address: Address
 	private var port: uint16
 
 	module var message: Message
 	module var socket: TCPSocket
-	module var state = IncomingRequestState.Initial
 	module var id: Size = 0
 
 	module constructor(socket: TCPSocket, location: Pair<Address, uint16>) {
@@ -478,25 +472,10 @@ export class OutgoingResponse {
 export class Server {
 	private var socket: TCPSocket
 
-	# it *is* possible for this to overflow if the server is getting many requests but realistically,
-	# the number of requests would be so unbelievably high that it's next-to-impossible for the first
-	# request (with id 0) to still be pending at the same time as the very last request
-	# (with id 18,446,744,073,709,551,615 on 64-bit systems)
-	private var idCounter: Size = 0
-
-	# we use a List instead of a Vector so that the pointers we pass into request handlers don't get invalidated when another
-	# response is sent and thus removed from the List
-	#
-	# reason:
-	# Vectors have to reallocate the array and move their elements when an element is removed,
-	# but Lists are internally implemented as doubly-linked lists, which means that their values
-	# are all allocated individually and managed by a bunch of also-individually-allocated nodes that reference each other
-	#
-	# long story short: we use List to prevent pointer invalidation and Bad News Bears from coming
-	private var responses: List<OutgoingResponse>
-	private var pendingRequests: List<IncomingRequest>
+	private var coroutineIDs: Vector<Coroutines.ID>
 
 	# TODO: create something like Node's EventEmitter
+	#       that's going to have to wait until we implement async lambdas
 	public var requestHandler: (IncomingRequest, ref OutgoingResponse) => void = (req: IncomingRequest, res: ref OutgoingResponse) => void {
 		res.status = Status.NotFound
 		res.headers["Content-Length"] = "9"
@@ -508,94 +487,90 @@ export class Server {
 		this.socket.listen(10)
 	}
 
-	public function tick(): void {
-		let client = this.socket.accept()
-		# if we've got a new request, create the necessary objects for the request and response
-		if client {
-			let req: ref IncomingRequest = this.pendingRequests.pushBack(new IncomingRequest((*client).first, (*client).second))
-			let res: ref OutgoingResponse = this.responses.pushBack(new OutgoingResponse((*client).first))
-			req.id = res.id = this.idCounter++
-		}
+	private function doTryCatch(req: ref IncomingRequest, res: ref OutgoingResponse, data: ref Vector<uint8>): bool {
+		# try to parse the data
+		try {
+			req.message.process(data)
+			# if we've reached the body, we're done waiting and we can hand off the request to the handler
+			# if they want the message body, they can ask for it later
+			if req.message.inBody {
+				# if we don't have a method, it's not a request
+				# throw an error so that our exception handler tells the client that they made a bad request
+				if !req.message.method
+					throw new MessageParsingException
 
-		# try to receive request information for requests that are still in progress
-		for i: Size in 0..this.pendingRequests.length {
-			let req: ref IncomingRequest = this.pendingRequests[i]
-			if req.state == IncomingRequestState.Initial {
-				let maybeData = req.socket.receive()
-				if maybeData {
-					# try to parse the data
-					try {
-						req.message.process(*maybeData)
-						# if we've reached the body, we're done waiting and we can hand off the request to the handler
-						# if they want the message body, they can ask for it later
-						if req.message.inBody {
-							# if we don't have a method, it's not a request
-							# throw an error so that our exception handler tells the client that they made a bad request
-							if !req.message.method
-								throw new MessageParsingException
+				# same here: no path = not a request
+				if !req.message.path
+					throw new MessageParsingException
 
-							# same here: no path = not a request
-							if !req.message.path
-								throw new MessageParsingException
-
-							req.state = IncomingRequestState.Ready
-						}
-					} catch e: MessageParsingException {
-						# if we failed to parse it, tell the client they made a bad request and remove the request
-						req.state = IncomingRequestState.Handled
-						for res: ref OutgoingResponse in this.responses.items {
-							if res.id == req.id {
-								res.status = Status.BadRequest
-								res.end()
-								this.pendingRequests.remove(i)
-								--i
-								break
-							}
-						}
-					}
-				}
+				# TODO: this should be an async lambda (when Alta gets those)
+				#       or an event emitter call (once we get those; also after Alta gets async lambdas)
+				this.requestHandler(req, res)
+				return true
 			}
+		} catch e: MessageParsingException {
+			# if we failed to parse it, tell the client they made a bad request
+			res.status = Status.BadRequest
+			res.end()
+			return true
 		}
 
-		# handle requests that are ready to be handled
-		for i: Size in 0..this.pendingRequests.length {
-			let req: ref IncomingRequest = this.pendingRequests[i]
-			if req.state == IncomingRequestState.Ready {
-				req.state = IncomingRequestState.Handled
-				for res: ref OutgoingResponse in this.responses.items {
-					if res.id == req.id {
-						this.requestHandler(req, res)
-						break
-					}
-				}
-				this.pendingRequests.remove(i)
-				--i
+		return false
+	}
+
+	private async function handleConnection(client: TCPSocket, location: Pair<Address, uint16>): void {
+		let req = new IncomingRequest(client, location)
+		let res = new OutgoingResponse(client)
+
+		while true {
+			let maybeData = req.socket.receive()
+			if maybeData {
+				# `break`ing inside `try ... catch` is a little broken right now
+				# (it won't unset the `catch` handler)
+				#
+				# also, `try ... catch` is broken inside async and generator functions,
+				# so we need to delegate it over to `doTryCatch` for now
+				if this.doTryCatch(req, res, *maybeData)
+					break
 			}
+
+			yield;
 		}
 
-		# process outgoing responses and allow them to send some data
-		for i: Size in 0..this.responses.length {
-			let res: ref OutgoingResponse = this.responses[i]
+		while !(res.buffer.length == 0 && res._ended) {
 			if res.buffer.length > 0
 				res.trySend()
-			if res.buffer.length == 0 && res._ended {
-				this.responses.remove(i)
-				--i
+			yield;
+		}
+
+		# we're done; remove this coroutine from the vector
+		for i: Size in 0..this.coroutineIDs.length {
+			if this.coroutineIDs[i] == $coroutine.id {
+				this.coroutineIDs.remove(i)
+				break
 			}
 		}
 	}
-}
 
-enum IncomingResponseState: uint8 {
-	Initial,
-	Ready,
-	Handled,
+	public function checkForConnection(): void {
+		let client = this.socket.accept()
+		# if we've got a new request, create the necessary objects for the request and response
+		if client {
+			this.coroutineIDs.push($scheduler.schedule(this.handleConnection((*client).first, (*client).second)))
+		}
+	}
+
+	public async function run(): void {
+		while true {
+			this.checkForConnection()
+			yield;
+		}
+	}
 }
 
 export class IncomingResponse {
 	module var message: Message
 	module var socket: TCPSocket
-	module var state = IncomingResponseState.Initial
 
 	module constructor(socket: TCPSocket) {
 		this.socket = socket
@@ -729,54 +704,50 @@ export class OutgoingRequest {
 		this.send(string)
 		this._ended = true
 	}
-}
 
-export class Client {
-	private var socket: TCPSocket
-	private var _request = new OutgoingRequest(this.socket)
-	private var response = new IncomingResponse(this.socket)
-	private var responseHandler: (IncomingResponse) => void = (res: IncomingResponse) => void {}
-
-	public constructor(handler: (IncomingResponse) => void) {
-		this.responseHandler = handler
-	}
-
-	public function connect(address: Address, port: uint16 = 80): void {
-		this.socket.connect(address, port)
-	}
-
-	public @read function request(): ref OutgoingRequest {
-		return this._request
-	}
-
-	public function tick(): void {
-		if this.socket.connectionFailure
-			throw new ConnectionFailure
-		if this.response.state == IncomingResponseState.Handled
-			return;
-		if this._request.buffer.length == 0 && this._request._ended {
-			let maybeData = this.socket.receive()
-			if maybeData {
-				# not sure if it's best to throw an error here in the `tick` method,
-				# maybe we should add another parameter to the response handler like Node.js does with `err` in most of their callbacks?
-				this.response.message.process(*maybeData)
-				# if we've reached the body, we're done waiting and we can hand off the response to the handler
-				# they can get the body themselves
-				if this.response.message.inBody {
-					# if we don't have a status, it's not a response
-					# throw an error so that the user knows the server did something naughty
-					if !this.response.message.status
-						throw new MessageParsingException
-
-					this.response.state = IncomingResponseState.Ready
-				}
-			}
-			if this.response.state == IncomingResponseState.Ready {
-				this.response.state = IncomingResponseState.Handled
-				this.responseHandler(this.response)
-			}
-		} else if this._request.buffer.length > 0 {
-			this._request.trySend()
+	public async function finishSending(): void {
+		while !(this.buffer.length == 0 && this._ended) {
+			if this.buffer.length > 0
+				this.trySend()
+			yield;
 		}
 	}
+
+	public async function waitForResponse(): IncomingResponse {
+		await this.finishSending()
+
+		let res = new IncomingResponse(this.socket)
+		while true {
+			let maybeData = this.socket.receive()
+			if maybeData {
+				res.message.process(*maybeData)
+				# if we've reached the body, we're done waiting and we can hand off the response to the handler
+				# they can get the body themselves
+				if res.message.inBody {
+					# if we don't have a status, it's not a response
+					# throw an error so that the user knows the server did something naughty
+					if !res.message.status
+						throw new MessageParsingException
+
+					return res
+				}
+			}
+
+			yield;
+		}
+	}
+}
+
+export async function request(address: Address, port: uint16 = 80): OutgoingRequest {
+	let socket = new TCPSocket
+
+	socket.connect(address, port)
+
+	while socket.connecting
+		yield;
+
+	if socket.connectionFailure
+		throw new ConnectionFailure
+
+	return new OutgoingRequest(socket)
 }
