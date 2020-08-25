@@ -188,6 +188,7 @@ struct __Alta_basic_coroutine_state {
   void* value;
   _Alta_basic_coroutine_state* waitingFor;
   _Alta_basic_coroutine_runner next;
+  uint64_t id;
 };
 
 #endif // _ALTA_RUNTIME_DEFINITIONS_H
