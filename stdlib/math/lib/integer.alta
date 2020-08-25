@@ -1,5 +1,0 @@
-import Size, uint64, int64 from "types"
-
-type IntegerUnit = unsigned int
-let IntegerUnitMaximum: const IntegerUnit = -1 as IntegerUnit
-let IntegerUnitBits: const Size = sizeof IntegerUnit * 8
