@@ -1,5 +1,5 @@
 import ptrdiff_t from "libc/lib/stddef"
-import Size from "types"
+import Size, uint64 from "types"
 import jmp_buf from "libc/lib/setjmp"
 
 export enum ObjectType: int {
@@ -185,6 +185,7 @@ export literal @external @typed struct _Alta_basic_coroutine_state {
   value: ptr void;
   waitingFor: ptr _Alta_basic_coroutine_state;
   next: (ptr _Alta_basic_coroutine_state) -> void;
+  id: uint64;
 }
 
 export type _Alta_basic_coroutine_runner = (ptr _Alta_basic_coroutine_state) -> void
