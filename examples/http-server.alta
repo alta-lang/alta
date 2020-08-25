@@ -35,12 +35,7 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 	server.listen(port: 8080)
 	printLine("Now listening on port 8080...")
 
-	# this is temporary
-	# in the future, when Alta gets coroutines, we can just wait for all coroutines to exit
-	# (which is much more versatile than waiting specifically for the server
-	# and would allow us to schedule more tasks to run in between server ticks)
-	while true
-		server.tick()
+	await server.run()
 
 	return 0
 }

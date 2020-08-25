@@ -1,4 +1,4 @@
-import Client, OutgoingRequest, IncomingResponse, Method, Status, Field from "http"
+import request, Method, Status, Field from "http"
 import Path from "uri"
 import printLine, print from "io"
 import String from "string"
@@ -22,48 +22,41 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 	if args.length > 2
 		port = parseNumber<uint16>(args[2])
 
-	let done = false
+	let req = await request(args[1], port)
 
-	let client = new Client((res: IncomingResponse) => void {
-		printLine("Server responded with status code ", res.status)
+	req.method = Method.Get
+	req.path = "/"
+	req.end()
 
-		print("With headers = [")
-		let isFirst = true
-		for header: Pair<Field, String> in res.headers.items {
-			if isFirst {
-				printLine()
-				isFirst = false
-			}
-			printLine('\t', header.first, " = ", header.second)
+	let res = await req.waitForResponse()
+
+	printLine("Server responded with status code ", res.status)
+
+	print("With headers = [")
+	let isFirst = true
+	for header: Pair<Field, String> in res.headers.items {
+		if isFirst {
+			printLine()
+			isFirst = false
 		}
-		printLine(']')
+		printLine('\t', header.first, " = ", header.second)
+	}
+	printLine(']')
 
-		while true {
-			let maybeData = res.receive()
-			if maybeData {
-				# a chunk with zero length indicates the server is done
-				# TODO: move this check into the HTTP package logic to make it easier for users
-				#       and also make it smarter (e.g. instead of relying on system behavior
-				#       where peers closing their sockets generates a packet with zero length, we
-				#       should be checking for Content-Length or, once we support HTTP/1.1, the terminating
-				#       chunk in a chunked transfer encoding response)
-				if (*maybeData).length == 0 {
-					done = true
-					break
-				}
-				print(new String((*maybeData).data, (*maybeData).length))
-			}
+	while true {
+		let maybeData = res.receive()
+		if maybeData {
+			# a chunk with zero length indicates the server is done
+			# TODO: move this check into the HTTP package logic to make it easier for users
+			#       and also make it smarter (e.g. instead of relying on system behavior
+			#       where peers closing their sockets generates a packet with zero length, we
+			#       should be checking for Content-Length or, once we support HTTP/1.1, the terminating
+			#       chunk in a chunked transfer encoding response)
+			if (*maybeData).length == 0
+				break
+			print(new String((*maybeData).data, (*maybeData).length))
 		}
-	})
-
-	client.connect(args[1], port)
-
-	client.request.method = Method.Get
-	client.request.path = "/"
-	client.request.end()
-
-	while !done
-		client.tick()
+	}
 
 	return 0
 }
