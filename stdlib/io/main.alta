@@ -1,9 +1,10 @@
 import "libc/lib/stdio" as stdio
 import String, rawstringLength from "string"
-import rawstring, rawconststring, Size from "types"
+import rawstring, rawconststring, Size, uint8 from "types"
 import Exception, InvalidArgument from "exceptions"
-import numberToString, floatingPointToString from "util"
+import numberToString, floatingPointToString, BucketList from "util"
 import INT_MAX from "libc/lib/limits"
+import Path from "fs"
 
 export stdio.printf as printf
 
@@ -33,42 +34,57 @@ export class CloseFailure extends Exception {}
 export class ReadFailure extends Exception {}
 export class EndOfFile extends Exception {}
 
+export enum Mode: int {
+  Read = 1,
+  Write = 2,
+}
+
+function translateMode(mode: Mode, overwrite: bool): ptr const byte {
+  if mode & Mode.Read && mode & Mode.Write && overwrite {
+    return "w+b"
+  } else if mode & Mode.Write && overwrite {
+    return "wb"
+  } else if mode & Mode.Read && mode & Mode.Write {
+    return "r+b" # not a+ because we want to be able to write anywhere
+  } else if mode & Mode.Write {
+    return "r+b" # we don't want to overwrite existing data, but we want to be able to write anywhere
+  } else {
+    return "rb"
+  }
+}
+
 export class File {
   private var handle: ptr stdio.FILE = nullptr
-  private var path = new String
-  private var mode = new String
+  private var path = new Path
+  private var mode: Mode = Mode.Read
+  private var dtor: BucketList
 
   public constructor() {}
-  public constructor(path: rawconststring) {
-    this.open(path, "r")
-  }
-  public constructor(path: rawconststring, mode: rawconststring) {
-    this.open(path, mode)
+  public constructor(path: Path, mode: Mode = Mode.Read, overwrite: bool = false) {
+    this.open(path, mode, overwrite)
   }
 
-  public @copy constructor(other: ref File) {
-    this.open(other.path, other.mode)
-  }
-
-  public destructor() {
-    this.close()
-  }
-
-  public function open(path: rawconststring, mode: rawconststring): void {
-    this.handle = stdio.fopen(path, mode)
+  public function open(path: Path, mode: Mode = Mode.Read, overwrite: bool = false): void {
+    this.handle = stdio.fopen(path, translateMode(mode, overwrite))
     if !this.handle {
       this.handle = nullptr
       throw new OpenFailure
     }
     this.path = path
     this.mode = mode
-  }
 
-  public function close(): void {
-    if this.handle {
+    this.dtor = new BucketList(@copy(this.handle) () => void {
       if stdio.fclose(this.handle) {
         throw new CloseFailure
       }
+    })
+  }
+
+  public function close(foo: String): void {
+    if this.handle {
+      # if ours was the last reference to that file, this will automatically close it
+      # (by destroying the old BucketList)
+      this.dtor = new BucketList
       this.handle = nullptr
     }
   }
