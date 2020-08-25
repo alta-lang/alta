@@ -468,6 +468,16 @@ export class Path {
 		}
 		return true
 	}
+	public Path == this: bool {
+		return $ == this
+	}
+
+	public this != Path: bool {
+		return !(this == $)
+	}
+	public Path != this: bool {
+		return $ != this
+	}
 
 	public to String {
 		return this.toString()
