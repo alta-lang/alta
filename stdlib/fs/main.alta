@@ -424,7 +424,7 @@ export class Path {
 			let hFind: HANDLE = FindFirstFileA(str.data, &ffd)
 			while true {
 				yield this / ffd.cFileName
-				if FindNextFile(hFind, &ffd) == 0
+				if FindNextFileA(hFind, &ffd) == 0
 					break
 			}
 			if GetLastError() != ERROR_NO_MORE_FILES
