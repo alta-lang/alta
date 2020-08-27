@@ -1440,10 +1440,6 @@ int main(int argc, char** argv) {
 
           manifest["targets"][target.name][packageName]["uses-runtime"] = target.name != "_runtime_init";
 
-          if (target.name != "_runtime_init") {
-            cmakeLists << "  alta-global-runtime" << '\n';
-          }
-
           std::unordered_set<std::string> depsLinked;
 
           for (auto& dep: packageDependencies[packageName]) {
@@ -1532,8 +1528,11 @@ int main(int argc, char** argv) {
           }
           outfileCmake << "target_link_libraries(" << targetName << " PUBLIC\n";
           if (gItem->instantiatedFromSamePackage || !mod->packageInfo.isEntryPackage || (mod->packageInfo.isEntryPackage && target.type != AltaCore::Modules::OutputBinaryType::Exectuable)) {
+            outfileCmake << "  alta-global-runtime\n";
             outfileCmake << "  " << mod->packageInfo.name << "-core-" << target.name << '\n';
           }
+
+          outfileCmake << "  alta-global-runtime\n";
 
           if (gItem->instantiatedFromSamePackage) {
             outfileCmake << ")\n";
@@ -1595,7 +1594,9 @@ int main(int argc, char** argv) {
         outfileCmake << ")\n";
         outfileCmake << "alta_add_properties(" << mod->packageInfo.name << '-' << target.name << ")\n";
         outfileCmake << "target_link_libraries(" << mod->packageInfo.name << '-' << target.name << " PUBLIC\n";
+        outfileCmake << "  alta-global-runtime\n";
         outfileCmake << "  " << mod->packageInfo.name << "-core-" << target.name << '\n';
+        outfileCmake << "  alta-global-runtime\n";
         outfileCmake << ")\n";
 
         if (mod->packageInfo.isEntryPackage) {
