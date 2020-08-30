@@ -1,0 +1,25 @@
+import printLine from "io"
+
+async function looper(times: int): void {
+	for i: int in 0..times {
+		printLine("doing iteration #", i + 1, " of ", times)
+
+		# we `yield` to other coroutines on every iteration,
+		# because we're nice like that :)
+		yield;
+	}
+}
+
+literal function main(): int {
+	# schedule one instance of the coroutine
+	$scheduler.schedule(looper(5))
+
+	# every time we call an async function, it returns a new coroutine;
+	# so we can call it again to schedule a different instance of it:
+	$scheduler.schedule(looper(10))
+
+	# wait for all coroutines to finish before exiting the process
+	$scheduler.finishAll()
+
+	return 0
+}
