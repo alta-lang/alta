@@ -1,0 +1,6 @@
+import Statement from "./statement.alta"
+import Box from "memory"
+
+export class FunctionDefinition extends Statement {
+	public var body: Box<Statement>
+}

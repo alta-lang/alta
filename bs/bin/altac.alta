@@ -1,0 +1,35 @@
+import Lexer, Token, TokenType from "../lib/lexer.alta"
+import String from "string"
+import printLine, File from "io"
+import Size from "types"
+import Vector from "vector"
+
+literal function main(argc: int, argv: ptr ptr byte): int {
+	let args = new Vector<String>(length: argc)
+	for i: Size in 0..argc {
+		args.push(argv[i])
+	}
+
+	if args.length < 2 {
+		printLine("Missing file/folder input path")
+		return 1
+	}
+
+	let lexer = new Lexer
+
+	{
+		let file = new File(args[1])
+		# TODO: this isn't Unicode safe
+		while let maybeChar = file.read?() {
+			lexer.feed(*maybeChar)
+		}
+		lexer.end()
+	}
+
+	for token: ref Token in lexer.tokens.items {
+		let typeName = @reverse TokenType[token.type]
+		printLine("found a token with type \"", typeName ? *typeName : new String("unknown"), "\" found in ", token.location.file, " at ", token.location.line, ':', token.location.column, ", with content \"", token.content, '"')
+	}
+
+	return 0
+}

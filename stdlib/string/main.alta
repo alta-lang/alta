@@ -233,11 +233,48 @@ export class CodePoint {
 
     return true
   }
+  public CodePoint == this: bool {
+    return $ == this
+  }
 
   # TODO: automatically create operator methods when corresponding operator methods are provided
   #       e.g. automatically create `!=` if `==` is provided
   public this != CodePoint: bool {
     return !(this == $)
+  }
+  # TODO: create an attribute for automatic operator creation: `@reflexive`
+  #       it would be used to tell the compiler that doing `this == foo` is the same as doing `foo == this`
+  #       (which is true in most but not all cases, so the compiler can't assume it is)
+  public CodePoint != this: bool {
+    return $ != this
+  }
+
+  public this > CodePoint: bool {
+    return this as uint32 > $ as uint32
+  }
+  public CodePoint > this: bool {
+    return $ > this
+  }
+
+  public this < CodePoint: bool {
+    return this as uint32 < $ as uint32
+  }
+  public CodePoint < this: bool {
+    return $ > this
+  }
+
+  public this <= CodePoint: bool {
+    return !(this > $)
+  }
+  public CodePoint <= this: bool {
+    return $ <= this
+  }
+
+  public this >= CodePoint: bool {
+    return !(this < $)
+  }
+  public CodePoint >= this: bool {
+    return $ >= this
   }
 }
 

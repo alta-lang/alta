@@ -1,0 +1,9 @@
+import Size from "types"
+
+# incredibly wrong for multithreading, but (un?)fortunately for us, Alta doesn't currently support multithreading
+# (it will, but not right now)
+let counter: Size = 0
+
+export class Node {
+	public var id = counter++
+}
