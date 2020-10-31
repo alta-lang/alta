@@ -110,12 +110,18 @@ _Alta_runtime_export _Alta_symbol_info* _Alta_find_info_for_symbol(const char* s
 _Alta_runtime_export const char* _Alta_symbol_to_full_Alta_name(const char* symbol);
 
 _Alta_runtime_export void* _Alta_generator_push(_Alta_basic_generator_state* generator, size_t size);
-_Alta_runtime_export void _Alta_generator_pop(_Alta_basic_generator_state* generator, size_t size);
 
 _Alta_runtime_export void _Alta_no_op_optional_destructor(_Alta_basic_optional* optional);
 _Alta_runtime_export void _Alta_no_op_union_destructor(_Alta_basic_union* uni);
 _Alta_runtime_export void _Alta_no_op_class_destructor(_Alta_basic_class* class, _Alta_bool persistent);
 
 _Alta_runtime_export void _Alta_failed_assertion(const char* expression, const char* file, size_t line, size_t column);
+
+_Alta_runtime_export void _Alta_generator_create_stack(_Alta_basic_generator_state* generator, size_t size);
+_Alta_runtime_export void _Alta_generator_release_stack(_Alta_basic_generator_state* generator);
+
+_Alta_runtime_export _Alta_generator_reload_context _Alta_generator_reload(_Alta_basic_generator_state* generator);
+_Alta_runtime_export void* _Alta_generator_reload_next(_Alta_generator_reload_context* context, size_t size);
+_Alta_runtime_export void _Alta_generator_reload_next_scope(_Alta_generator_reload_context* context);
 
 #endif /* _ALTA_RUNTIME_COMMON_H */

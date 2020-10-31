@@ -420,14 +420,8 @@ _Alta_runtime_export void _Alta_release_capture_class_state_cache(_Alta_wrapper*
 };
 
 _Alta_runtime_export void* _Alta_generator_push(_Alta_basic_generator_state* generator, size_t size) {
-  generator->stackSize += size;
-  generator->stack = realloc(generator->stack, generator->stackSize);
-  return (void*)((char*)generator->stack + (generator->stackSize - size));
-};
-
-_Alta_runtime_export void _Alta_generator_pop(_Alta_basic_generator_state* generator, size_t size) {
-  generator->stackSize -= size;
-  generator->stack = realloc(generator->stack, generator->stackSize);
+  // we store the stack backwards, just like the native platform does
+  return (void*)((char*)generator->stack->stack + generator->stack->size - (generator->stack->offset += size));
 };
 
 _Alta_runtime_export void _Alta_no_op_optional_destructor(_Alta_basic_optional* optional) {};
@@ -443,4 +437,55 @@ _Alta_runtime_export void _Alta_failed_assertion(const char* expression, const c
   printf("failed assertion at %s:%zu:%zu: %s\n", (file[0] == '\0') ? "<unknown>" : file, line, column, (expression[0] == '\0') ? "<unknown>" : expression);
   abort();
 #endif
+};
+
+_Alta_runtime_export void _Alta_generator_create_stack(_Alta_basic_generator_state* generator, size_t size) {
+  _Alta_floating_stack* parent = generator->stack;
+  generator->stack = malloc(sizeof(_Alta_floating_stack) + size);
+
+  // we don't zero out the stack, since the native platform doesn't do that either (so it's unnecessary work)
+  memset(generator->stack, 0, sizeof(_Alta_floating_stack));
+
+  generator->stack->parent_stack = parent;
+  generator->stack->size = size;
+};
+
+_Alta_runtime_export void _Alta_generator_release_stack(_Alta_basic_generator_state* generator) {
+  _Alta_floating_stack* prev = generator->stack;
+  generator->stack = generator->stack->parent_stack;
+  free(prev);
+};
+
+_Alta_runtime_export _Alta_generator_reload_context _Alta_generator_reload(_Alta_basic_generator_state* generator) {
+  return (_Alta_generator_reload_context) {
+    .stack = generator->stack,
+    .offset = generator->stack->offset,
+  };
+};
+
+_Alta_runtime_export void* _Alta_generator_reload_next(_Alta_generator_reload_context* context, size_t size) {
+  if (!context) {
+    printf("_Alta_generator_reload_next: can't reload without a context\n");
+    abort();
+  } else if (!context->stack) {
+    printf("_Alta_generator_reload_next: was given a finished context\n");
+    abort();
+  }
+
+  void* ptr = (void*)((char*)context->stack->stack + context->stack->size - context->offset);
+  context->offset -= size;
+  return ptr;
+};
+
+_Alta_runtime_export void _Alta_generator_reload_next_scope(_Alta_generator_reload_context* context) {
+  if (!context) {
+    printf("_Alta_generator_reload_next_scope: can't reload without a context\n");
+    abort();
+  } else if (!context->stack) {
+    printf("_Alta_generator_reload_next_scope: was given a finished context\n");
+    abort();
+  }
+
+  context->stack = context->stack->parent_stack;
+  context->offset = context->stack->offset;
 };

@@ -168,9 +168,22 @@ typedef struct __Alta_symbol_table {
 } _Alta_symbol_table;
 // </symbol-table>
 
+typedef struct __Alta_floating_stack _Alta_floating_stack;
+
+struct __Alta_floating_stack {
+  _Alta_floating_stack* parent_stack;
+  size_t size;
+  size_t offset;
+  char stack[];
+};
+
+typedef struct __Alta_generator_reload_context {
+  _Alta_floating_stack* stack;
+  size_t offset;
+} _Alta_generator_reload_context;
+
 typedef struct __Alta_basic_generator_state {
-  void* stack;
-  size_t stackSize;
+  _Alta_floating_stack* stack;
   void* input;
   size_t index;
   _Alta_bool done;
