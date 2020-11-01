@@ -203,11 +203,19 @@ generator function process()(uint32...): Token? {
 			++line
 			column = 0
 		} else {
+			printLine("doing static tokens for cp='", cp as byte, '\'')
+
+			printLine("staticTokens.keys.length == ", staticTokens.keys.length)
+			printLine("staticTokens.values.length == ", staticTokens.values.length)
+
 			# determine how many static tokens are possible matches based on the first character
 			let viable = new Vector<Pair<String, TokenType>>
 			for candidate: Pair<String, TokenType> in staticTokens.items {
-				if candidate.first[0] == cp
+				printLine("testing viability: ", candidate.first[0] as byte, ", ", candidate.second, " (", *(@reverse TokenType[candidate.second]), ')')
+				if candidate.first[0] == cp {
+					printLine("viable candidate!")
 					viable.push(candidate)
+				}
 			}
 
 			let idx: Size = 1

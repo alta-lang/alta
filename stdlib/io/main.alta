@@ -65,7 +65,8 @@ export class File {
   }
 
   public function open(path: Path, mode: Mode = Mode.Read, overwrite: bool = false): void {
-    this.handle = stdio.fopen(path, translateMode(mode, overwrite))
+    # also assign it to a local variable so we can copy it into the lambda below
+    let handle: ptr stdio.FILE = this.handle = stdio.fopen(path, translateMode(mode, overwrite))
     if !this.handle {
       this.handle = nullptr
       throw new OpenFailure
@@ -73,8 +74,8 @@ export class File {
     this.path = path
     this.mode = mode
 
-    this.dtor = new BucketList(@copy(this.handle) () => void {
-      if stdio.fclose(this.handle) {
+    this.dtor = new BucketList(@copy(handle) () => void {
+      if stdio.fclose(handle) {
         throw new CloseFailure
       }
     })
