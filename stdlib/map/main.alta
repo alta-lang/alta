@@ -76,8 +76,6 @@ export generic class Map<K, V> {
   public @read generator function items(): Pair<K, V> {
     if this._keys.length == 0
       return;
-    if this._keys.length == 0
-      return new Pair<K, V>(this._keys[0], this._values[0])
     for i: Size in 0..this._keys.length - 1 {
       yield new Pair<K, V>(this._keys[i], this._values[i])
     }
