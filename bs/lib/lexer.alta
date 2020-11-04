@@ -230,9 +230,9 @@ generator function process()(uint32...): Token? {
 						maxLength = viable[i].first.length
 				}
 
-				# if the current character index is greater than (or equal to) the length of the longest possible candidate,
+				# if the current character index is greater than the length of the longest possible candidate,
 				# we're done asking for characters; make do with what we have
-				if idx >= maxLength # shouldn't ever be > (greater than), but just in case
+				if idx > maxLength
 					break
 
 				let maybeCP: uint32? = null
@@ -258,7 +258,7 @@ generator function process()(uint32...): Token? {
 					processedCPs.push(*maybeCP)
 					# look for and remove candidates that don't have the character we got as their next character
 					for i: Size in 0..viable.length {
-						if viable[i].first.length < idx {
+						if viable[i].first.length > idx {
 							if viable[i].first[idx] != *maybeCP {
 								viable.remove(i)
 								--i
