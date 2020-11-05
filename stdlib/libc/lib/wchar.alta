@@ -1,6 +1,0 @@
-@@CTranspiler.include("wchar.h");
-
-export type wchar_t = any
-export type wint_t = any
-
-declare literal export function wprintf(format: ptr const wchar_t, @CTranspiler.vararg data: any...): int

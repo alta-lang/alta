@@ -1,6 +1,0 @@
-export * from "objects.alta"
-export * from "classes.alta"
-export * from "lambdas.alta"
-export * from "unions.alta"
-export * from "optionals.alta"
-export * from "wrappers.alta"

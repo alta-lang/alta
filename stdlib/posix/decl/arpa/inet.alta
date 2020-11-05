@@ -1,8 +1,0 @@
-@@CTranspiler.include("arpa/inet.h");
-
-import uint16, uint32 from "types"
-
-declare literal export @CTranspiler.macro function htonl(host: uint32): uint32
-declare literal export @CTranspiler.macro function htons(host: uint16): uint16
-declare literal export @CTranspiler.macro function ntohl(net: uint32): uint32
-declare literal export @CTranspiler.macro function ntohs(net: uint16): uint16
