@@ -1,0 +1,192 @@
+import Vector from "vector"
+import String from "string"
+import Size from "types"
+import Box from "memory"
+
+import Token, TokenType from "./lexer.alta"
+import "./ast" as ast
+
+struct State {
+	index: Size;
+}
+
+export class Parser {
+	private var tokens: Vector<Token>
+	private var _root: Box<ast.RootNode> = nullptr
+	private var state: State
+
+	#
+	# public API
+	#
+
+	public constructor() {}
+
+	public @read function root(): Box<ast.RootNode> {
+		return this._root
+	}
+
+	public async function run(tokens: Vector<Token>): void {
+		this.tokens = tokens
+		this._root = await this.parseRootNode()
+	}
+
+	#
+	# private helper functions
+	#
+
+	public function expect(tokenType: TokenType): Token? {
+		if this.state.index >= this.tokens.length
+			return null
+		if this.tokens[this.state.index].type != tokenType
+			return null
+		return this.tokens[this.state.index++]
+	}
+
+	public function expectKeyword(keyword: String): Token? {
+		if this.state.index >= this.tokens.length
+			return null
+		if this.tokens[this.state.index].type != TokenType.Identifier
+			return null
+		if this.tokens[this.state.index].content != keyword
+			return null
+		return this.tokens[this.state.index++]
+	}
+
+	#
+	# rules
+	#
+
+	private async function parseRootNode(): Box<ast.RootNode> {
+		let root: Box<ast.RootNode> = new* ast.RootNode
+		while true {
+			let statement = await this.parseRootStatement()
+			if !statement
+				break
+			root.proxy.statements.push(statement)
+		}
+		return root
+	}
+
+	private async function parseRootStatement(): Box<ast.RootStatement> {
+		let statement: Box<ast.RootStatement> = nullptr
+
+		if !statement
+			statement = await this.parseFunctionDefinition()
+
+		return statement
+	}
+
+	private async function parseFunctionDefinition(): Box<ast.FunctionDefinition> {
+		let savedState = this.state
+		let func: Box<ast.FunctionDefinition> = new* ast.FunctionDefinition
+
+		while true {
+			let attr = await this.parseAttribute()
+			if !attr
+				break
+			func.proxy.attributes.push(attr)
+		}
+
+		if !this.expectKeyword("function") {
+			this.state = savedState
+			return nullptr
+		}
+
+		let name = this.expect(TokenType.Identifier)
+		if !name {
+			this.state = savedState
+			return nullptr
+		}
+		func.proxy.name = (*name).content
+
+		if !this.expect(TokenType.OpeningParenthesis) {
+			this.state = savedState
+			return nullptr
+		}
+
+		while true {
+			let param = await this.parseParameter()
+			if !param
+				break
+			func.proxy.parameters.push(param)
+		}
+
+		if !(this.expect(TokenType.ClosingParenthesis) && this.expect(TokenType.Colon)) {
+			this.state = savedState
+			return nullptr
+		}
+
+		let body = await this.parseStatement()
+		if !body {
+			this.state = savedState
+			return nullptr
+		}
+		func.proxy.body = body
+
+		return func
+	}
+
+	private async function parseAttribute(): Box<ast.Attribute> {
+		let savedState = this.state
+		let attr: Box<ast.Attribute> = new* ast.Attribute
+
+		if !this.expect(TokenType.AtSign) {
+			this.state = savedState
+			return nullptr
+		}
+
+		let name = this.expect(TokenType.Identifier)
+		if !name {
+			this.state = savedState
+			return nullptr
+		}
+		attr.proxy.components.push((*name).content)
+
+		return attr
+	}
+
+	private async function parseParameter(): Box<ast.Parameter> {
+		let savedState = this.state
+		let param: Box<ast.Parameter> = new* ast.Parameter
+
+		let name = this.expect(TokenType.Identifier)
+		if !name {
+			this.state = savedState
+			return nullptr
+		}
+		param.proxy.name = (*name).content
+
+		let type = await this.parseType()
+		if !type {
+			this.state = savedState
+			return nullptr
+		}
+		param.proxy.type = type
+
+		return param
+	}
+
+	private async function parseType(): Box<ast.Type> {
+		let savedState = this.state
+		let type: Box<ast.Type> = new* ast.Type
+
+		let name = this.expect(TokenType.Identifier)
+		if !name {
+			this.state = savedState
+			return nullptr
+		}
+		type.proxy.name = (*name).content
+
+		return type
+	}
+
+	private async function parseStatement(): Box<ast.Statement> {
+		let statement: Box<ast.Statement> = nullptr
+
+		# TODO
+		if !statement
+			statement = new* ast.Statement
+
+		return statement
+	}
+}

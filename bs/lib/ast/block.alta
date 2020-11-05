@@ -1,0 +1,19 @@
+import Box from "memory"
+import Vector from "vector"
+
+import Statement from "./statement.alta"
+import SerialNode from "../serialization.alta"
+
+export class Block extends Statement {
+	private var statements: Vector<Box<Statement>>
+
+	protected @override function serialize(): SerialNode {
+		let serial = new SerialNode("Block")
+
+		for statement: Box<Statement> in this.statements.items {
+			serial.children.push(statement.proxy.serialize())
+		}
+
+		return serial
+	}
+}

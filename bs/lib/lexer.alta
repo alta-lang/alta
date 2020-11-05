@@ -73,7 +73,7 @@ function isIdentifierNonFirst(cp: uint32): bool {
 # this could probably be split up into different coroutines like the parser is going to be,
 # but the lexer is small and simple enough that we can try to be as efficient as possible
 # by processing everything in this one single generator
-generator function process()(uint32...): Token? {
+generator function process(file: Path)(uint32...): Token? {
 	let token: Token? = null
 	let cpQueue: Queue<uint32>
 	let line: Size = 1
@@ -101,7 +101,7 @@ generator function process()(uint32...): Token? {
 		let cp = *pendingCP
 
 		if (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') || cp == '_' {
-			let tok = new Token(TokenType.Identifier, location: new Location(line: line, column: column))
+			let tok = new Token(TokenType.Identifier, location: new Location(line: line, column: column, file: file))
 			tok.content += cp
 
 			let continueIt = false
@@ -140,7 +140,7 @@ generator function process()(uint32...): Token? {
 			if continueIt
 				continue
 		} else if cp >= '0' && cp <= '9' {
-			let tok = new Token(TokenType.Number, location: new Location(line: line, column: column))
+			let tok = new Token(TokenType.Number, location: new Location(line: line, column: column, file: file))
 			tok.content += cp
 
 			let continueIt = false
@@ -274,7 +274,7 @@ generator function process()(uint32...): Token? {
 				for candidate: ref Pair<String, TokenType> in viable.items {
 					if candidate.first.length > maxLength {
 						maxLength = candidate.first.length
-						token = new Token(candidate.second, content: candidate.first, location: new Location(line: line, column: column))
+						token = new Token(candidate.second, content: candidate.first, location: new Location(line: line, column: column, file: file))
 					}
 				}
 				# pop off the characters we consumed
@@ -308,17 +308,18 @@ generator function process()(uint32...): Token? {
 #       The current version is coded to push tokens onto a result vector, but the lexer is set up in a way
 #       that the API can be quickly and easily changed to also pass you the tokens in a streaming manner.
 export class Lexer {
-	private var gen = process()
+	private var gen: (@returnTypeOf process)? = null
 
 	public var tokens: Vector<Token>
 
-	public constructor() {
+	public constructor(file: Path) {
+		this.gen = process(file)
 		# needs to advance to the first `yield`
-		this.gen.next()
+		;(*this.gen).next()
 	}
 
 	public function feed(input: CodePoint): void {
-		if let maybeMaybeTok = this.gen.next(input) {
+		if let maybeMaybeTok = (*this.gen).next(input) {
 			if let maybeTok = *maybeMaybeTok {
 				this.tokens.push(*maybeTok)
 			}
@@ -332,7 +333,7 @@ export class Lexer {
 	}
 
 	public function end(): void {
-		if let maybeMaybeTok = this.gen.next() {
+		if let maybeMaybeTok = (*this.gen).next() {
 			if let maybeTok = *maybeMaybeTok {
 				this.tokens.push(*maybeTok)
 			}

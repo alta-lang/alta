@@ -64,6 +64,10 @@ export generic class Map<K, V> {
     return this._values
   }
 
+  public @read function count(): Size {
+    return this._keys.length
+  }
+
   public function clear(): void {
     this._keys.clear()
     this._values.clear()

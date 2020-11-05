@@ -1,11 +1,15 @@
 import Lexer, Token, TokenType from "../lib/lexer.alta"
+import Parser from "../lib/parser.alta"
 import String from "string"
 import printLine, File from "io"
 import Size from "types"
 import Vector from "vector"
+import Path from "fs"
 
 literal function main(argc: int, argv: ptr ptr byte): int {
 	let args = new Vector<String>(length: argc)
+	let path = new Path
+
 	for i: Size in 0..argc {
 		args.push(argv[i])
 	}
@@ -15,10 +19,12 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 		return 1
 	}
 
-	let lexer = new Lexer
+	path = args[1]
 
+	# put the File in its own block to limit its scope and have it auto-closed
+	let lexer = new Lexer(path)
 	{
-		let file = new File(args[1])
+		let file = new File(path)
 		# TODO: this isn't Unicode safe
 		while let maybeChar = file.read?() {
 			lexer.feed(*maybeChar)
@@ -28,7 +34,16 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 
 	for token: ref Token in lexer.tokens.items {
 		let typeName = @reverse TokenType[token.type]
-		printLine("found a token with type \"", typeName ? *typeName : new String("unknown"), "\" found in ", token.location.file, " at ", token.location.line, ':', token.location.column, ", with content \"", token.content, '"')
+		printLine("found a token with type \"", typeName ? *typeName : new String("unknown"), "\" in ", token.location.file, " at ", token.location.line, ':', token.location.column, ", with content \"", token.content, '"')
+	}
+
+	let parser = new Parser
+	await parser.run(lexer.tokens)
+
+	if parser.root {
+		printLine("Parsed a root node:\n", parser.root)
+	} else {
+		printLine("Failed to parse")
 	}
 
 	return 0

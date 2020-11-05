@@ -1,0 +1,16 @@
+import String from "string"
+
+import Node from "./node.alta"
+import SerialNode from "../serialization.alta"
+
+export class Type extends Node {
+	public var name: String
+
+	protected @override function serialize(): SerialNode {
+		let serial = new SerialNode("Type")
+
+		serial["name"] = this.name
+
+		return serial
+	}
+}

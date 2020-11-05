@@ -1,0 +1,86 @@
+import String, CodePoint from "string"
+import Map from "map"
+import Vector from "vector"
+import Pair from "util"
+
+function escape(string: String): String {
+	let result = new String
+	for cp: CodePoint in string.items {
+		if cp.byteLength > 1 {
+			# dealing with a Unicode char; don't compare to byte (or else CodePoint will throw an exception)
+			result += cp
+			continue
+		}
+		if cp == '\n' {
+			result += "\\n"
+		} else if cp == '\r' {
+			result += "\\r"
+		} else if cp == '\b' {
+			result += "\\b"
+		} else if cp == '\f' {
+			result += "\\f"
+		} else if cp == '\t' {
+			result += "\\t"
+		} else {
+			if cp == '"' || cp == '\\' {
+				result += '\\'
+			}
+			result += cp
+		}
+	}
+	return result
+}
+
+export class SerialNode {
+	public var name: String
+	public var attributes: Map<String, (String | SerialNode)?>
+	public var content: String
+	public var children: Vector<SerialNode>
+
+	public constructor(name: String = "", content: String = "") {
+		this.name = name
+		this.content = content
+	}
+
+	public this[String]: ref (String | SerialNode)? {
+		return *this.attributes[$]
+	}
+
+	private function toPrettyString(indent: String): String {
+		let result = new String
+
+		result += this.name + '{'
+
+		for pair: Pair<String, (String | SerialNode)?> in this.attributes.items {
+			if pair.second instanceof String {
+				result += '\n' + indent + '\t' + pair.first + " = \"" + escape(*pair.second as String) + '"'
+			} else {
+				result += '\n' + indent + '\t' + pair.first + " = " + (*pair.second as SerialNode).toPrettyString(indent + '\t')
+			}
+		}
+
+		if this.content.length > 0 {
+			if this.attributes.count == 0 && this.children.length == 0 {
+				result += ' ' + this.content + ' '
+			} else {
+				result += '\n' + indent + "\t[content] = \"" + escape(this.content) + '"'
+			}
+		}
+
+		for child: ref SerialNode in this.children.items {
+			result += '\n' + indent + '\t' + child.toPrettyString(indent + '\t')
+		}
+
+		if this.attributes.count == 0 && this.children.length == 0 {
+			result += '}'
+		} else {
+			result += '\n' + indent + '}'
+		}
+
+		return result
+	}
+
+	public to String {
+		return this.toPrettyString("")
+	}
+}

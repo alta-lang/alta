@@ -158,6 +158,10 @@ export generic class Box<T> {
     return this.handle != nullptr
   }
 
+  public @read function proxy(): ref T {
+    return this
+  }
+
   # TODO: automatically provide operators if the contained type provides it
   # e.g. if the type provides `==`, define a `==` operator the defers to the contained instance
 }

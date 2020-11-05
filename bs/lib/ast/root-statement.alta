@@ -1,8 +1,8 @@
 import Node from "./node.alta"
 import SerialNode from "../serialization.alta"
 
-export class Statement extends Node {
+export class RootStatement extends Node {
 	protected @override function serialize(): SerialNode {
-		return new SerialNode("Statement")
+		return new SerialNode("RootStatement")
 	}
 }
