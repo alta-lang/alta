@@ -1,0 +1,67 @@
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+COMMENT = _{ "#" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
+
+identifier = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+
+func_keyword = { "function" }
+return_keyword = { "return" }
+
+opening_paren = { "(" }
+closing_paren = { ")" }
+colon = { ":" }
+comma = { "," }
+at_sign = { "@" }
+opening_brace = { "{" }
+closing_brace = { "}" }
+
+root = { SOI ~ root_statement* ~ EOI }
+root_statement = {
+	function_definition
+}
+
+function_definition = { attribute* ~ func_keyword ~ identifier ~ opening_paren ~ (function_parameter ~ (comma ~ function_parameter)* ~ comma?)? ~ closing_paren ~ colon ~ alta_type ~ statement }
+function_parameter = { identifier ~ colon ~ alta_type }
+
+type_modifier = { "mut" | "ref" }
+
+alta_type = {
+	type_modifier* ~ identifier
+}
+
+attr_id_wrapper = !{
+	identifier
+}
+
+attribute = @{
+	at_sign ~ attr_id_wrapper
+}
+
+statement = {
+	block |
+	return_statement |
+	expr_statement
+}
+
+expr_statement = { expression }
+
+block = { opening_brace ~ statement* ~ closing_brace }
+
+return_statement = { return_keyword ~ expression }
+
+expression = {
+	(
+		integer_literal |
+		string_literal |
+		identifier
+	) ~
+	(
+		function_call_suffix
+	)*
+}
+
+function_call_suffix = { opening_paren ~ ((identifier ~ colon)? ~ expression ~ (comma ~ (identifier ~ colon)? ~ expression)* ~ comma?)? ~ closing_paren }
+
+integer_literal = { ASCII_DIGIT+ }
+
+string_literal = @{ "\"" ~ (!("\"" | "\r" | "\n") ~ ANY)* ~ "\"" }
+

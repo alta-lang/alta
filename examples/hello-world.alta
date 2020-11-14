@@ -1,0 +1,5 @@
+@literal function main(argc: int, argv: ref byte): int {
+	# some random comment
+	printLine("Hello, world!")
+	return 0
+}
