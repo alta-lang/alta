@@ -52,7 +52,9 @@ export class SerialNode {
 		result += this.name + '{'
 
 		for pair: Pair<String, (String | SerialNode)?> in this.attributes.items {
-			if pair.second instanceof String {
+			if !pair.second
+				continue
+			if *pair.second instanceof String {
 				result += '\n' + indent + '\t' + pair.first + " = \"" + escape(*pair.second as String) + '"'
 			} else {
 				result += '\n' + indent + '\t' + pair.first + " = " + (*pair.second as SerialNode).toPrettyString(indent + '\t')
