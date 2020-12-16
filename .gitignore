@@ -13,3 +13,4 @@ CMakeFiles
 **/._*
 **/.DS_Store
 /bs/tests
+/target
