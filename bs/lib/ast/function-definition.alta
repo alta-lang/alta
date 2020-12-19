@@ -18,14 +18,14 @@ export class FunctionDefinition extends RootStatement {
 		let serial = new SerialNode("FunctionDefinition")
 		let attrs = new SerialNode("$Array")
 
-		serial["name"] = this.name
+		serial.setAttribute("name", new SerialNode(content: this.name))
 
 		for attribute: Box<Attribute> in this.attributes.items {
-			attrs.children.push(attribute.proxy.serialize())
+			attrs.addChild(attribute.proxy.serialize())
 		}
-		serial["attributes"] = attrs
+		serial.setAttribute("attributes", attrs)
 
-		serial.children.push(this.body.proxy.serialize())
+		serial.addChild(this.body.proxy.serialize())
 
 		return serial
 	}

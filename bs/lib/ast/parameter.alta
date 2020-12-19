@@ -12,8 +12,8 @@ export class Parameter extends Node {
 	protected @override function serialize(): SerialNode {
 		let serial = new SerialNode("Parameter")
 
-		serial["name"] = this.name
-		serial["type"] = this.type.proxy.serialize()
+		serial.setAttribute("name", new SerialNode(content: this.name))
+		serial.setAttribute("type", this.type.proxy.serialize())
 
 		return serial
 	}

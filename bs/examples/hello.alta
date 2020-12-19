@@ -1,0 +1,4 @@
+@literal function main(argc: int, argv: ptr ptr byte): int {
+	printLine("Hello, world!")
+	return 0
+}

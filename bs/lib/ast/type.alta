@@ -9,7 +9,7 @@ export class Type extends Node {
 	protected @override function serialize(): SerialNode {
 		let serial = new SerialNode("Type")
 
-		serial["name"] = this.name
+		serial.setAttribute("name", new SerialNode(content: this.name))
 
 		return serial
 	}

@@ -12,7 +12,7 @@ export class RootNode extends Node {
 		let serial = new SerialNode("RootNode")
 
 		for statement: Box<RootStatement> in this.statements.items {
-			serial.children.push(statement.proxy.serialize())
+			serial.addChild(statement.proxy.serialize())
 		}
 
 		return serial

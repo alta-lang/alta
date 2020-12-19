@@ -11,7 +11,7 @@ export class Block extends Statement {
 		let serial = new SerialNode("Block")
 
 		for statement: Box<Statement> in this.statements.items {
-			serial.children.push(statement.proxy.serialize())
+			serial.addChild(statement.proxy.serialize())
 		}
 
 		return serial
