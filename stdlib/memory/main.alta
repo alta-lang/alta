@@ -159,7 +159,7 @@ export generic class Box<T> {
   }
 
   public @read function proxy(): ref T {
-    return this
+    return *(this.handle as ptr T)
   }
 
   # TODO: automatically provide operators if the contained type provides it
