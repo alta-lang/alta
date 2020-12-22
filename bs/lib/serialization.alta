@@ -101,7 +101,7 @@ export class SerialNode {
 	private function toPrettyString(indent: String): String {
 		let result = new String
 
-		result += this.name + '{'
+		result += this.name + " {"
 
 		for pair: Pair<String, ptr void> in this._attributes.items {
 			let node: ref SerialNode = *(pair.second as ptr SerialNode)

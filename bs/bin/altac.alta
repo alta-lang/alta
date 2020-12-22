@@ -41,7 +41,7 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 	await parser.run(lexer.tokens)
 
 	if parser.root {
-		printLine("Parsed a root node:\n", parser.root)
+		printLine("Parsed a root node:\n", parser.root.proxy)
 	} else {
 		printLine("Failed to parse")
 	}

@@ -6,6 +6,7 @@ import RootStatement from "./root-statement.alta"
 import Statement from "./statement.alta"
 import Attribute from "./attribute.alta"
 import Parameter from "./parameter.alta"
+import Type from "./type.alta"
 import SerialNode from "../serialization.alta"
 
 export class FunctionDefinition extends RootStatement {
@@ -13,17 +14,26 @@ export class FunctionDefinition extends RootStatement {
 	public var body: Box<Statement>
 	public var attributes: Vector<Box<Attribute>>
 	public var parameters: Vector<Box<Parameter>>
+	public var returnType: Box<Type>
 
 	protected @override function serialize(): SerialNode {
 		let serial = new SerialNode("FunctionDefinition")
-		let attrs = new SerialNode("$Array")
 
 		serial.setAttribute("name", new SerialNode(content: this.name))
 
+		let attrs = new SerialNode("$Array")
 		for attribute: Box<Attribute> in this.attributes.items {
 			attrs.addChild(attribute.proxy.serialize())
 		}
 		serial.setAttribute("attributes", attrs)
+
+		let params = new SerialNode("$Array")
+		for param: Box<Parameter> in this.parameters.items {
+			params.addChild(param.proxy.serialize())
+		}
+		serial.setAttribute("parameters", params)
+
+		serial.setAttribute("returnType", this.returnType.proxy.serialize())
 
 		serial.addChild(this.body.proxy.serialize())
 

@@ -1,0 +1,12 @@
+import String from "string"
+
+import Expression from "./expression.alta"
+import SerialNode from "../serialization.alta"
+
+export class IntegerLiteral extends Expression {
+	public var raw: String
+
+	protected @override function serialize(): SerialNode {
+		return new SerialNode("IntegerLiteral", this.raw)
+	}
+}

@@ -1,0 +1,22 @@
+import Box from "memory"
+import String from "string"
+
+import Expression from "./expression.alta"
+import SerialNode from "../serialization.alta"
+
+export class Accessor extends Expression {
+	public var target: Box<Expression>
+	public var member: String
+
+	protected @override function serialize(): SerialNode {
+		let serial = new SerialNode("Accessor")
+
+		if this.target {
+			serial.setAttribute("target", this.target.proxy.serialize())
+		}
+
+		serial.setAttribute("member", new SerialNode(content: this.member))
+
+		return serial
+	}
+}

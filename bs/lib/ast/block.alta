@@ -5,7 +5,7 @@ import Statement from "./statement.alta"
 import SerialNode from "../serialization.alta"
 
 export class Block extends Statement {
-	private var statements: Vector<Box<Statement>>
+	public var statements: Vector<Box<Statement>>
 
 	protected @override function serialize(): SerialNode {
 		let serial = new SerialNode("Block")

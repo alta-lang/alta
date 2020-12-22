@@ -33,6 +33,9 @@ export enum TokenType: Size {
 	EqualSign,
 	Dot,
 	Colon,
+	Comma,
+	Ampersand,
+	Asterisk,
 	Last, # TODO: the next update to the language should support this as a property on enums (like e.g. `MyEnum.$first` and `MyEnum.$last`)
 	      #       note that i used the special fetch notation there because we want to avoid reserving enumeration member names
 }
@@ -48,6 +51,9 @@ let staticTokens = new Map<String, TokenType>(items:
 	new Pair<String, TokenType>("(", TokenType.OpeningParenthesis),
 	new Pair<String, TokenType>(")", TokenType.ClosingParenthesis),
 	new Pair<String, TokenType>(":", TokenType.Colon),
+	new Pair<String, TokenType>(",", TokenType.Comma),
+	new Pair<String, TokenType>("&", TokenType.Ampersand),
+	new Pair<String, TokenType>("*", TokenType.Asterisk),
 )
 
 export class Token {

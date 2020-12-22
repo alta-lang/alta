@@ -1,15 +1,25 @@
+import Box from "memory"
 import String from "string"
+import Vector from "vector"
+import uint8, Size from "types"
+import numberToString from "util"
 
 import Node from "./node.alta"
+import Accessor from "./accessor.alta"
 import SerialNode from "../serialization.alta"
 
 export class Type extends Node {
-	public var name: String
+	public var isReference = false
+	public var pointerDepth: Size = 0
+	public var target: Box<Accessor>
 
 	protected @override function serialize(): SerialNode {
 		let serial = new SerialNode("Type")
 
-		serial.setAttribute("name", new SerialNode(content: this.name))
+		serial.setAttribute("target", this.target.proxy.serialize())
+
+		serial.setAttribute("isReference", new SerialNode(content: this.isReference ? "true" : "false"))
+		serial.setAttribute("pointerDepth", new SerialNode(content: numberToString<Size>(this.pointerDepth)))
 
 		return serial
 	}
