@@ -313,16 +313,14 @@ export class Parser {
 	}
 
 	private async function parseExpression(): Box<ast.Expression> {
-		{
-			let int = await this.parseIntegerLiteral()
-			if int
-				return int
-		}
+		let expr = await this.parseFunctionCallOrSubscriptOrAccessorOrPostIncDec()
+		if expr
+			return expr
 
 		return nullptr
 	}
 
-	private async function parseIntegerLiteral(): Box<ast.IntegerLiteral> {
+	private async function parseIntegerLiteral(): Box<ast.Expression> {
 		let savedState = this.state
 		let int: Box<ast.IntegerLiteral> = new* ast.IntegerLiteral
 
@@ -334,5 +332,120 @@ export class Parser {
 		int.proxy.raw = (*num).content
 
 		return int
+	}
+
+	private async function parseGroupedExpression(): Box<ast.Expression> {
+		let savedState = this.state
+
+		if !this.expect(TokenType.OpeningParenthesis) {
+			this.state = savedState
+			return nullptr
+		}
+
+		let expr = await this.parseExpression()
+		if !expr {
+			this.state = savedState
+			return nullptr
+		}
+
+		if !this.expect(TokenType.ClosingParenthesis) {
+			this.state = savedState
+			return nullptr
+		}
+
+		return expr
+	}
+
+	private async function parseStructureExpression(): Box<ast.Expression> {
+		let savedState = this.state
+		let struct: Box<ast.StructureExpression> = nullptr
+		let deferToLowerPrecedences = false
+
+		# used as a workaround for the C++-written compiler for Alta not having `goto`
+		while true {
+			if !this.expectKeyword("new") {
+				deferToLowerPrecedences = true
+				break
+			}
+
+			let name = await this.parseStrictAccessor()
+			if !name {
+				this.state = savedState
+				deferToLowerPrecedences = true
+				break
+			}
+
+			struct = new* ast.StructureExpression
+			struct.proxy.target = name
+
+			let stateBeforeArguments = this.state
+
+			if this.expect(TokenType.OpeningBrace) {
+				while true {
+					let prevState = this.state
+					let label = this.expect(TokenType.Identifier)
+					if !label || !this.expect(TokenType.Colon) {
+						this.state = prevState
+						break
+					}
+
+					let expr = await this.parseExpression()
+					if !expr {
+						this.state = prevState
+						break
+					}
+
+					struct.proxy.arguments.push(new Pair<String, Box<ast.Expression>>((*label).content, expr))
+
+					if !this.expect(TokenType.Comma) {
+						break
+					}
+				}
+
+				if !this.expect(TokenType.ClosingBrace) {
+					this.state = stateBeforeArguments
+					struct = nullptr
+					break
+				}
+			}
+
+			break
+		}
+
+		if deferToLowerPrecedences {
+			{
+				let int = await this.parseIntegerLiteral()
+				if int
+					return int
+			}
+
+			{
+				let acc = await this.parseStrictAccessor()
+				if acc
+					return acc
+			}
+
+			{
+				let expr = await this.parseGroupedExpression()
+				if expr
+					return expr
+			}
+
+			return nullptr
+		} else {
+			return struct
+		}
+	}
+
+	private async function parseFunctionCallOrSubscriptOrAccessorOrPostIncDec(): Box<ast.Expression> {
+		let savedState = this.state
+
+		let target = await this.parseStructureExpression()
+		if !target {
+			this.state = savedState
+			return nullptr
+		}
+
+		return target
 	}
 }
