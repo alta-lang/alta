@@ -1452,7 +1452,7 @@ int main(int argc, char** argv) {
           }
 
           for (auto& generic: genericsUsed[packageName]) {
-            auto genMod = generic->parentScope.lock()->parentModule.lock();
+            auto genMod = AltaCore::Util::getModule(generic->parentScope.lock().get()).lock();
             auto pkgName = Talta::mangleName(genMod.get());
             auto name = pkgName + '-' + std::to_string(generic->moduleIndex) + '-' + target.name;
             if (depsLinked.find(name) == depsLinked.end()) {
