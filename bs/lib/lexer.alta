@@ -36,6 +36,7 @@ export enum TokenType: Size {
 	Comma,
 	Ampersand,
 	Asterisk,
+	String,
 	Last, # TODO: the next update to the language should support this as a property on enums (like e.g. `MyEnum.$first` and `MyEnum.$last`)
 	      #       note that i used the special fetch notation there because we want to avoid reserving enumeration member names
 }
@@ -185,7 +186,64 @@ generator function process(file: Path)(uint32...): Token? {
 			if continueIt
 				continue
 		} else if cp == '"' {
-			# TODO
+			let tok = new Token(TokenType.String, location: new Location(line: line, column: column, file: file))
+			tok.content += cp
+
+			let escapeIt = false
+			let breakOut = false
+			let continueIt = false
+			let ok = true
+			while true {
+				let maybeCP: uint32? = null
+				if cpQueue.length > 0
+					maybeCP = cpQueue.pop()
+				if !maybeCP {
+					maybeCP = yield token
+					token = null
+				}
+
+				if !maybeCP {
+					breakOut = true
+					break
+				}
+
+				let cp2 = *maybeCP
+
+				if cp2 == '\r' || cp2 == '\n' {
+					let cps = new Queue<uint32>
+					for item: CodePoint in tok.content.items {
+						cps.push(item)
+					}
+					cps.push(cp2)
+					while cpQueue.length > 0
+						cps.push(cpQueue.pop())
+					cpQueue = cps
+					continueIt = true
+					ok = false
+					break
+				} else if escapeIt {
+					escapeIt = false
+					tok.content += cp2
+				} else if cp2 == '\\' {
+					escapeIt = true
+					tok.content += '\\'
+				} else if cp2 == '"' {
+					tok.content += cp2
+					break
+				} else {
+					tok.content += cp2
+				}
+			}
+
+			if ok {
+				token = tok
+				column += tok.content.length - 1
+			}
+
+			if breakOut
+				break
+			if continueIt
+				continue
 		} else if cp == ' ' || cp == '\t' {
 			# no-op
 		} else if cp == '\r' {

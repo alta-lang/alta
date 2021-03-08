@@ -1,0 +1,46 @@
+import Box from "memory"
+import String from "string"
+import Vector from "vector"
+import Pair from "util"
+import Size from "types"
+
+import RootStatement from "./root-statement.alta"
+import SerialNode from "../serialization.alta"
+
+export class ImportItem {
+	public var components: Vector<String>
+	public var alias: String?
+
+	module function serialize(): SerialNode {
+		let serial = new SerialNode("ImportItem")
+
+		serial.setAttribute("components", new SerialNode(content: this.components.reduce<String>("", (acc: ref String, index: Size, val: String) => void { acc += "." + val })))
+		if this.alias
+			serial.setAttribute("alias", new SerialNode(content: *this.alias))
+
+		return serial
+	}
+}
+
+export class Import extends RootStatement {
+	public var query: String
+	public var imports: Vector<ImportItem>
+	public var alias: String?
+
+	protected @override function serialize(): SerialNode {
+		let serial = new SerialNode("Import")
+
+		serial.setAttribute("query", new SerialNode(content: this.query))
+
+		let imports = new SerialNode("$Vector")
+		for import: ImportItem in this.imports.items {
+			imports.addChild(import.serialize())
+		}
+		serial.setAttribute("items", imports)
+
+		if this.alias
+			serial.setAttribute("alias", new SerialNode(content: *this.alias))
+
+		return serial
+	}
+}

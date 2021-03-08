@@ -1,35 +1,8 @@
-import String, CodePoint from "string"
+import String from "string"
 import Map from "map"
 import Vector from "vector"
 import Pair from "util"
-
-function escape(string: String): String {
-	let result = new String
-	for cp: CodePoint in string.items {
-		if cp.byteLength > 1 {
-			# dealing with a Unicode char; don't compare to byte (or else CodePoint will throw an exception)
-			result += cp
-			continue
-		}
-		if cp == '\n' {
-			result += "\\n"
-		} else if cp == '\r' {
-			result += "\\r"
-		} else if cp == '\b' {
-			result += "\\b"
-		} else if cp == '\f' {
-			result += "\\f"
-		} else if cp == '\t' {
-			result += "\\t"
-		} else {
-			if cp == '"' || cp == '\\' {
-				result += '\\'
-			}
-			result += cp
-		}
-	}
-	return result
-}
+import escape from "./util"
 
 # the `ptr void` is a stupid workaround for an issue with the current compiler written in C++;
 # you can't reference yourself in a generic or an optional or a union (and probably not a function type either)

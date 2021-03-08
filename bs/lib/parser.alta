@@ -4,6 +4,7 @@ import Size from "types"
 import Box from "memory"
 import Map from "map"
 import Pair from "util"
+import unescape from "./util"
 
 import Token, TokenType from "./lexer.alta"
 import "./ast" as ast
@@ -73,6 +74,12 @@ export class Parser {
 		let statement: Box<ast.RootStatement> = nullptr
 
 		if !statement {
+			let import = await this.parseImport()
+			if import
+				statement = import
+		}
+
+		if !statement {
 			# can't directly assign to `statement` because of a bug in the current C++-written compiler
 			let func = await this.parseFunctionDefinition()
 			if func
@@ -80,6 +87,106 @@ export class Parser {
 		}
 
 		return statement
+	}
+
+	private async function parseImport(): Box<ast.Import> {
+		let savedState = this.state
+		let import: Box<ast.Import> = new* ast.Import
+
+		if !this.expectKeyword("import") {
+			this.state = savedState
+			return nullptr
+		}
+
+		let str = this.expect(TokenType.String)
+		if str {
+			if !this.expectKeyword("as") {
+				this.state = savedState
+				return nullptr
+			}
+
+			let query = (*str).content
+			import.proxy.query = unescape(query.substring(from: 1, length: query.length - 2))
+
+			let id = this.expect(TokenType.Identifier)
+			if !id {
+				this.state = savedState
+				return null
+			}
+
+			import.proxy.alias = (*id).content
+
+			return import
+		}
+
+		let expectClosingBrace = false
+
+		if this.expect(TokenType.OpeningBrace) {
+			expectClosingBrace = true
+		}
+
+		while true {
+			let item = await this.parseImportItem()
+			if !item {
+				break
+			}
+			import.proxy.imports.push(*item)
+			if !this.expect(TokenType.Comma) {
+				break
+			}
+		}
+
+		if expectClosingBrace && !this.expect(TokenType.ClosingBrace) {
+			this.state = savedState
+			return nullptr
+		}
+
+		if import.proxy.imports.length == 0 || !this.expectKeyword("from") {
+			this.state = savedState
+			return nullptr
+		}
+		str = this.expect(TokenType.String)
+		if !str {
+			this.state = savedState
+			return nullptr
+		}
+		let query = (*str).content
+		import.proxy.query = unescape(query.substring(from: 1, length: query.length - 2))
+
+		return import
+	}
+
+	private async function parseImportItem(): ast.ImportItem? {
+		let savedState = this.state
+		let item = new ast.ImportItem
+
+		while true {
+			let id = this.expect(TokenType.Identifier)
+			if !id {
+				break
+			}
+			item.components.push((*id).content)
+			if !this.expect(TokenType.Dot) {
+				break
+			}
+		}
+
+		if item.components.length == 0 {
+			this.state = savedState
+			return null
+		}
+
+		if (this.expectKeyword("as")) {
+			let id = this.expect(TokenType.Identifier)
+			if !id {
+				this.state = savedState
+				return null
+			}
+
+			item.alias = (*id).content
+		}
+
+		return item
 	}
 
 	private async function parseFunctionDefinition(): Box<ast.FunctionDefinition> {
@@ -334,6 +441,20 @@ export class Parser {
 		return int
 	}
 
+	private async function parseStringLiteral(): Box<ast.Expression> {
+		let savedState = this.state
+		let string: Box<ast.StringLiteral> = new* ast.StringLiteral
+
+		let str = this.expect(TokenType.String)
+		if !str {
+			this.state = savedState
+			return nullptr
+		}
+		string.proxy.raw = (*str).content
+
+		return string
+	}
+
 	private async function parseGroupedExpression(): Box<ast.Expression> {
 		let savedState = this.state
 
@@ -417,6 +538,12 @@ export class Parser {
 				let int = await this.parseIntegerLiteral()
 				if int
 					return int
+			}
+
+			{
+				let string = await this.parseStringLiteral()
+				if string
+					return string
 			}
 
 			{
