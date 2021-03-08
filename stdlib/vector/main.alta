@@ -234,6 +234,13 @@ export generic class Vector<T> {
     this._length = 0
   }
 
+  public generic function reduce<R>(initialValue: R, reducer: (ref R, Size, T) => void): R {
+    for index: Size in 0..this._length {
+      reducer(initialValue, index, this._data[index])
+    }
+    return initialValue
+  }
+
   public this += Vector<T>: ref Vector<T> {
     for item: ref T in $.items {
       this.push(item)

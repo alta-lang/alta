@@ -1,5 +1,5 @@
 import allocate, free from "memory"
-import Impossible, IndexOutOfBounds from "exceptions"
+import IndexOutOfBounds from "exceptions"
 import Size from "types"
 
 generic class Node<T> {
@@ -138,7 +138,7 @@ export generic class List<T> {
       ptr = ptr.next
       ;++i
     }
-    throw new Impossible
+    assert false
   }
   public function remove(index: Size): T {
     if index == 0
@@ -162,7 +162,7 @@ export generic class List<T> {
       ptr = ptr.next
       ;++i
     }
-    throw new Impossible
+    assert false
   }
 
   public function clear(): ref List<T> {
@@ -205,7 +205,7 @@ export generic class List<T> {
       ptr = ptr.next
       ;++i
     }
-    throw new Impossible
+    assert false
   }
 
   public @read generator function items(): ref T {
