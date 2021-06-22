@@ -1,0 +1,41 @@
+import min from "math"
+import memcpy, malloc, free as libcFree from "libc"
+import initDefault from "safety"
+
+public function allocate<T>(length: Size): [T]? {
+	@unsafe {
+		let buf = malloc(sizeof T * length)
+		if !buf {
+			return null
+		}
+
+		for i in 0..length {
+			initDefault!(buf[i])
+		}
+
+		return buf as [T; length]
+	}
+}
+
+public function free<T>(memory: &![T]): void {
+	@unsafe {
+		libcFree(memory.raw as ptr void)
+	}
+}
+
+public @unsafe function copyRaw<T>(from source: *T, to dest: *!T, length: Size): void {
+	memcpy(source as ptr void, dest as ptr void, length)
+}
+
+public function copy<T>(from source: &[T], to dest: &![T], length: Size): void {
+	length = min<Size>(length, min(source.length, dest.length))
+	@unsafe {
+		copyRaw<T>(from: source.raw, to: dest.raw, length: length)
+	}
+}
+
+public function copy<T>(from source: &[T], to dest: &![T]): void {
+	@unsafe {
+		copyRaw<T>(from: source.raw, to: dest.raw, length: min(source.length, dest.length))
+	}
+}

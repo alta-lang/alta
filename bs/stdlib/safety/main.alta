@@ -1,0 +1,24 @@
+import "macro" as macro
+
+public @macro function initDefault(context: &!macro.Context): macro.Result {
+	if context.arguments.length != 1 {
+		return .Error("Expected a single argument")
+	}
+
+	let expr = context.arguments[0].asExpression?()
+	var newValue: macro.Expression? = null
+
+	if expr.type().isNative() {
+		newValue = macro.Cast.new(withTarget: macro.IntegerLiteral.new(0), type: expr.type())
+	} else if expr.type().isStructure() {
+		newValue = macro.StructureExpression.new(forType: expr.type())
+	} else {
+		return .Error("Unsupported type")
+	}
+
+	if newExpr {
+		return .Ok(macro.Assignment.new(withSource: *newValue, destination: expr))
+	} else {
+		return .Error("No default value available for type")
+	}
+}

@@ -1,3 +1,10 @@
-@literal function main(argc: int, argv: ptr ptr byte): int {
+import printLine from "io"
+import String from "string"
+
+@entry function main(args: [String]): i32 {
+	for i in 0..args.length {
+		printLine!("Got arg: {}", args[i])
+	}
+
 	return 0
 }

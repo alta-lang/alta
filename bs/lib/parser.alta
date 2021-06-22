@@ -302,16 +302,39 @@ export class Parser {
 			type.proxy.isReference = true
 		}
 
-		while this.expectKeyword("ptr") || this.expect(TokenType.Asterisk) {
-			++type.proxy.pointerDepth
+		if this.expectKeyword("mut") || this.expect(TokenType.ExclamationMark) {
+			type.proxy.isMutable = true
 		}
 
-		let target = await this.parseStrictAccessor()
-		if !target {
-			this.state = savedState
-			return nullptr
+		if this.expect(TokenType.OpeningSquare) {
+			let itemType = await this.parseType()
+			if !itemType {
+				this.state = savedState
+				return nullptr
+			}
+
+			type.proxy.arrayType = itemType
+
+			if !this.expect(TokenType.ClosingSquare) {
+				this.state = savedState
+				return nullptr
+			}
+		} else if this.expectKeyword("ptr") || this.expect(TokenType.Asterisk) {
+			let pointerType = await this.parseType()
+			if !pointerType {
+				this.state = savedState
+				return nullptr
+			}
+
+			type.proxy.pointerType = pointerType
+		} else {
+			let target = await this.parseStrictAccessor()
+			if !target {
+				this.state = savedState
+				return nullptr
+			}
+			type.proxy.target = target
 		}
-		type.proxy.target = target
 
 		return type
 	}
@@ -330,6 +353,12 @@ export class Parser {
 		}
 
 		{
+			let for = await this.parseForLoop()
+			if for
+				return for
+		}
+
+		{
 			let expr = await this.parseExpression()
 			if expr {
 				let exprStmt: Box<ast.ExpressionStatement> = new* ast.ExpressionStatement
@@ -339,6 +368,53 @@ export class Parser {
 		}
 
 		return nullptr
+	}
+
+	private async function parseForLoop(): Box<ast.ForLoop> {
+		let savedState = this.state
+		let loop: Box<ast.ForLoop> = new* ast.ForLoop
+
+		if !this.expectKeyword("for") {
+			this.state = savedState
+			return nullptr
+		}
+
+		let counterName = this.expect(TokenType.Identifier)
+		if !counterName {
+			this.state = savedState
+			return nullptr
+		}
+		loop.proxy.counterName = (*counterName).content
+
+		if this.expect(TokenType.Colon) {
+			let counterType = await this.parseType()
+			if !counterType {
+				this.state = savedState
+				return nullptr
+			}
+			loop.proxy.counterType = counterType
+		}
+
+		if !this.expectKeyword("in") {
+			this.state = savedState
+			return nullptr
+		}
+
+		let iterator = await this.parseExpression()
+		if !iterator {
+			this.state = savedState
+			return nullptr
+		}
+		loop.proxy.iterator = iterator
+
+		let body = await this.parseStatement()
+		if !body {
+			this.state = savedState
+			return nullptr
+		}
+		loop.proxy.body = body
+
+		return loop
 	}
 
 	private async function parseBlock(): Box<ast.Block> {
@@ -420,11 +496,56 @@ export class Parser {
 	}
 
 	private async function parseExpression(): Box<ast.Expression> {
-		let expr = await this.parseFunctionCallOrSubscriptOrAccessorOrPostIncDec()
+		let expr = await this.parseRangeExpression()
 		if expr
 			return expr
 
 		return nullptr
+	}
+
+	private async function parseRangeExpression(): Box<ast.Expression> {
+		let savedState = this.state
+
+		let target = await this.parseFunctionCallOrSubscriptOrAccessorOrPostIncDec()
+		if !target {
+			this.state = savedState
+			return nullptr
+		}
+
+		savedState = this.state
+		if this.expect(TokenType.Dot) && this.expect(TokenType.Dot) {
+			let includesEnd = !!this.expect(TokenType.Dot)
+			let range: Box<ast.RangeExpression> = new* ast.RangeExpression
+			let otherExpr = await this.parseFunctionCallOrSubscriptOrAccessorOrPostIncDec()
+
+			if otherExpr {
+				range.proxy.includesEnd = true
+				range.proxy.descreasing = false
+				range.proxy.start = target
+				range.proxy.end = otherExpr
+
+				target = range
+			} else {
+				this.state = savedState
+			}
+		} else if this.expect(TokenType.Colon) && this.expect(TokenType.Colon) {
+			let includesEnd = !!this.expect(TokenType.Colon)
+			let range: Box<ast.RangeExpression> = new* ast.RangeExpression
+			let otherExpr = await this.parseFunctionCallOrSubscriptOrAccessorOrPostIncDec()
+
+			if otherExpr {
+				range.proxy.includesEnd = true
+				range.proxy.descreasing = false
+				range.proxy.start = target
+				range.proxy.end = otherExpr
+
+				target = range
+			} else {
+				this.state = savedState
+			}
+		}
+
+		return target
 	}
 
 	private async function parseIntegerLiteral(): Box<ast.Expression> {

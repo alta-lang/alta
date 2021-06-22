@@ -14,3 +14,5 @@ CMakeFiles
 **/.DS_Store
 /bs/tests
 /target
+.ccls-cache
+/compile_commands.json

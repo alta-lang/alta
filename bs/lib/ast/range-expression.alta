@@ -1,0 +1,30 @@
+import String from "string"
+import Box from "memory"
+
+import Expression from "./expression.alta"
+import Accessor from "./accessor.alta"
+import SerialNode from "../serialization.alta"
+
+export class RangeExpression extends Expression {
+	public var start: Box<Expression>
+	public var end: Box<Expression>
+	public var includesEnd = false
+	public var descreasing = false
+
+	protected @override function serialize(): SerialNode {
+		let serial = new SerialNode("RangeExpression")
+
+		if this.start {
+			serial.setAttribute("start", this.start.proxy.serialize())
+		}
+
+		if this.end {
+			serial.setAttribute("end", this.end.proxy.serialize())
+		}
+
+		serial.setAttribute("includesEnd", new SerialNode(content: this.includesEnd ? "true" : "false"))
+		serial.setAttribute("descreasing", new SerialNode(content: this.descreasing ? "true" : "false"))
+
+		return serial
+	}
+}

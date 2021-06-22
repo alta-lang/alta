@@ -1,0 +1,11 @@
+import LessThanSelfComparable from "types"
+
+public function min<T implements LessThanComparable<T>>(a: &T, b: &T): &T {
+	return (a < b) ? a : b
+}
+
+public function max<T implements LessThanComparable<T>>(a: &T, b: &T): &T {
+	return (a < b) ? b : a
+}
+
+public function power<T implements Multipliable<T>>

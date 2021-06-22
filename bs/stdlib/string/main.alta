@@ -1,0 +1,35 @@
+import allocate, free, copy from "memory"
+import strlen from "libc"
+
+public struct String {
+	bytes: [byte]
+}
+
+public interface String {
+	@new function init(self: &!Self, withBytes: [byte]): void? # `void?` turns into `Optional<void>`
+	@unsafe @new function init(self: &!Self, withCString: ptr byte): void?
+
+	@destructor function destroy(self: consume &!Self): void
+
+	function byteLength(self: &Self): Size
+}
+
+public impl String for struct String {
+	@new function init(self: &!Self, withBytes bytes: [byte]): void? {
+		self.bytes = allocate<byte>?(bytes.length)
+		copy<byte>(from: bytes, to: self.bytes)
+	}
+
+	@unsafe @new function init(self: &!Self, withCString cString: *byte): void? {
+		self.bytes = allocate<byte>?(bytes.length)
+		copy<byte>(from: cString, to: self.bytes.raw, length: strlen(cString))
+	}
+
+	@destructor function destroy(self: consume &!Self): void {
+		free<byte>(self.bytes)
+	}
+
+	function byteLength(self: &Self): Size {
+		return self.bytes.length
+	}
+}

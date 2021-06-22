@@ -1,0 +1,30 @@
+import Box from "memory"
+import String from "string"
+
+import Statement from "./statement.alta"
+import Expression from "./expression.alta"
+import Type from "./type.alta"
+import SerialNode from "../serialization.alta"
+
+export class ForLoop extends Statement {
+	public var counterName: String
+	public var counterType: Box<Type>
+	public var iterator: Box<Expression>
+	public var body: Box<Statement>
+
+	protected @override function serialize(): SerialNode {
+		let serial = new SerialNode("ForLoop")
+
+		serial.setAttribute("counterName", new SerialNode(content: this.counterName))
+
+		if this.counterType {
+			serial.setAttribute("counterType", this.counterType.proxy.serialize())
+		}
+
+		serial.setAttribute("iterator", this.iterator.proxy.serialize())
+
+		serial.addChild(this.body.proxy.serialize())
+
+		return serial
+	}
+}

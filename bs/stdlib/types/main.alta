@@ -1,0 +1,83 @@
+#
+# logical operators
+#
+
+public interface Negatable {
+	operator !&self: bool
+}
+
+public interface LogicalAndable<T> {
+	operator &self && &T: bool
+}
+
+public inteface LogicalOrable<T> {
+	operator &self || &T: bool
+}
+
+public interface LessThanComparable<T> {
+	operator &self < &T: bool
+}
+
+public interface GreaterThanComparable<T> {
+	operator &self > &T: bool
+}
+
+public interface LessThanOrEqualComparable<T> {
+	operator &self <= &T: bool
+}
+
+public interface GreaterThanOrEqualComparable<T> {
+	operator &self >= &T: bool
+}
+
+public inteface EqualComparable<T> {
+	operator &self == &T: bool
+}
+
+public interface NotEqualComparable<T> {
+	operator &self != &T: bool
+}
+
+#
+# arithmetic operators
+#
+
+public inteface Summable<T, U> {
+	operator &self + &T: U
+}
+
+public interface Differentiable<T, U> {
+	operator &self - &T: U
+}
+
+public interface Multiplicable<T, U> {
+	operator &self * &T: U
+}
+
+public interface Divisible<T, U> {
+	operator &self / &T: U
+}
+
+#
+# bitwise operators
+#
+
+public interface LeftShiftable<T, U> {
+	operator &self << &T: U
+}
+
+public interface RightShiftable<T, U> {
+	operator &self >> &T: U
+}
+
+public interface Invertible<U> {
+	operator ~&self: U
+}
+
+public interface BitwiseAndable<T, U> {
+	operator &self & &T: U
+}
+
+public interface BitwiseOrable<T, U> {
+	operator &self | &T: U
+}
