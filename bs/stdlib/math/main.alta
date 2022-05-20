@@ -1,4 +1,4 @@
-import LessThanSelfComparable from "types"
+import LessThanComparable from "types"
 
 public function min<T implements LessThanComparable<T>>(a: &T, b: &T): &T {
 	return (a < b) ? a : b
@@ -8,4 +8,12 @@ public function max<T implements LessThanComparable<T>>(a: &T, b: &T): &T {
 	return (a < b) ? b : a
 }
 
-public function power<T implements Multipliable<T>>
+public interface Exponentiable<T> implements EqualComparable<T> {
+	function new(withInteger: int): &!Self
+	
+}
+
+# This function does NOT handle negative powers.
+public function power<T implements Exponentiable<T>>(raise num: &T, to pow: &T): &T {
+	
+}
