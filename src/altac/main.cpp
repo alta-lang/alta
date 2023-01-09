@@ -328,6 +328,10 @@ int main(int argc, char** argv) {
   using json = nlohmann::json;
   using Option = CLI::Option;
 
+  if (!Talta::init()) {
+    throw std::runtime_error("Failed to initialize transpiler");
+  }
+
   AltaCore::Logging::shortSubsystemNames.push_back(std::make_pair<std::string, std::string>("frontend", "CLI"));
   AltaCore::Logging::codeSummaryRepositories["frontend"] = {};
 
