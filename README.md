@@ -76,7 +76,7 @@ Check out the [FAQ](FAQ.md).
 There are various subprojects that make up Alta. Each has been separated because they might
 prove useful for stuff other than just the transpiler.
 
-  * [AltaCore](https://github.com/alta-lang/alta-core) - Alta's core frontend functionality, wrapped into a neat, no-so-little library
+  * [AltaCore](https://github.com/alta-lang/alta-core) - Alta's core frontend functionality, wrapped into a neat, not-so-little library
   * [Ceetah](https://github.com/alta-lang/ceetah) - C source code generation. Pure awesomeness. Play around with a C AST and then generate C code from it
   * [Talta](https://github.com/alta-lang/talta) - Alta's C transpiler. Uses a big helping of Ceetah along with a dash of AltaCore to bake some tasty C code from any given Alta AST
 
