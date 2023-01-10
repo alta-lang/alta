@@ -12,18 +12,16 @@ jobs:
       echo "##vso[task.setvariable variable=Alta.Commit]$(git rev-parse --short=7 HEAD)"
     displayName: "Determine Alta compiler version"
 
-  # set up GCC 7 (required to build because we use C++17)
-  # and install uuid-dev (dependency of crossguid)
+  # install uuid-dev (dependency of crossguid)
   - script: |
-      sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
       sudo apt-get update
-      sudo apt-get install -y gcc-7 g++-7 uuid-dev
-    displayName: "Install GCC 7 and uuid-dev"
+      sudo apt-get install -y uuid-dev
+    displayName: "Install uuid-dev"
 
   - task: CMake@1
     displayName: "Configure project with CMake"
     inputs:
-      cmakeArgs: '-DCMAKE_C_COMPILER=/usr/bin/gcc-7 -DCMAKE_CXX_COMPILER=/usr/bin/g++-7 -DCMAKE_BUILD_TYPE=Release -DCPACK_OUTPUT_FILE_PREFIX="$(Build.ArtifactStagingDirectory)" ..'
+      cmakeArgs: '-DCMAKE_BUILD_TYPE=Release -DCPACK_OUTPUT_FILE_PREFIX="$(Build.ArtifactStagingDirectory)" ..'
 
    # build it
   - task: CMake@1
