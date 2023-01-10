@@ -22,24 +22,67 @@ export class Location {
 
 export enum TokenType: Size {
 	None, # should never be used
-	AtSign,
+
+	# <special-rules>
+	SingleLineComment,
 	Identifier,
-	OpeningParenthesis,
-	ClosingParenthesis,
+	Decimal,
+	Integer,
+	String,
+	Character,
+	SpecialIdentifier,
+	# </special-rules>
+
+	# <multi-character-rules>
+	Equality,
+	And,
+	Or,
+	Returns,
+	FatReturns,
+	LessThanOrEqualTo,
+	GreaterThanOrEqualTo,
+	Inequality,
+	Increment,
+	Decrement,
+	PlusEquals,
+	MinusEquals,
+	TimesEquals,
+	DividedEquals,
+	ModuloEquals,
+	LeftShift,
+	LeftShiftEquals,
+	RightShiftEquals,
+	BitwiseAndEquals,
+	BitwiseOrEquals,
+	BitwiseXorEquals,
+	# </multi-character-rules>
+
 	OpeningBrace,
 	ClosingBrace,
-	Number,
-	Equality,
+	OpeningParenthesis,
+	ClosingParenthesis,
+	Colon,
+	Semicolon,
+	Comma,
 	EqualSign,
 	Dot,
-	Colon,
-	Comma,
+	PlusSign,
+	MinusSign,
+	ForwardSlash,
+	AtSign, # or Ampersat?
+	QuestionMark,
+	OpeningAngleBracket,
+	ClosingAngleBracket,
 	Ampersand,
 	Asterisk,
-	String,
 	OpeningSquare,
 	ClosingSquare,
 	ExclamationMark,
+	Percent,
+	Tilde,
+	Caret,
+	Pipe,
+
 	Last, # TODO: the next update to the language should support this as a property on enums (like e.g. `MyEnum.$first` and `MyEnum.$last`)
 	      #       note that i used the special fetch notation there because we want to avoid reserving enumeration member names
 }
@@ -60,7 +103,38 @@ let staticTokens = new Map<String, TokenType>(items:
 	new Pair<String, TokenType>(",", TokenType.Comma),
 	new Pair<String, TokenType>("&", TokenType.Ampersand),
 	new Pair<String, TokenType>("*", TokenType.Asterisk),
-	new Pair<String, TokenType>("!", TokenType.ExclamationMark)
+	new Pair<String, TokenType>("!", TokenType.ExclamationMark),
+	new Pair<String, TokenType>("%", TokenType.Percent),
+	new Pair<String, TokenType>("~", TokenType.Tilde),
+	new Pair<String, TokenType>("^", TokenType.Caret),
+	new Pair<String, TokenType>("|", TokenType.Pipe),
+	new Pair<String, TokenType>("+", TokenType.PlusSign),
+	new Pair<String, TokenType>("-", TokenType.MinusSign),
+	new Pair<String, TokenType>("/", TokenType.ForwardSlash),
+	new Pair<String, TokenType>("?", TokenType.QuestionMark),
+	new Pair<String, TokenType>("<", TokenType.OpeningAngleBracket),
+	new Pair<String, TokenType>(">", TokenType.ClosingAngleBracket),
+	new Pair<String, TokenType>(";", TokenType.Semicolon),
+	new Pair<String, TokenType>("&&", TokenType.And),
+	new Pair<String, TokenType>("||", TokenType.Or),
+	new Pair<String, TokenType>("->", TokenType.Returns),
+	new Pair<String, TokenType>("=>", TokenType.FatReturns),
+	new Pair<String, TokenType>("<=", TokenType.LessThanOrEqualTo),
+	new Pair<String, TokenType>(">=", TokenType.GreaterThanOrEqualTo),
+	new Pair<String, TokenType>("!=", TokenType.Inequality),
+	new Pair<String, TokenType>("++", TokenType.Increment),
+	new Pair<String, TokenType>("--", TokenType.Decrement),
+	new Pair<String, TokenType>("+=", TokenType.PlusEquals),
+	new Pair<String, TokenType>("-=", TokenType.MinusEquals),
+	new Pair<String, TokenType>("*=", TokenType.TimesEquals),
+	new Pair<String, TokenType>("/=", TokenType.DividedEquals),
+	new Pair<String, TokenType>("%=", TokenType.ModuloEquals),
+	new Pair<String, TokenType>("<<", TokenType.LeftShift),
+	new Pair<String, TokenType>("<<=", TokenType.LeftShiftEquals),
+	new Pair<String, TokenType>(">>=", TokenType.RightShiftEquals),
+	new Pair<String, TokenType>("&=", TokenType.BitwiseAndEquals),
+	new Pair<String, TokenType>("|=", TokenType.BitwiseOrEquals),
+	new Pair<String, TokenType>("^=", TokenType.BitwiseXorEquals),
 )
 
 export class Token {
@@ -113,8 +187,8 @@ generator function process(file: Path)(uint32...): Token? {
 		++column
 		let cp = *pendingCP
 
-		if (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') || cp == '_' {
-			let tok = new Token(TokenType.Identifier, location: new Location(line: line, column: column, file: file))
+		if (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') || cp == '_' || cp == '$' {
+			let tok = new Token(cp == '$' ? TokenType.SpecialIdentifier : TokenType.Identifier, location: new Location(line: line, column: column, file: file))
 			tok.content += cp
 
 			let continueIt = false
@@ -153,7 +227,7 @@ generator function process(file: Path)(uint32...): Token? {
 			if continueIt
 				continue
 		} else if cp >= '0' && cp <= '9' {
-			let tok = new Token(TokenType.Number, location: new Location(line: line, column: column, file: file))
+			let tok = new Token(TokenType.Integer, location: new Location(line: line, column: column, file: file))
 			tok.content += cp
 
 			let continueIt = false
@@ -250,6 +324,50 @@ generator function process(file: Path)(uint32...): Token? {
 				break
 			if continueIt
 				continue
+		} else if cp == '\'' {
+			let tok = new Token(TokenType.Character, location: new Location(line: line, column: column, file: file))
+			let pendingCP: uint32? = null
+
+			# if we fail to match this token, we can go ahead and break
+			# because the single quote character (') cannot form any other token
+
+			for i: int in 0..2 {
+				if cpQueue.length > 0
+					pendingCP = cpQueue.pop()
+				if !pendingCP {
+					pendingCP = yield token
+					token = null
+				}
+
+				if !pendingCP
+					break
+
+				tok.content += *pendingCP
+			}
+
+			if tok.content.length < 3
+				break
+
+			if tok.content[1] == '\\' {
+				if cpQueue.length > 0
+					pendingCP = cpQueue.pop()
+				if !pendingCP {
+					pendingCP = yield token
+					token = null
+				}
+
+				if !pendingCP
+					break
+
+				tok.content += *pendingCP
+			}
+
+			if tok.content[tok.content.length - 1] != '\'' {
+				break
+			}
+
+			token = tok
+			column += tok.content.length - 1
 		} else if cp == ' ' || cp == '\t' {
 			# no-op
 		} else if cp == '\r' {

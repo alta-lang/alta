@@ -552,7 +552,7 @@ export class Parser {
 		let savedState = this.state
 		let int: Box<ast.IntegerLiteral> = new* ast.IntegerLiteral
 
-		let num = this.expect(TokenType.Number)
+		let num = this.expect(TokenType.Integer)
 		if !num {
 			this.state = savedState
 			return nullptr
