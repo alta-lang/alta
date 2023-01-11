@@ -802,6 +802,8 @@ int main(int argc, char** argv) {
 
       std::string platform = "other";
       std::string compatability = "none";
+      std::string arch = "unknown";
+      std::string bitness = "0";
 
 #if defined(_WIN32) || defined(_WIN32)
       platform = "windows";
@@ -829,8 +831,24 @@ int main(int argc, char** argv) {
       platform = "solaris";
 #endif
 
+#if defined(__x86_64__) || defined(__x86_64) || defined(_M_AMD64) || defined(_M_X64)
+      arch = "x86_64";
+      bitness = "64";
+#elif defined(__i386__) || defined(__i386) || defined(_M_IX86)
+      arch = "i386";
+      bitness = "32";
+#elif defined(__aarch64__)
+      arch = "aarch64";
+      bitness = "64";
+#elif defined(__arm__)
+      arch = "arm";
+      bitness = "32";
+#endif
+
       defs["platform"] = platform;
       defs["compatability"] = compatability;
+      defs["arch"] = arch;
+      defs["bitness"] = bitness;
 
       AltaCore::Modules::parsingDefinitions = &defs;
 
