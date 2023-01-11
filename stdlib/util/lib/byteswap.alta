@@ -1,0 +1,33 @@
+import InvalidArgument from "exceptions"
+
+export generic function byteswap<T>(value: T): T {
+	if sizeof T == 1
+		return value
+
+	if sizeof T == 2
+		return
+			((value & (0xff << 8)) >> 8) |
+			((value & (0xff << 0)) << 8)
+
+	if sizeof T == 4
+		return
+			((value & (0xff << 24)) >> 24) |
+			((value & (0xff << 16)) >>  8) |
+			((value & (0xff <<  8)) <<  8) |
+			((value & (0xff <<  0)) << 24)
+
+	if sizeof T == 8
+		return
+			((value & (0xff << 56)) >> 56) |
+			((value & (0xff << 48)) >> 40) |
+			((value & (0xff << 40)) >> 24) |
+			((value & (0xff << 32)) >>  8) |
+			((value & (0xff << 24)) <<  8) |
+			((value & (0xff << 16)) << 24) |
+			((value & (0xff <<  8)) << 40) |
+			((value & (0xff <<  0)) << 56)
+
+	# anything else is unsupported
+	# TODO: should be a compile-time error
+	throw new InvalidArgument
+}
