@@ -804,6 +804,7 @@ int main(int argc, char** argv) {
       std::string compatability = "none";
       std::string arch = "unknown";
       std::string bitness = "0";
+      std::string endianness = "unknown";
 
 #if defined(_WIN32) || defined(_WIN32)
       platform = "windows";
@@ -845,10 +846,17 @@ int main(int argc, char** argv) {
       bitness = "32";
 #endif
 
+#if defined(__LITTLE_ENDIAN__) || defined(__LITTLE_ENDIAN)
+      endianness = "little";
+#elif defined(__BIG_ENDIAN__) || defined(__BIG_ENDIAN)
+      endianness = "big";
+#endif
+
       defs["platform"] = platform;
       defs["compatability"] = compatability;
       defs["arch"] = arch;
       defs["bitness"] = bitness;
+      defs["endianness"] = endianness;
 
       AltaCore::Modules::parsingDefinitions = &defs;
 
