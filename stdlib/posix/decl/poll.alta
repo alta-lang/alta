@@ -1,5 +1,3 @@
-@@CTranspiler.include("poll.h");
-
 export struct pollfd {
 	fd: int;
 	events: short int;

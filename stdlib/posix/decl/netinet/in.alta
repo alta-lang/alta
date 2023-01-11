@@ -1,28 +1,71 @@
-@@CTranspiler.include("netinet/in.h");
-
-import uint32, uint16 from "types"
+import uint32, uint16, uint8 from "types"
 
 export type in_port_t = uint16
 export type in_addr_t = uint32
-export type sa_family_t = any
 
-export literal @external struct in_addr {
+##if platform == "linux"
+	export type sa_family_t = unsigned short int
+##else if platform == "darwin"
+	export type sa_family_t = uint8
+##end if
+
+export struct in_addr {
 	s_addr: in_addr_t;
 }
 
-export literal @external struct sockaddr {
-	sin_family: sa_family_t;
+export struct sockaddr {
+##if platform == "darwin"
+	sa_len: uint8;
+##end if
+	sa_family: sa_family_t;
+
+	# `char[14]`
+	sa_data0: char;
+	sa_data1: char;
+	sa_data2: char;
+	sa_data3: char;
+	sa_data4: char;
+	sa_data5: char;
+	sa_data6: char;
+	sa_data7: char;
+	sa_data8: char;
+	sa_data9: char;
+	sa_data10: char;
+	sa_data11: char;
+	sa_data12: char;
+	sa_data13: char;
 }
 
 export literal @external struct sockaddr_in {
+##if platform == "darwin"
+	sa_len: uint8;
+##end if
+
 	sin_family: sa_family_t;
 	sin_port: in_port_t;
 	sin_addr: in_addr;
+
+	# on Linux:
+	#   `unsigned char[sizeof (struct sockaddr) - (sizeof (unsigned short int)) - sizeof (in_port_t) - sizeof (struct in_addr)]`
+	#   which is
+	#   `unsigned char[16 - 2 - 2 - 4]`
+	#   which is
+	#   `unsigned char[8]`
+	# on macOS:
+	#   `char[8]`
+	sin_zero0: byte;
+	sin_zero1: byte;
+	sin_zero2: byte;
+	sin_zero3: byte;
+	sin_zero4: byte;
+	sin_zero5: byte;
+	sin_zero6: byte;
+	sin_zero7: byte;
 }
 
-declare literal export var IPPROTO_IP: const int
-declare literal export var IPPROTO_IPV6: const int
-declare literal export var IPPROTO_ICMP: const int
-declare literal export var IPPROTO_RAW: const int
-declare literal export var IPPROTO_TCP: const int
-declare literal export var IPPROTO_UDP: const int
+export var IPPROTO_IP: const int = 0
+export var IPPROTO_IPV6: const int = 41
+export var IPPROTO_ICMP: const int = 1
+export var IPPROTO_RAW: const int = 255
+export var IPPROTO_TCP: const int = 6
+export var IPPROTO_UDP: const int = 17

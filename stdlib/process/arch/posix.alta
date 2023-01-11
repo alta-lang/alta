@@ -1,14 +1,11 @@
-@@CTranspiler.include("spawn.h");
-@@CTranspiler.include("unistd.h");
-@@CTranspiler.include("sys/ioctl.h");
-@@CTranspiler.include("sys/wait.h");
-
 import Size, rawstring from "types"
 import String from "string"
 import allocate from "memory"
 import Exception from "exceptions"
 import Vector from "vector"
 import Map from "map"
+import ssize_t from "posix/decl/sys/types"
+import FIONREAD from "posix/decl/sys/ioctl"
 
 export class PipeCreationFailure extends Exception {}
 export class ProcessCreationFailure extends Exception {}
@@ -19,11 +16,100 @@ export class ReadFailure extends Exception {}
 export class WriteFailure extends Exception {}
 export class HandleDestructionFailure extends Exception {}
 
-type posix_spawn_file_actions_t = any
-type posix_spawnattr_t = any
-type mode_t = any
-type pid_t = any
-type ssize_t = any
+type pid_t = int
+
+##if platform == "linux"
+  type mode_t = unsigned int
+
+  struct __spawn_action {
+    # opaque type
+  }
+
+  struct sigset_t {
+    # `unsigned long int[(1024 / (8 * sizeof (unsigned long int)))]`
+    # which is
+    # `unsigned long int[(1024 / (8 * 8))]`
+    # which is
+    # `unsigned long int[16]`
+    __val0: unsigned long int;
+    __val1: unsigned long int;
+    __val2: unsigned long int;
+    __val3: unsigned long int;
+    __val4: unsigned long int;
+    __val5: unsigned long int;
+    __val6: unsigned long int;
+    __val7: unsigned long int;
+    __val8: unsigned long int;
+    __val9: unsigned long int;
+    __val10: unsigned long int;
+    __val11: unsigned long int;
+    __val12: unsigned long int;
+    __val13: unsigned long int;
+    __val14: unsigned long int;
+    __val15: unsigned long int;
+  }
+
+  struct posix_spawn_file_actions_t {
+    __allocated: int;
+    __used: int;
+    __actions: ptr __spawn_action;
+
+    # `int[16]`
+     __pad0: int;
+     __pad1: int;
+     __pad2: int;
+     __pad3: int;
+     __pad4: int;
+     __pad5: int;
+     __pad6: int;
+     __pad7: int;
+     __pad8: int;
+     __pad9: int;
+    __pad10: int;
+    __pad11: int;
+    __pad12: int;
+    __pad13: int;
+    __pad14: int;
+    __pad15: int;
+  }
+
+  struct sched_param {
+    sched_priority: int;
+  }
+
+  struct posix_spawnattr_t {
+    __flags: short int;
+    __pgrp: pid_t;
+    __sd: sigset_t;
+    __ss: sigset_t;
+    __sp: sched_param;
+    __policy: int;
+
+    # `int[16]`
+     __pad0: int;
+     __pad1: int;
+     __pad2: int;
+     __pad3: int;
+     __pad4: int;
+     __pad5: int;
+     __pad6: int;
+     __pad7: int;
+     __pad8: int;
+     __pad9: int;
+    __pad10: int;
+    __pad11: int;
+    __pad12: int;
+    __pad13: int;
+    __pad14: int;
+    __pad15: int;
+  }
+##else if platform == "darwin"
+  import uint16 from "types"
+
+  type mode_t = uint16
+  type posix_spawn_file_actions_t = ptr void
+  type posix_spawnattr_t = ptr void
+##end if
 
 declare literal function pipe(pipefd: ptr int): int
 declare literal function posix_spawn(pid: ptr pid_t, path: ptr const byte, file_actions: ptr const posix_spawn_file_actions_t, attrp: ptr const posix_spawnattr_t, argv: ptr const ptr byte, envp: ptr const ptr byte): int
@@ -40,13 +126,13 @@ declare literal function posix_spawn_file_actions_adddup2(file_actions: ptr posi
 
 declare literal function waitpid(pid: pid_t, wstatus: ptr int, options: int): pid_t
 
-declare literal var FIONREAD: const unsigned long int
-
 # alias the functions, since Stream has methods
 # with the same names that need to use them
 using posixRead = read
 using posixWrite = write
 using posixClose = close
+
+# TODO: get rid of the global stream table and use a BucketList instead
 
 let streamTable: Map<int, Size> = new Map<int, Size>
 
