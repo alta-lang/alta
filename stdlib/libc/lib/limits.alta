@@ -1,33 +1,38 @@
-@@CTranspiler.include("limits.h");
+export var CHAR_BIT: const int = 8
 
-declare literal export var CHAR_BIT: const int
+export var SCHAR_MIN: const signed byte = -127 - 1
+export var SCHAR_MAX: const signed byte = 127
 
-declare literal export var SCHAR_MIN: const signed byte
-declare literal export var SCHAR_MAX: const signed byte
+export var UCHAR_MAX: const unsigned byte = (127 * 2) + 1
 
-declare literal export var UCHAR_MAX: const unsigned byte
+export var CHAR_MIN: const byte = -127 - 1
+export var CHAR_MAX: const byte = 127
 
-declare literal export var CHAR_MIN: const byte
-declare literal export var CHAR_MAX: const byte
+export var MB_LEN_MAX: const int = 1
 
-declare literal export var MB_LEN_MAX: const int
+export var SHRT_MIN: const short int = -32767 - 1
+export var SHRT_MAX: const short int = 32767
 
-declare literal export var SHRT_MIN: const short int
-declare literal export var SHRT_MAX: const short int
+export var USHRT_MAX: const unsigned short int = (32767 * 2) + 1
 
-declare literal export var USHRT_MAX: const unsigned short int
+export var INT_MIN: const int = -2147483647 - 1
+export var INT_MAX: const int = 2147483647
 
-declare literal export var INT_MIN: const int
-declare literal export var INT_MAX: const int
+export var UINT_MAX: const unsigned int = (2147483647 * 2) + 1
 
-declare literal export var UINT_MAX: const unsigned int
+export var LLONG_MIN: const long long int = 9223372036854775807 - 1
+export var LLONG_MAX: const long long int = 9223372036854775807
 
-declare literal export var LONG_MIN: const long int
-declare literal export var LONG_MAX: const long int
+export var ULLONG_MAX: const unsigned long long int = (9223372036854775807 * 2) + 1
 
-declare literal export var ULONG_MAX: const unsigned long int
+##if platform == "windows"
+	export var LONG_MIN: const long int = INT_MIN
+	export var LONG_MAX: const long int = INT_MAX
 
-declare literal export var LLONG_MIN: const long long int
-declare literal export var LLONG_MAX: const long long int
+	export var ULONG_MAX: const unsigned long int = UINT_MAX
+##else
+	export var LONG_MIN: const long int = LLONG_MIN
+	export var LONG_MAX: const long int = LLONG_MAX
 
-declare literal export var ULLONG_MAX: const unsigned long long int
+	export var ULONG_MAX: const unsigned long int = ULLONG_MAX
+##end if

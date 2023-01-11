@@ -1,11 +1,28 @@
-@@CTranspiler.include("stdio.h");
-
 import size_t, NULL from "./stddef.alta"
-import va_list from "./stdarg.alta"
+#import va_list from "./stdarg.alta"
 import rawconststring, rawstring from "types"
+import int64_t from "./stdint.alta"
 
-export literal @external @typed struct FILE {}
-export literal @external @typed struct fpos_t {}
+export struct FILE {
+	# we only ever deal with pointers to this structure,
+	# so we can leave it empty
+}
+
+##if platform == "linux"
+	struct __mbstate_t {
+		__count: int;
+
+		# actually a union
+		__wch: unsigned int;
+	}
+
+	export struct fpos_t {
+		__pos: int64_t;
+		__state: __mbstate_t;
+	}
+##else if platform == "darwin"
+	export type fpos_t = int64_t
+##end if
 
 declare literal export function remove(filename: rawconststring): int
 declare literal export function rename(oldname: rawconststring, newname: rawconststring): int
@@ -28,14 +45,14 @@ declare literal export function snprintf(buffer: rawstring, size: size_t, format
 declare literal export function sprintf(buffer: rawstring, format: rawconststring, @CTranspiler.vararg data: any...): int
 declare literal export function sscanf(source: rawconststring, format: rawconststring, @CTranspiler.vararg data: any...): int
 
-declare literal export function vfprintf(stream: ptr FILE, format: rawconststring, data: va_list): int
-declare literal export function vfscanf(stream: ptr FILE, format: rawconststring, data: va_list): int
-declare literal export function vprintf(format: rawconststring, data: va_list): int
-declare literal export function vscanf(format: rawconststring, data: va_list): int
+#declare literal export function vfprintf(stream: ptr FILE, format: rawconststring, data: va_list): int
+#declare literal export function vfscanf(stream: ptr FILE, format: rawconststring, data: va_list): int
+#declare literal export function vprintf(format: rawconststring, data: va_list): int
+#declare literal export function vscanf(format: rawconststring, data: va_list): int
 
-declare literal export function vsnprintf(buffer: rawstring, size: size_t, format: rawconststring, data: va_list): int
-declare literal export function vsprintf(buffer: rawstring, format: rawconststring, data: va_list): int
-declare literal export function vsscanf(source: rawconststring, format: rawconststring, data: va_list): int
+#declare literal export function vsnprintf(buffer: rawstring, size: size_t, format: rawconststring, data: va_list): int
+#declare literal export function vsprintf(buffer: rawstring, format: rawconststring, data: va_list): int
+#declare literal export function vsscanf(source: rawconststring, format: rawconststring, data: va_list): int
 
 declare literal export function fgetc(stream: ptr FILE): int
 declare literal export function fgets(buffer: rawstring, count: int, stream: ptr FILE): rawstring
@@ -63,21 +80,40 @@ declare literal export function feof(stream: ptr FILE): int
 declare literal export function ferror(stream: ptr FILE): int
 declare literal export function perror(message: rawconststring): void
 
-declare literal export var BUFSIZ: const int
-declare literal export var EOF: const int
-declare literal export var FILENAME_MAX: const int
-declare literal export var FOPEN_MAX: const int
-declare literal export var L_tmpnam: const int
-declare literal export var TMP_MAX: const int
+##if platform == "linux"
+	export var BUFSIZ: const int = 8192
+	export var EOF: const int = -1
+	export var FILENAME_MAX: const int = 4096
+	export var FOPEN_MAX: const int = 16
+	export var L_tmpnam: const int = 20
+	export var TMP_MAX: const int = 238328
+##else if platform == "darwin"
+	export var BUFSIZ: const int = 1024
+	export var EOF: const int = -1
+	export var FILENAME_MAX: const int = 1024
+	export var FOPEN_MAX: const int = 20
+	export var L_tmpnam: const int = 1024
+	export var TMP_MAX: const int = 308915776
+##end if
 
-declare literal export var _IOFBF: const int
-declare literal export var _IOLBF: const int
-declare literal export var _IONBF: const int
+export var _IOFBF: const int = 0
+export var _IOLBF: const int = 1
+export var _IONBF: const int = 2
 
-declare literal export var SEEK_SET: const int
-declare literal export var SEEK_CUR: const int
-declare literal export var SEEK_END: const int
+export var SEEK_SET: const int = 0
+export var SEEK_CUR: const int = 1
+export var SEEK_END: const int = 2
 
-declare literal export var stdin: ptr FILE
-declare literal export var stdout: ptr FILE
-declare literal export var stderr: ptr FILE
+##if platform == "darwin"
+	declare literal var __stdinp: ptr FILE
+	declare literal var __stdoutp: ptr FILE
+	declare literal var __stderrp: ptr FILE
+
+	export __stdinp as stdin
+	export __stdoutp as stdout
+	export __stderrp as stderr
+##else if platform == "linux"
+	declare literal export var stdin: ptr FILE
+	declare literal export var stdout: ptr FILE
+	declare literal export var stderr: ptr FILE
+##end if

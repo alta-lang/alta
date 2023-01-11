@@ -1,5 +1,3 @@
-@@CTranspiler.include("ctype.h");
-
 declare literal export function isalnum(character: int): bool
 declare literal export function isalpha(character: int): bool
 declare literal export function iscntrl(character: int): bool

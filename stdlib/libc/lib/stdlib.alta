@@ -1,24 +1,18 @@
-@@CTranspiler.include("stdlib.h");
-
 import rawconststring, rawstring from "types"
 import size_t from "./stddef.alta"
 import wchar_t from "./wchar.alta"
 
-# the C standard doesn't enforce an order,
-# so the underlying implementation could put either value first;
-# however, we don't care because these are just declarations to let
-# Alta know these structs exist and have these members.
-export literal @external @typed struct div_t {
-  quot: int;
-  rem: int;
+export struct div_t {
+	quot: int;
+	rem: int;
 }
-export literal @external @typed struct ldiv_t {
-  quot: long int;
-  rem: long int;
+export struct ldiv_t {
+	quot: long int;
+	rem: long int;
 }
-export literal @external @typed struct lldiv_t {
-  quot: long long int;
-  rem: long long int;
+export struct lldiv_t {
+	quot: long long int;
+	rem: long long int;
 }
 
 declare literal export function atof(str: rawconststring): double
@@ -58,8 +52,19 @@ declare literal export function wctomb(destination: rawstring, source: wchar_t):
 declare literal export function mbstowcs(destination: ptr wchar_t, source: rawconststring, max: size_t): size_t
 declare literal export function wcstombs(destination: rawstring, source: ptr const wchar_t, max: size_t): size_t
 
-declare literal export var EXIT_FAILURE: const int
-declare literal export var EXIT_SUCCESS: const int
+export var EXIT_FAILURE: const int = 1
+export var EXIT_SUCCESS: const int = 0
 
-declare literal export var MB_CUR_MAX: const size_t
-declare literal export var RAND_MAX: const int
+##if platform == "linux"
+	declare literal function __ctype_get_mb_cur_max(): size_t
+
+	export @read function MB_CUR_MAX(): size_t {
+		return __ctype_get_mb_cur_max()
+	}
+	export var RAND_MAX: const int = 2147483647
+##else if platform == "darwin"
+	declare literal var __mb_cur_max: const size_t
+
+	export __mb_cur_max as MB_CUR_MAX
+	export var RAND_MAX: const int = 0x7fffffff
+##end if

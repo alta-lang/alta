@@ -1,118 +1,154 @@
-@@CTranspiler.include("stdint.h");
+# TODO: check Windows for these definitions
 
 import size_t, ptrdiff_t from "./stddef.alta"
 import sig_atomic_t from "./signal.alta"
 import wchar_t, wint_t from "./wchar.alta"
 
-# see TODO in stddef.alta at line 3
-export type intmax_t = any
-export type uintmax_t = any
+export type intmax_t = long long int
+export type uintmax_t = unsigned long long int
 
-export type int8_t = any
-export type uint8_t = any
+export type int8_t = signed byte
+export type uint8_t = unsigned byte
 
-export type int16_t = any
-export type uint16_t = any
+export type int16_t = short int
+export type uint16_t = unsigned short int
 
-export type int32_t = any
-export type uint32_t = any
+export type int32_t = int
+export type uint32_t = unsigned int
 
-export type int64_t = any
-export type uint64_t = any
+export type int64_t = long long int
+export type uint64_t = unsigned long long int
 
-export type int_least8_t = any
-export type uint_least8_t = any
+export type int_least8_t = int8_t
+export type uint_least8_t = uint8_t
 
-export type int_least16_t = any
-export type uint_least16_t = any
+export type int_least16_t = int16_t
+export type uint_least16_t = uint16_t
 
-export type int_least32_t = any
-export type uint_least32_t = any
+export type int_least32_t = int32_t
+export type uint_least32_t = uint32_t
 
-export type int_least64_t = any
-export type uint_least64_t = any
+export type int_least64_t = int64_t
+export type uint_least64_t = uint64_t
 
-export type int_fast8_t = any
-export type uint_fast8_t = any
 
-export type int_fast16_t = any
-export type uint_fast16_t = any
+export type int_fast8_t = int8_t
+export type uint_fast8_t = uint8_t
 
-export type int_fast32_t = any
-export type uint_fast32_t = any
+##if platform == "linux"
+	export type int_fast16_t = int64_t
+	export type uint_fast16_t = uint64_t
 
-export type int_fast64_t = any
-export type uint_fast64_t = any
+	export type int_fast32_t = int64_t
+	export type uint_fast32_t = uint64_t
+##else if platform == "darwin"
+	export type int_fast16_t = int16_t
+	export type uint_fast16_t = uint16_t
 
-export type intptr_t = any
-export type uintptr_t = any
+	export type int_fast32_t = int32_t
+	export type uint_fast32_t = uint32_t
+##end if
 
-declare literal export var INTMAX_MIN: const intmax_t
-declare literal export var INTMAX_MAX: const intmax_t
-declare literal export var UINTMAX_MAX: const uintmax_t
+export type int_fast64_t = int64_t
+export type uint_fast64_t = uint64_t
 
-declare literal export var INT8_MIN: const int8_t
-declare literal export var INT8_MAX: const int8_t
-declare literal export var UINT8_MAX: const uint8_t
+##if bitness == "64"
+	export type intptr_t = long long int
+	export type uintptr_t = unsigned long long int
+##else if bitness == "32"
+	export type intptr_t = int
+	export type uintptr = unsigned int
+##end if
 
-declare literal export var INT16_MIN: const int16_t
-declare literal export var INT16_MAX: const int16_t
-declare literal export var UINT16_MAX: const uint16_t
+export var INTMAX_MIN: const intmax_t = -9223372036854775807 - 1
+export var INTMAX_MAX: const intmax_t = 9223372036854775807
+export var UINTMAX_MAX: const uintmax_t = 18446744073709551615
 
-declare literal export var INT32_MIN: const int32_t
-declare literal export var INT32_MAX: const int32_t
-declare literal export var UINT32_MAX: const uint32_t
+export var INT8_MIN: const int8_t = -128
+export var INT8_MAX: const int8_t = 127
+export var UINT8_MAX: const uint8_t = 255
 
-declare literal export var INT64_MIN: const int64_t
-declare literal export var INT64_MAX: const int64_t
-declare literal export var UINT64_MAX: const uint64_t
+export var INT16_MIN: const int16_t = -32768
+export var INT16_MAX: const int16_t = 32767
+export var UINT16_MAX: const uint16_t = 65535
 
-declare literal export var INT_LEAST8_MIN: const int_least8_t
-declare literal export var INT_LEAST8_MAX: const int_least8_t
-declare literal export var UINT_LEAST8_MAX: const uint_least8_t
+export var INT32_MIN: const int32_t = -2147483647 - 1
+export var INT32_MAX: const int32_t = 2147483647
+export var UINT32_MAX: const uint32_t = 4294967295
 
-declare literal export var INT_LEAST16_MIN: const int_least16_t
-declare literal export var INT_LEAST16_MAX: const int_least16_t
-declare literal export var UINT_LEAST16_MAX: const uint_least16_t
+export var INT64_MIN: const int64_t = -9223372036854775807 - 1
+export var INT64_MAX: const int64_t = 9223372036854775807
+export var UINT64_MAX: const uint64_t = 18446744073709551615
 
-declare literal export var INT_LEAST32_MIN: const int_least32_t
-declare literal export var INT_LEAST32_MAX: const int_least32_t
-declare literal export var UINT_LEAST32_MAX: const uint_least32_t
+export var INT_LEAST8_MIN: const int_least8_t = INT8_MIN
+export var INT_LEAST8_MAX: const int_least8_t = INT8_MAX
+export var UINT_LEAST8_MAX: const uint_least8_t = UINT8_MAX
 
-declare literal export var INT_LEAST64_MIN: const int_least64_t
-declare literal export var INT_LEAST64_MAX: const int_least64_t
-declare literal export var UINT_LEAST64_MAX: const uint_least64_t
+export var INT_LEAST16_MIN: const int_least16_t = INT16_MIN
+export var INT_LEAST16_MAX: const int_least16_t = INT16_MAX
+export var UINT_LEAST16_MAX: const uint_least16_t = UINT16_MAX
 
-declare literal export var INT_FAST8_MIN: const int_fast8_t
-declare literal export var INT_FAST8_MAX: const int_fast8_t
-declare literal export var UINT_FAST8_MAX: const uint_fast8_t
+export var INT_LEAST32_MIN: const int_least32_t = INT32_MIN
+export var INT_LEAST32_MAX: const int_least32_t = INT32_MAX
+export var UINT_LEAST32_MAX: const uint_least32_t = UINT32_MAX
 
-declare literal export var INT_FAST16_MIN: const int_fast16_t
-declare literal export var INT_FAST16_MAX: const int_fast16_t
-declare literal export var UINT_FAST16_MAX: const uint_fast16_t
+export var INT_LEAST64_MIN: const int_least64_t = INT64_MIN
+export var INT_LEAST64_MAX: const int_least64_t = INT64_MAX
+export var UINT_LEAST64_MAX: const uint_least64_t = UINT64_MAX
 
-declare literal export var INT_FAST32_MIN: const int_fast32_t
-declare literal export var INT_FAST32_MAX: const int_fast32_t
-declare literal export var UINT_FAST32_MAX: const uint_fast32_t
+export var INT_FAST8_MIN: const int_fast8_t = INT8_MIN
+export var INT_FAST8_MAX: const int_fast8_t = INT8_MAX
+export var UINT_FAST8_MAX: const uint_fast8_t = UINT8_MAX
 
-declare literal export var INT_FAST64_MIN: const int_fast64_t
-declare literal export var INT_FAST64_MAX: const int_fast64_t
-declare literal export var UINT_FAST64_MAX: const uint_fast64_t
+##if platform == "linux"
+	export var INT_FAST16_MIN: const int_fast16_t = INT64_MIN
+	export var INT_FAST16_MAX: const int_fast16_t = INT64_MAX
+	export var UINT_FAST16_MAX: const uint_fast16_t = UINT64_MAX
 
-declare literal export var INTPTR_MIN: const intptr_t
-declare literal export var INTPTR_MAX: const intptr_t
-declare literal export var UINTPTR_MAX: const uintptr_t
+	export var INT_FAST32_MIN: const int_fast32_t = INT64_MIN
+	export var INT_FAST32_MAX: const int_fast32_t = INT64_MAX
+	export var UINT_FAST32_MAX: const uint_fast32_t = UINT64_MAX
+##else if platform == "darwin"
+	export var INT_FAST16_MIN: const int_fast16_t = INT16_MIN
+	export var INT_FAST16_MAX: const int_fast16_t = INT16_MAX
+	export var UINT_FAST16_MAX: const uint_fast16_t = UINT16_MAX
 
-declare literal export var SIZE_MAX: const size_t
+	export var INT_FAST32_MIN: const int_fast32_t = INT32_MIN
+	export var INT_FAST32_MAX: const int_fast32_t = INT32_MAX
+	export var UINT_FAST32_MAX: const uint_fast32_t = UINT32_MAX
+##end if
 
-declare literal export var PTRDIFF_MIN: const ptrdiff_t
-declare literal export var PTRDIFF_MAX: const ptrdiff_t
+export var INT_FAST64_MIN: const int_fast64_t = INT64_MIN
+export var INT_FAST64_MAX: const int_fast64_t = INT64_MAX
+export var UINT_FAST64_MAX: const uint_fast64_t = UINT64_MAX
 
-declare literal export var SIG_ATOMIC_MIN: const sig_atomic_t
-declare literal export var SIG_ATOMIC_MAX: const sig_atomic_t
+##if bitness == "64"
+	export var INTPTR_MIN: const intptr_t = INT64_MIN
+	export var INTPTR_MAX: const intptr_t = INT64_MAX
+	export var UINTPTR_MAX: const uintptr_t = UINT64_MAX
 
-declare literal export var WCHAR_MIN: const wchar_t
-declare literal export var WCHAR_MAX: const wchar_t
+	export var SIZE_MAX: const size_t = UINT64_MAX
+##else if bitness == "32"
+	export var INTPTR_MIN: const intptr_t = INT32_MIN
+	export var INTPTR_MAX: const intptr_t = INT32_MAX
+	export var UINTPTR_MAX: const uintptr_t = UINT32_MAX
 
-declare literal export var WINT_MIN: const wint_t
-declare literal export var WINT_MAX: const wint_t
+	export var SIZE_MAX: const size_t = UINT32_MAX
+##end if
+
+export var PTRDIFF_MIN: const ptrdiff_t = INTPTR_MIN
+export var PTRDIFF_MAX: const ptrdiff_t = INTPTR_MAX
+
+export var SIG_ATOMIC_MIN: const sig_atomic_t = INT32_MIN
+export var SIG_ATOMIC_MAX: const sig_atomic_t = INT32_MAX
+
+export var WCHAR_MIN: const wchar_t = INT32_MIN
+export var WCHAR_MAX: const wchar_t = INT32_MAX
+
+##if platform == "linux"
+	export var WINT_MIN: const wint_t = 0
+	export var WINT_MAX: const wint_t = UINT32_MAX
+##else if platform == "darwin"
+	export var WINT_MIN: const wint_t = INT32_MIN
+	export var WINT_MAX: const wint_t = INT32_MAX
+##end if

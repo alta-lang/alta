@@ -51,36 +51,132 @@ import Exception from "exceptions"
 	export var defaultPathComponentSeparator: const ptr const char = "\\"
 	export var defaultPathSeparator: const ptr const char = ";"
 ##else
-	@@CTranspiler.include("unistd.h");
-	@@CTranspiler.include("sys/param.h");
-	@@CTranspiler.include("sys/stat.h");
-	@@CTranspiler.include("errno.h");
-	@@CTranspiler.include("dirent.h");
-
-	declare literal var MAXPATHLEN: Size
+	##if platform == "linux"
+		var MAXPATHLEN: Size = 4096
+	##else if platform == "darwin"
+		var MAXPATHLEN: Size = 1024
+	##end if
 	declare literal function getcwd(buf: ptr byte, size: Size): ptr byte
 
-	# we need to do this for the same reason as the `_stat` structure on Windows
-	literal @external @CTranspiler.name("stat") struct StatStruct {
-		st_mode: int;
-	}
+	##if platform == "linux"
+		type __dev_t = unsigned long int
+		type __ino_t = unsigned long int
+		type __nlink_t = unsigned long int
+		type __mode_t = unsigned int
+		type __uid_t = unsigned int
+		type __gid_t = unsigned int
+		type __off_t = long int
+		type __blksize_t = long int
+		type __blkcnt_t = long int
+		type __syscall_slong_t = long int
+		type __time_t = long int
+
+		struct timespec {
+			tv_sec: __time_t;
+			tv_nsec: __syscall_slong_t;
+		}
+
+		struct StatStruct {
+			st_dev: __dev_t;
+			st_ino: __ino_t;
+			st_nlink: __nlink_t;
+			st_mode: __mode_t;
+			st_uid: __uid_t;
+			st_gid: __gid_t;
+			__pad0: int;
+			st_rdev: __dev_t;
+			st_size: __off_t;
+			st_blksize: __blksize_t;
+			st_blocks: __blkcnt_t;
+			st_atim: timespec;
+			st_mtim: timespec;
+			st_ctim: timespec;
+			__glibc_reserved0: __syscall_slong_t;
+			__glibc_reserved1: __syscall_slong_t;
+			__glibc_reserved2: __syscall_slong_t;
+		}
+	##else if platform == "darwin"
+		import uint32_t, int32_t, int64_t, uint16_t, uint8_t, uint64_t from "libc/lib/stdint"
+
+		type dev_t = int32_t
+		type mode_t = uint16_t
+		type nlink_t = uint16_t
+		type __darwin_ino64_t = uint64_t
+		type uid_t = uint32_t
+		type gid_t = uint32_t
+		type off_t = int64_t
+		type blkcnt_t = int64_t
+		type blksize_t = int32_t
+		type __darwin_time_t = long int
+
+		struct timespec {
+			tv_sec: __darwin_time_t;
+			tv_nsec: long int;
+		};
+
+		struct StatStruct {
+			st_dev: dev_t;
+			st_mode: mode_t;
+			st_nlink: nlink_t;
+			st_ino: __darwin_ino64_t;
+			st_uid: uid_t;
+			st_gid: gid_t;
+			st_rdev: dev_t;
+			st_atimespec: timespec;
+			st_mtimespec: timespec;
+			st_ctimespec: timespec;
+			st_birthtimespec: timespec;
+			st_size: off_t;
+			st_blocks: blkcnt_t;
+			st_blksize: blksize_t;
+			st_flags: uint32_t;
+			st_gen: uint32_t;
+			st_lspare: int32_t;
+			st_qspare0: int64_t;
+			st_qspare1: int64_t;
+		}
+	##end if
+
 	declare literal function stat(path: ptr const byte, buffer: ptr StatStruct): int
 	using statFunc = stat
 
-	declare literal var S_IFMT: int
+	var S_IFMT: int = 0o170000
 
-	declare literal var S_IFSOCK: int
-	declare literal var S_IFLNK: int
-	declare literal var S_IFREG: int
-	declare literal var S_IFBLK: int
-	declare literal var S_IFDIR: int
-	declare literal var S_IFCHR: int
-	declare literal var S_IFIFO: int
+	var S_IFSOCK: int = 0o140000
+	var S_IFLNK: int = 0o120000
+	var S_IFREG: int = 0o100000
+	var S_IFBLK: int = 0o060000
+	var S_IFDIR: int = 0o040000
+	var S_IFCHR: int = 0o020000
+	var S_IFIFO: int = 0o010000
 
-	type DIR = any
-	literal @external struct dirent {
-		d_name: ptr byte;
+	struct DIR {
+		# we use this opaquely, so an empty struct is sufficient
 	}
+
+	##if platform == "linux"
+		struct dirent {
+			d_ino: __ino_t;
+			d_off: __off_t;
+			d_reclen: unsigned short int;
+			d_type: unsigned char;
+
+			# this is actually char[256]
+			d_name: byte;
+		}
+	##else if platform == "darwin"
+		struct dirent {
+			d_ino: uint64_t;
+			d_seekoff: uint64_t;
+			d_reclen: uint16_t;
+			d_namlen: uint16_t;
+			d_type: uint8_t;
+
+			# this is actually char[1024]
+			d_name: byte;
+		}
+	##end if
+
 	declare literal function opendir(name: ptr const byte): ptr DIR
 	declare literal function readdir(dirp: ptr DIR): ptr dirent
 	declare literal function closedir(dirp: ptr DIR): int
@@ -434,7 +530,7 @@ export class Path {
 		##else
 			let dir = opendir(this.resolve())
 			while let info = readdir(dir) {
-				yield this / info.d_name
+				yield this / (&info.d_name)
 			}
 			closedir(dir)
 			return;

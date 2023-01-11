@@ -1,6 +1,12 @@
-@@CTranspiler.include("stddef.h");
+# TODO: check Windows
+##if bitness == "64"
+	export type size_t = unsigned long long int
+	export type ptrdiff_t = long long int
+##else if bitness == "32"
+	export type size_t = unsigned int
+	export type ptrdiff_t = int
+##end if
 
-export type size_t = any
-export type ptrdiff_t = any
-
-declare literal export var NULL: const ptr void
+# technically platform- and architecture-dependent, but in reality,
+# none of the systems we care about use anything else
+export var NULL: const ptr void = 0 as ptr void

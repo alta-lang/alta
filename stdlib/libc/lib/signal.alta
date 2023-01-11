@@ -1,17 +1,19 @@
-@@CTranspiler.include("signal.h");
+# TODO: check Windows for these definitions
+# Linux and macOS both agree
 
-export type sig_atomic_t = any
+export type sig_atomic_t = int
 
 declare literal export function signal(signal: int, handler: (int) -> void): (int) -> void
 declare literal export function raise(signal: int): int
 
-declare literal export var SIGABRT: const int
-declare literal export var SIGFPE: const int
-declare literal export var SIGILL: const int
-declare literal export var SIGINT: const int
-declare literal export var SIGSEGV: const int
-declare literal export var SIGTERM: const int
 
-declare literal export var SIG_DFL: (int) -> void
-declare literal export var SIG_IGN: (int) -> void
-declare literal export var SIG_ERR: (int) -> void
+export var SIGABRT: const int = 6
+export var SIGFPE: const int = 8
+export var SIGILL: const int = 4
+export var SIGINT: const int = 2
+export var SIGSEGV: const int = 11
+export var SIGTERM: const int = 15
+
+export var SIG_DFL: const (int) -> void = 0 as (int) -> void
+export var SIG_IGN: const (int) -> void = 1 as (int) -> void
+export var SIG_ERR: const (int) -> void = -1 as (int) -> void

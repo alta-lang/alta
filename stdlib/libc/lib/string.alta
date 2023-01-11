@@ -1,5 +1,3 @@
-@@CTranspiler.include("string.h");
-
 import NULL, size_t from "./stddef.alta"
 import rawstring, rawconststring from "types"
 

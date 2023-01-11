@@ -1,5 +1,3 @@
-@@CTranspiler.include("math.h");
-
 ##if platform == "linux"
 @@CTranspiler.link("m");
 ##end if
@@ -253,27 +251,26 @@ declare literal export function islessgreater(x: any, y: any): bool
 
 declare literal export function isunordered(x: any, y: any): bool
 
-declare literal export var HUGE_VALF: const float
-declare literal export var HUGE_VAL: const double
-declare literal export var HUGE_VALL: const long double
+# TODO
+#export var HUGE_VALF: const float = __builtin_huge_valf()
+#export var HUGE_VAL: const double = __builtin_huge_val()
+#export var HUGE_VALL: const long double = __builtin_huge_vall()
+#export var INFINITY: const float = __builtin_huge_valf()
+#export var NAN: const float = __builtin_nanf("0x7fc00000")
 
-declare literal export var INFINITY: const float
+#export var FP_FAST_FMAF: const int = FP_FAST_FMAF
+#export var FP_FAST_FMA: const int = FP_FAST_FMA
+#export var FP_FAST_FMAL: const int = FP_FAST_FMAL
 
-declare literal export var NAN: const float
+export var FP_ILOGB0: const int = -2147483647 - 1
+export var FP_ILOGBNAN: const int = -2147483647 - 1
 
-declare literal export var FP_FAST_FMAF: const int
-declare literal export var FP_FAST_FMA: const int
-declare literal export var FP_FAST_FMAL: const int
+export var MATH_ERRNO: const int = 1
+export var MATH_ERREXCEPT: const int = 2
+#export var math_errhandling: const int = (__math_errhandling())
 
-declare literal export var FP_ILOGB0: const int
-declare literal export var FP_ILOGBNAN: const int
-
-declare literal export var MATH_ERRNO: const int
-declare literal export var MATH_ERREXCEPT: const int
-declare literal export var math_errhandling: const int
-
-declare literal export var FP_NORMAL: const int
-declare literal export var FP_SUBNORMAL: const int
-declare literal export var FP_ZERO: const int
-declare literal export var FP_INFINITE: const int
-declare literal export var FP_NAN: const int
+export var FP_NORMAL: const int = 4
+export var FP_SUBNORMAL: const int = 5
+export var FP_ZERO: const int = 3
+export var FP_INFINITE: const int = 2
+export var FP_NAN: const int = 1

@@ -1,6 +1,168 @@
-@@CTranspiler.include("setjmp.h");
+# TODO: Windows (both x86_64 and AARCH64) and Linux (AARCH64)
 
-export literal @external @typed struct jmp_buf {}
+##if platform == "darwin"
+	##if arch == "x86_64"
+		# this is actually defined as `int[((9 * 2) + 3 + 16)]`
+		#                             (i.e. `int[37]`)
+		# FIXME: Alta needs a way to define arrays
+		export struct jmp_buf {
+			 _0: int;
+			 _1: int;
+			 _2: int;
+			 _3: int;
+			 _4: int;
+			 _5: int;
+			 _6: int;
+			 _7: int;
+			 _8: int;
+			 _9: int;
+			_10: int;
+			_11: int;
+			_12: int;
+			_13: int;
+			_14: int;
+			_15: int;
+			_16: int;
+			_17: int;
+			_18: int;
+			_19: int;
+			_20: int;
+			_21: int;
+			_22: int;
+			_23: int;
+			_24: int;
+			_25: int;
+			_26: int;
+			_27: int;
+			_28: int;
+			_29: int;
+			_30: int;
+			_31: int;
+			_32: int;
+			_33: int;
+			_34: int;
+			_35: int;
+			_36: int;
+		}
+	##else if arch == "aarch64"
+		# `int[((14 + 8 + 2) * 2)]`
+		# (i.e. `int[48]`)
+		export struct jmp_buf {
+			 _0: int;
+			 _1: int;
+			 _2: int;
+			 _3: int;
+			 _4: int;
+			 _5: int;
+			 _6: int;
+			 _7: int;
+			 _8: int;
+			 _9: int;
+			_10: int;
+			_11: int;
+			_12: int;
+			_13: int;
+			_14: int;
+			_15: int;
+			_16: int;
+			_17: int;
+			_18: int;
+			_19: int;
+			_20: int;
+			_21: int;
+			_22: int;
+			_23: int;
+			_24: int;
+			_25: int;
+			_26: int;
+			_27: int;
+			_28: int;
+			_29: int;
+			_30: int;
+			_31: int;
+			_32: int;
+			_33: int;
+			_34: int;
+			_35: int;
+			_36: int;
+			_37: int;
+			_38: int;
+			_39: int;
+			_40: int;
+			_41: int;
+			_42: int;
+			_43: int;
+			_44: int;
+			_45: int;
+			_46: int;
+			_47: int;
+		}
+	##else if arch == "i386"
+		# `int[(18)]`
+		export struct jmp_buf {
+			 _0: int;
+			 _1: int;
+			 _2: int;
+			 _3: int;
+			 _4: int;
+			 _5: int;
+			 _6: int;
+			 _7: int;
+			 _8: int;
+			 _9: int;
+			_10: int;
+			_11: int;
+			_12: int;
+			_13: int;
+			_14: int;
+			_15: int;
+			_16: int;
+			_17: int;
+		}
+	##end if
+##else if platform == "linux"
+	##if arch == "x86_64"
+		# `long int[8]`
+		# (i.e. `long int[8]`)
+		struct __jmp_buf {
+			_0: long int;
+			_1: long int;
+			_2: long int;
+			_3: long int;
+			_4: long int;
+			_5: long int;
+			_6: long int;
+			_7: long int;
+		}
 
-declare literal export function longjmp(environment: jmp_buf, state: int): void
-declare literal export function setjmp(environment: jmp_buf): int
+		# `unsigned long int[(1024 / (8 * sizeof (unsigned long int)))]`
+		# (i.e. `unsigned long int[16]`)
+		struct __sigset_t {
+			 _0: unsigned long int;
+			 _1: unsigned long int;
+			 _2: unsigned long int;
+			 _3: unsigned long int;
+			 _4: unsigned long int;
+			 _5: unsigned long int;
+			 _6: unsigned long int;
+			 _7: unsigned long int;
+			 _8: unsigned long int;
+			 _9: unsigned long int;
+			_10: unsigned long int;
+			_11: unsigned long int;
+			_12: unsigned long int;
+			_13: unsigned long int;
+			_14: unsigned long int;
+			_15: unsigned long int;
+		}
+
+		export struct jmp_buf {
+			__jmpbuf: __jmp_buf;
+			__mask_was_saved: int;
+			__saved_mask: __sigset_t;
+		}
+	##end if
+##end if
+
+declare literal export function longjmp(environment: ptr jmp_buf, state: int): void
+declare literal export function setjmp(environment: ptr jmp_buf): int

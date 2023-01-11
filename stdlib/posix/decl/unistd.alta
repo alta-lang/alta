@@ -1,3 +1,1 @@
-@@CTranspiler.include("unistd.h");
-
 declare literal export function close(handle: int): int

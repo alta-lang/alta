@@ -1,16 +1,25 @@
-@@CTranspiler.include("fcntl.h");
+export var F_DUPFD: const int = 0
+export var F_GETFD: const int = 1
+export var F_SETFD: const int = 2
+export var F_GETFL: const int = 3
+export var F_SETFL: const int = 4
 
-declare literal export var O_NONBLOCK: const int
+##if platform == "linux"
+	export var O_NONBLOCK: const int = 0o4000
 
-declare literal export var F_DUPFD: const int
-declare literal export var F_GETFD: const int
-declare literal export var F_SETFD: const int
-declare literal export var F_GETFL: const int
-declare literal export var F_SETFL: const int
-declare literal export var F_GETLK: const int
-declare literal export var F_SETLK: const int
-declare literal export var F_SETLKW: const int
-declare literal export var F_GETOWN: const int
-declare literal export var F_SETOWN: const int
+	export var F_GETLK: const int = 5
+	export var F_SETLK: const int = 6
+	export var F_SETLKW: const int = 7
+	export var F_GETOWN: const int = 9
+	export var F_SETOWN: const int = 8
+##else if platform == "darwin"
+	export var O_NONBLOCK: const int = 0x00000004
+
+	export var F_GETLK: const int = 7
+	export var F_SETLK: const int = 8
+	export var F_SETLKW: const int = 9
+	export var F_GETOWN: const int = 5
+	export var F_SETOWN: const int = 6
+##end if
 
 declare literal export function fcntl(handle: int, command: int, @CTranspiler.vararg args: any...): int

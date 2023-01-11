@@ -1,83 +1,157 @@
-@@CTranspiler.include("errno.h");
+export * from "libc/lib/errno"
 
-declare literal export var errno: int
-
-declare literal export var E2BIG: const int
-declare literal export var EACCES: const int
-declare literal export var EADDRINUSE: const int
-declare literal export var EADDRNOTAVAIL: const int
-declare literal export var EAFNOSUPPORT: const int
-declare literal export var EAGAIN: const int
-declare literal export var EALREADY: const int
-declare literal export var EBADF: const int
-declare literal export var EBADMSG: const int
-declare literal export var EBUSY: const int
-declare literal export var ECANCELED: const int
-declare literal export var ECHILD: const int
-declare literal export var ECONNABORTED: const int
-declare literal export var ECONNREFUSED: const int
-declare literal export var ECONNRESET: const int
-declare literal export var EDEADLK: const int
-declare literal export var EDESTADDRREQ: const int
-declare literal export var EDOM: const int
-declare literal export var EDQUOT: const int
-declare literal export var EEXIST: const int
-declare literal export var EFAULT: const int
-declare literal export var EFBIG: const int
-declare literal export var EHOSTUNREACH: const int
-declare literal export var EIDRM: const int
-declare literal export var EILSEQ: const int
-declare literal export var EINPROGRESS: const int
-declare literal export var EINTR: const int
-declare literal export var EINVAL: const int
-declare literal export var EIO: const int
-declare literal export var EISCONN: const int
-declare literal export var EISDIR: const int
-declare literal export var ELOOP: const int
-declare literal export var EMFILE: const int
-declare literal export var EMLINK: const int
-declare literal export var EMSGSIZE: const int
-declare literal export var EMULTIHOP: const int
-declare literal export var ENAMETOOLONG: const int
-declare literal export var ENETDOWN: const int
-declare literal export var ENETRESET: const int
-declare literal export var ENETUNREACH: const int
-declare literal export var ENFILE: const int
-declare literal export var ENOBUFS: const int
-declare literal export var ENODATA: const int
-declare literal export var ENODEV: const int
-declare literal export var ENOENT: const int
-declare literal export var ENOEXEC: const int
-declare literal export var ENOLCK: const int
-declare literal export var ENOLINK: const int
-declare literal export var ENOMEM: const int
-declare literal export var ENOMSG: const int
-declare literal export var ENOPROTOOPT: const int
-declare literal export var ENOSPC: const int
-declare literal export var ENOSR: const int
-declare literal export var ENOSTR: const int
-declare literal export var ENOSYS: const int
-declare literal export var ENOTCONN: const int
-declare literal export var ENOTDIR: const int
-declare literal export var ENOTEMPTY: const int
-declare literal export var ENOTSOCK: const int
-declare literal export var ENOTSUP: const int
-declare literal export var ENOTTY: const int
-declare literal export var ENXIO: const int
-declare literal export var EOPNOTSUPP: const int
-declare literal export var EOVERFLOW: const int
-declare literal export var EPERM: const int
-declare literal export var EPIPE: const int
-declare literal export var EPROTO: const int
-declare literal export var EPROTONOSUPPORT: const int
-declare literal export var EPROTOTYPE: const int
-declare literal export var ERANGE: const int
-declare literal export var EROFS: const int
-declare literal export var ESPIPE: const int
-declare literal export var ESRCH: const int
-declare literal export var ESTALE: const int
-declare literal export var ETIME: const int
-declare literal export var ETIMEDOUT: const int
-declare literal export var ETXTBSY: const int
-declare literal export var EWOULDBLOCK: const int
-declare literal export var EXDEV: const int
+##if platform == "linux"
+	export var E2BIG: const int = 7
+	export var EACCES: const int = 13
+	export var EADDRINUSE: const int = 98
+	export var EADDRNOTAVAIL: const int = 99
+	export var EAFNOSUPPORT: const int = 97
+	export var EAGAIN: const int = 11
+	export var EALREADY: const int = 114
+	export var EBADF: const int = 9
+	export var EBADMSG: const int = 74
+	export var EBUSY: const int = 16
+	export var ECANCELED: const int = 125
+	export var ECHILD: const int = 10
+	export var ECONNABORTED: const int = 103
+	export var ECONNREFUSED: const int = 111
+	export var ECONNRESET: const int = 104
+	export var EDEADLK: const int = 35
+	export var EDESTADDRREQ: const int = 89
+	export var EDQUOT: const int = 122
+	export var EEXIST: const int = 17
+	export var EFAULT: const int = 14
+	export var EFBIG: const int = 27
+	export var EHOSTUNREACH: const int = 113
+	export var EIDRM: const int = 43
+	export var EINPROGRESS: const int = 115
+	export var EINTR: const int = 4
+	export var EINVAL: const int = 22
+	export var EIO: const int = 5
+	export var EISCONN: const int = 106
+	export var EISDIR: const int = 21
+	export var ELOOP: const int = 40
+	export var EMFILE: const int = 24
+	export var EMLINK: const int = 31
+	export var EMSGSIZE: const int = 90
+	export var EMULTIHOP: const int = 72
+	export var ENAMETOOLONG: const int = 36
+	export var ENETDOWN: const int = 100
+	export var ENETRESET: const int = 102
+	export var ENETUNREACH: const int = 101
+	export var ENFILE: const int = 23
+	export var ENOBUFS: const int = 105
+	export var ENODATA: const int = 61
+	export var ENODEV: const int = 19
+	export var ENOENT: const int = 2
+	export var ENOEXEC: const int = 8
+	export var ENOLCK: const int = 37
+	export var ENOLINK: const int = 67
+	export var ENOMEM: const int = 12
+	export var ENOMSG: const int = 42
+	export var ENOPROTOOPT: const int = 92
+	export var ENOSPC: const int = 28
+	export var ENOSR: const int = 63
+	export var ENOSTR: const int = 60
+	export var ENOSYS: const int = 38
+	export var ENOTCONN: const int = 107
+	export var ENOTDIR: const int = 20
+	export var ENOTEMPTY: const int = 39
+	export var ENOTSOCK: const int = 88
+	export var ENOTSUP: const int = 95
+	export var ENOTTY: const int = 25
+	export var ENXIO: const int = 6
+	export var EOPNOTSUPP: const int = 95
+	export var EOVERFLOW: const int = 75
+	export var EPERM: const int = 1
+	export var EPIPE: const int = 32
+	export var EPROTO: const int = 71
+	export var EPROTONOSUPPORT: const int = 93
+	export var EPROTOTYPE: const int = 91
+	export var EROFS: const int = 30
+	export var ESPIPE: const int = 29
+	export var ESRCH: const int = 3
+	export var ESTALE: const int = 116
+	export var ETIME: const int = 62
+	export var ETIMEDOUT: const int = 110
+	export var ETXTBSY: const int = 26
+	export var EWOULDBLOCK: const int = 11
+	export var EXDEV: const int = 18
+##else if platform == "darwin"
+	export var E2BIG: const int = 7
+	export var EACCES: const int = 13
+	export var EADDRINUSE: const int = 48
+	export var EADDRNOTAVAIL: const int = 49
+	export var EAFNOSUPPORT: const int = 47
+	export var EAGAIN: const int = 35
+	export var EALREADY: const int = 37
+	export var EBADF: const int = 9
+	export var EBADMSG: const int = 94
+	export var EBUSY: const int = 16
+	export var ECANCELED: const int = 89
+	export var ECHILD: const int = 10
+	export var ECONNABORTED: const int = 53
+	export var ECONNREFUSED: const int = 61
+	export var ECONNRESET: const int = 54
+	export var EDEADLK: const int = 11
+	export var EDESTADDRREQ: const int = 39
+	export var EDQUOT: const int = 69
+	export var EEXIST: const int = 17
+	export var EFAULT: const int = 14
+	export var EFBIG: const int = 27
+	export var EHOSTUNREACH: const int = 65
+	export var EIDRM: const int = 90
+	export var EINPROGRESS: const int = 36
+	export var EINTR: const int = 4
+	export var EINVAL: const int = 22
+	export var EIO: const int = 5
+	export var EISCONN: const int = 56
+	export var EISDIR: const int = 21
+	export var ELOOP: const int = 62
+	export var EMFILE: const int = 24
+	export var EMLINK: const int = 31
+	export var EMSGSIZE: const int = 40
+	export var EMULTIHOP: const int = 95
+	export var ENAMETOOLONG: const int = 63
+	export var ENETDOWN: const int = 50
+	export var ENETRESET: const int = 52
+	export var ENETUNREACH: const int = 51
+	export var ENFILE: const int = 23
+	export var ENOBUFS: const int = 55
+	export var ENODATA: const int = 96
+	export var ENODEV: const int = 19
+	export var ENOENT: const int = 2
+	export var ENOEXEC: const int = 8
+	export var ENOLCK: const int = 77
+	export var ENOLINK: const int = 97
+	export var ENOMEM: const int = 12
+	export var ENOMSG: const int = 91
+	export var ENOPROTOOPT: const int = 42
+	export var ENOSPC: const int = 28
+	export var ENOSR: const int = 98
+	export var ENOSTR: const int = 99
+	export var ENOSYS: const int = 78
+	export var ENOTCONN: const int = 57
+	export var ENOTDIR: const int = 20
+	export var ENOTEMPTY: const int = 66
+	export var ENOTSOCK: const int = 38
+	export var ENOTSUP: const int = 45
+	export var ENOTTY: const int = 25
+	export var ENXIO: const int = 6
+	export var EOPNOTSUPP: const int = 102
+	export var EOVERFLOW: const int = 84
+	export var EPERM: const int = 1
+	export var EPIPE: const int = 32
+	export var EPROTO: const int = 100
+	export var EPROTONOSUPPORT: const int = 43
+	export var EPROTOTYPE: const int = 41
+	export var EROFS: const int = 30
+	export var ESPIPE: const int = 29
+	export var ESRCH: const int = 3
+	export var ESTALE: const int = 70
+	export var ETIME: const int = 101
+	export var ETIMEDOUT: const int = 60
+	export var ETXTBSY: const int = 26
+	export var EWOULDBLOCK: const int = 35
+	export var EXDEV: const int = 18
+##end if

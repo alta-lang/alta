@@ -1,8 +1,6 @@
-@@CTranspiler.include("locale.h");
-
 import rawstring, rawconststring from "types"
 
-export literal @external struct lconv {
+export struct lconv {
   decimal_point: rawstring;
   thousands_sep: rawstring;
   grouping: rawstring;

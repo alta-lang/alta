@@ -1,21 +1,30 @@
-@@CTranspiler.include("time.h");
+# TODO: check Windows for all these definitions
 
 import size_t, NULL from "./stddef.alta"
 import rawstring, rawconststring from "types"
 
-export type clock_t = any
-export type time_t = any
+##if platform == "linux"
+	export type clock_t = long int
+##else if platform == "darwin"
+	export type clock_t = unsigned long int
+##end if
 
-export literal @external struct tm {
-  tm_sec: int;
-  tm_min: int;
-  tm_hour: int;
-  tm_mday: int;
-  tm_mon: int;
-  tm_year: int;
-  tm_wday: int;
-  tm_yday: int;
-  tm_isdst: int;
+export type time_t = long long int
+
+export struct tm {
+	tm_sec: int;
+	tm_min: int;
+	tm_hour: int;
+	tm_mday: int;
+	tm_mon: int;
+	tm_year: int;
+	tm_wday: int;
+	tm_yday: int;
+	tm_isdst: int;
+##if platform == "darwin" || platform == "linux"
+	tm_gmtoff: long int;
+	tm_zone: rawconststring;
+##end if
 }
 
 declare literal export function clock(): clock_t
@@ -29,4 +38,4 @@ declare literal export function gmtime(timer: ptr const time_t): ptr tm
 declare literal export function localtime(timer: ptr const time_t): ptr tm
 declare literal export function strftime(destination: rawstring, size: size_t, format: rawconststring, time: ptr const tm): size_t
 
-declare literal export var CLOCKS_PER_SEC: const clock_t
+declare literal export var CLOCKS_PER_SEC: const clock_t = 1000000
