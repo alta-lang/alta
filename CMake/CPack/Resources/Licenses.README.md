@@ -14,4 +14,3 @@ Here are links to the original source code repositories of each project:
   * `semver.c.LICENSE.txt` - https://github.com/h2non/semver.c
   * `variant.LICENSE.txt` - https://github.com/mpark/variant
   * `yaml-cpp.LICENSE.txt` - https://github.com/jbeder/yaml-cpp
-  * `Boost--Filesystem.LICENSE.txt` - https://github.com/boostorg/filesystem

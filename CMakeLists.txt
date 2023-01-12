@@ -161,10 +161,6 @@ install(FILES "${PROJECT_SOURCE_DIR}/deps/talta/deps/alta-core/deps/yaml-cpp/LIC
   COMPONENT Core
   RENAME "yaml-cpp.LICENSE.txt"
 )
-install(FILES "${PROJECT_SOURCE_DIR}/CMake/CPack/Resources/Boost--Filesystem.LICENSE.txt"
-  DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
-  COMPONENT Core
-)
 
 # install documentation
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/docs/language-reference/"

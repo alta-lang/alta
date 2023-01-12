@@ -1,0 +1,3 @@
+[submodule "deps/alta-core"]
+	path = deps/alta-core
+	url = https://github.com/alta-lang/alta-core.git
