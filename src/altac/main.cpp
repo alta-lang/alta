@@ -1049,7 +1049,7 @@ int main(int argc, char** argv) {
 
         std::ofstream tmpHeaderOut(tmppath.toString());
 
-        tmpHeaderOut << "// auto-generated. do not modify. resistance is futile.\n";
+        tmpHeaderOut << "// auto-generated. do not modify.\n";
         tmpHeaderOut << "#ifndef _ALTA_RUNTIME_BRIDGE_H\n";
         tmpHeaderOut << "#define _ALTA_RUNTIME_BRIDGE_H\n";
         tmpHeaderOut << "\n";
