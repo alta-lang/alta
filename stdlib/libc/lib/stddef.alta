@@ -1,7 +1,12 @@
 # TODO: check Windows
 ##if bitness == "64"
-	export type size_t = unsigned long long int
-	export type ptrdiff_t = long long int
+	##if platform == "windows"
+		export type size_t = unsigned long long int
+		export type ptrdiff_t = long long int
+	##else
+		export type size_t = unsigned long int
+		export type ptrdiff_t = long int
+	##end if
 ##else if bitness == "32"
 	export type size_t = unsigned int
 	export type ptrdiff_t = int

@@ -63,7 +63,7 @@ export var EXIT_SUCCESS: const int = 0
 	}
 	export var RAND_MAX: const int = 2147483647
 ##else if platform == "darwin"
-	declare literal var __mb_cur_max: const size_t
+	declare literal var __mb_cur_max: int
 
 	export __mb_cur_max as MB_CUR_MAX
 	export var RAND_MAX: const int = 0x7fffffff
