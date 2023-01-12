@@ -249,7 +249,7 @@ declare export literal function _Alta_release_capture_class_state_cache(wrapper:
 
 declare export literal function _Alta_common_dtor(klass: ptr _Alta_basic_class, isPersistent: bool): void
 
-declare export literal function _Alta_get_child(klass: ptr _Alta_basic_class, count: Size, @CTranspiler.vararg path: ptr byte...): ptr _Alta_basic_class
+declare export literal function _Alta_get_child(klass: ptr _Alta_basic_class, count: Size, @native.vararg path: ptr byte...): ptr _Alta_basic_class
 declare export literal function _Alta_get_real_version(klass: ptr _Alta_basic_class): ptr _Alta_basic_class
 declare export literal function _Alta_get_root_instance(klass: ptr _Alta_basic_class): ptr _Alta_basic_class
 

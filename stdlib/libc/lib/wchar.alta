@@ -8,4 +8,4 @@ export type wchar_t = int
 	export type wint_t = int
 ##end if
 
-declare literal export function wprintf(format: ptr const wchar_t, @CTranspiler.vararg data: any...): int
+declare literal export function wprintf(format: ptr const wchar_t, @native.vararg data: any...): int

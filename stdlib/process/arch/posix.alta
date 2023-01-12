@@ -114,7 +114,7 @@ type pid_t = int
 declare literal function pipe(pipefd: ptr int): int
 declare literal function posix_spawn(pid: ptr pid_t, path: ptr const byte, file_actions: ptr const posix_spawn_file_actions_t, attrp: ptr const posix_spawnattr_t, argv: ptr const ptr byte, envp: ptr const ptr byte): int
 declare literal function close(fd: int): int
-declare literal function ioctl(fd: int, request: unsigned long int, @CTranspiler.vararg data: any...): int
+declare literal function ioctl(fd: int, request: unsigned long int, @native.vararg data: any...): int
 declare literal function read(fd: int, buf: ptr void, count: Size): ssize_t
 declare literal function write(fd: int, buf: ptr const void, count: Size): ssize_t
 

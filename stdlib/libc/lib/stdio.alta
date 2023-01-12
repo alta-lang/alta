@@ -36,14 +36,14 @@ declare literal export function freopen(filename: rawconststring, mode: rawconst
 declare literal export function setbuf(stream: ptr FILE, buffer: rawstring): void
 declare literal export function setvbuf(stream: ptr FILE, buffer: rawstring, mode: int, bufferSize: size_t): int
 
-declare literal export function fprintf(stream: ptr FILE, format: rawconststring, @CTranspiler.vararg data: any...): int
-declare literal export function fscanf(stream: ptr FILE, format: rawconststring, @CTranspiler.vararg data: any...): int
-declare literal export function printf(format: rawconststring, @CTranspiler.vararg data: any...): int
-declare literal export function scanf(format: rawconststring, @CTranspiler.vararg data: any...): int
+declare literal export function fprintf(stream: ptr FILE, format: rawconststring, @native.vararg data: any...): int
+declare literal export function fscanf(stream: ptr FILE, format: rawconststring, @native.vararg data: any...): int
+declare literal export function printf(format: rawconststring, @native.vararg data: any...): int
+declare literal export function scanf(format: rawconststring, @native.vararg data: any...): int
 
-declare literal export function snprintf(buffer: rawstring, size: size_t, format: rawconststring, @CTranspiler.vararg data: any...): int
-declare literal export function sprintf(buffer: rawstring, format: rawconststring, @CTranspiler.vararg data: any...): int
-declare literal export function sscanf(source: rawconststring, format: rawconststring, @CTranspiler.vararg data: any...): int
+declare literal export function snprintf(buffer: rawstring, size: size_t, format: rawconststring, @native.vararg data: any...): int
+declare literal export function sprintf(buffer: rawstring, format: rawconststring, @native.vararg data: any...): int
+declare literal export function sscanf(source: rawconststring, format: rawconststring, @native.vararg data: any...): int
 
 #declare literal export function vfprintf(stream: ptr FILE, format: rawconststring, data: va_list): int
 #declare literal export function vfscanf(stream: ptr FILE, format: rawconststring, data: va_list): int

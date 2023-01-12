@@ -7,4 +7,4 @@ import uint32_t from "libc/lib/stdint"
 	export var FIONREAD: const unsigned long int = 0x4004667f
 ##end if
 
-declare literal export function ioctl(fd: int, request: unsigned long int, @CTranspiler.vararg args: any...): int
+declare literal export function ioctl(fd: int, request: unsigned long int, @native.vararg args: any...): int

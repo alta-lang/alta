@@ -22,4 +22,4 @@ export var F_SETFL: const int = 4
 	export var F_SETOWN: const int = 6
 ##end if
 
-declare literal export function fcntl(handle: int, command: int, @CTranspiler.vararg args: any...): int
+declare literal export function fcntl(handle: int, command: int, @native.vararg args: any...): int
