@@ -1,5 +1,5 @@
-#ifndef ALTA_CLI_PARSER_HPP
-#define ALTA_CLI_PARSER_HPP
+#ifndef ALTAC_PARSER_HPP
+#define ALTAC_PARSER_HPP
 
 #include <string>
 #include <vector>
@@ -117,4 +117,4 @@ namespace CLI {
   };
 };
 
-#endif // ALTA_CLI_PARSER_HPP
+#endif // ALTAC_PARSER_HPP

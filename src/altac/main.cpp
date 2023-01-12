@@ -7,11 +7,12 @@
 #include <set>
 #include <chrono>
 
-#include "../include/cli.hpp"
+#include <altac/cli.hpp>
 #include <alta/version.hpp>
 #include <crossguid/guid.hpp>
 #include <json.hpp>
 #include <picosha2.h>
+#include <altall/altall.hpp>
 
 #if defined(_WIN32) || defined(_WIN64)
 #include <Windows.h>
@@ -38,7 +39,7 @@ ALTACORE_MAP<std::string, std::vector<std::string>> libsToLink;
 
 void registerAttributes(AltaCore::Filesystem::Path file) {
   using namespace AltaCore;
-  AC_GENERAL_ATTRIBUTE("CTranspiler", "link");
+  AC_GENERAL_ATTRIBUTE("native", "link");
     if (args.size() < 1) return;
     if (!args[0].isString) return;
     auto ast = std::dynamic_pointer_cast<AST::RootNode>(_target);
@@ -327,9 +328,10 @@ void logger(AltaCore::Logging::Message message) {
 int main(int argc, char** argv) {
   using json = nlohmann::json;
   using Option = CLI::Option;
+  using namespace CLI;
 
-  if (!Talta::init()) {
-    throw std::runtime_error("Failed to initialize transpiler");
+  if (!AltaLL::init()) {
+    throw std::runtime_error("Failed to initialize compiler");
   }
 
   AltaCore::Logging::shortSubsystemNames.push_back(std::make_pair<std::string, std::string>("frontend", "CLI"));
@@ -543,23 +545,6 @@ int main(int argc, char** argv) {
     AltaCore::Modules::PackageInfo runtimeInitInfo;
     json manifest;
 
-    if (!runtimeInit.empty()) {
-      AltaCore::Filesystem::Path modPath(runtimeInit);
-      runtimeInitPath = AltaCore::Modules::resolve(runtimeInit, fn.isDirectory() ? fn / "main.alta" : fn).absolutify().normalize();
-      runtimeInitInfo = AltaCore::Modules::getInfo(runtimeInitPath);
-      AltaCore::Modules::TargetInfo info;
-      AltaCore::Filesystem::Path modFile;
-      if (modPath.isDirectory()) {
-        modFile = info.main;
-      } else {
-        modFile = runtimeInitInfo.root / (modPath.extname() == "alta" ? modPath : modPath + ".alta");
-      }
-      info.main = modFile.absolutify().normalize();
-      info.type = AltaCore::Modules::OutputBinaryType::Library;
-      info.name = "_runtime_init";
-      targets.push_back(info);
-    }
-
     if (!fn.exists()) {
       std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to find the given file/folder" << std::endl;
       return 4;
@@ -649,139 +634,6 @@ int main(int argc, char** argv) {
 
     AltaCore::Filesystem::mkdirp(outDir);
 
-    auto outdirRuntime = outDir / "_runtime";
-    auto runtimeFiles = getDirectoryListing(runtimePath, true);
-    mkdirp(outdirRuntime);
-    for (auto& file: runtimeFiles) {
-      auto relPath = file.relativeTo(runtimePath);
-      if (file.isDirectory()) {
-        mkdirp(outdirRuntime / relPath);
-      } else {
-        mkdirp(file.dirname());
-        bool output = true;
-        auto outpath = outdirRuntime / relPath;
-        if (outpath.exists()) {
-          std::ifstream fileIn(file.toString(), std::ios::in | std::ios::binary);
-          std::ifstream fileOut(outpath.toString(), std::ios::in | std::ios::binary);
-          std::vector<unsigned char> hashIn(picosha2::k_digest_size);
-          std::vector<unsigned char> hashOut(picosha2::k_digest_size);
-          picosha2::hash256(fileIn, hashIn.begin(), hashIn.end());
-          picosha2::hash256(fileOut, hashOut.begin(), hashOut.end());
-          auto hashInString = picosha2::bytes_to_hex_string(hashIn.begin(), hashIn.end());
-          auto hashOutString = picosha2::bytes_to_hex_string(hashOut.begin(), hashOut.end());
-          if (hashInString == hashOutString) {
-            output = false;
-          }
-        }
-        if (output) {
-          copyFile(file, outpath);
-        }
-      }
-    }
-
-    manifest["runtime"] = {
-      {"path", outdirRuntime.absolutify().normalize().toString()},
-      {"initializer", nullptr},
-    };
-
-    if (!runtimeInit.empty()) {
-      manifest["runtime"]["initializer"] = packageInfoToJSON(runtimeInitInfo);
-    }
-
-    std::ofstream runtimeCmakeLists((outDir / "_runtime" / "CMakeLists.txt").absolutify().toString());
-    runtimeCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
-    runtimeCmakeLists << "project(alta-global-runtime)\n";
-    if (!runtimeInit.empty()) {
-      runtimeCmakeLists << "if (NOT TARGET alta-dummy-target-" << runtimeInitInfo.name << "-_runtime_init)\n";
-      runtimeCmakeLists << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../_runtime_init/" << runtimeInitInfo.name << "\" \"${PROJECT_BINARY_DIR}/_runtime_init/" << runtimeInitInfo.name << "\")\n";
-      runtimeCmakeLists << "endif()\n";
-    }
-    runtimeCmakeLists << "if (NOT TARGET alta-global-runtime)\n";
-    runtimeCmakeLists << "  add_library(alta-global-runtime\n";
-    runtimeFiles = AltaCore::Filesystem::getDirectoryListing(outdirRuntime, true);
-    for (auto& runtimeFile: runtimeFiles) {
-      if (runtimeFile.extname() == "c") {
-        runtimeCmakeLists << "    \"${PROJECT_SOURCE_DIR}/" << runtimeFile.relativeTo(outdirRuntime).toString('/') << "\"\n";
-        manifest["runtime"]["sources"].push_back(runtimeFile.absolutify().normalize().toString());
-      }
-    }
-    runtimeCmakeLists << "  )\n";
-    runtimeCmakeLists << "alta_add_properties(alta-global-runtime)\n";
-    if (!runtimeInit.empty()) {
-      auto rel = targets[0].main.relativeTo(runtimeInitInfo.root);
-      auto baseModPath = outDir / targets[0].name / runtimeInitInfo.name / rel.dirname() / rel.filename();
-      runtimeCmakeLists << "  target_link_libraries(alta-global-runtime PUBLIC " << runtimeInitInfo.name << "-_runtime_init)\n";
-      runtimeCmakeLists << "  target_compile_definitions(alta-global-runtime PUBLIC ALTA_RUNTIME_INITIALIZER=\"";
-      runtimeCmakeLists << (baseModPath + ".h").absolutify().normalize().toString('/');
-      runtimeCmakeLists << "\")\n";
-    }
-    if (freestanding) {
-      runtimeCmakeLists << "  target_compile_definitions(alta-global-runtime PUBLIC ALTA_RUNTIME_FREESTANDING)\n";
-    }
-    runtimeCmakeLists << "endif()\n";
-    runtimeCmakeLists.close();
-
-    std::ofstream rootCmakeLists((outDir / "CMakeLists.txt").toString());
-
-    rootCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
-    rootCmakeLists << "if (WIN32)\n";
-    rootCmakeLists << "  set(ALTA_EXECUTABLE_EXTENSION \".exe\")\n";
-    rootCmakeLists << "  set(ALTA_DYLIB_EXTENSION \".dll\")\n";
-    rootCmakeLists << "  set(ALTA_STATLIB_EXTENSION \".lib\")\n";
-    rootCmakeLists << "else()\n";
-    rootCmakeLists << "  set(ALTA_EXECUTABLE_EXTENSION \"\")\n";
-    rootCmakeLists << "  set(ALTA_STATLIB_EXTENSION \".a\")\n";
-    rootCmakeLists << "  if (APPLE)\n";
-    rootCmakeLists << "    set(ALTA_DYLIB_EXTENSION \".dylib\")\n";
-    rootCmakeLists << "  else()\n";
-    rootCmakeLists << "    set(ALTA_DYLIB_EXTENSION \".so\")\n";
-    rootCmakeLists << "  endif()\n";
-    rootCmakeLists << "endif()\n";
-
-    // modified from code by Marcus Hanwell (https://blog.kitware.com/cmake-and-the-default-build-type/)
-    rootCmakeLists << "# set the default build type if it is not specified\n";
-    rootCmakeLists << "if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)\n";
-    rootCmakeLists << "  message(STATUS \"Setting build type to \\\"Release\\\" as none was specified.\")\n";
-    rootCmakeLists << "  set(CMAKE_BUILD_TYPE \"Release\" CACHE STRING \"Choose the type of build.\" FORCE)\n";
-    rootCmakeLists << "  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS \"Debug\" \"Release\" \"MinSizeRel\" \"RelWithDebInfo\")\n";
-    rootCmakeLists << "endif()\n";
-
-    // set the output directories for the various output types
-    // we do this to ensure consistency across platforms
-    rootCmakeLists << "set(CMAKE_RUNTIME_OUTPUT_DIRECTORY \"${CMAKE_BINARY_DIR}/bin\")\n";
-    rootCmakeLists << "set(CMAKE_LIBRARY_OUTPUT_DIRECTORY \"${CMAKE_BINARY_DIR}/lib\")\n";
-    rootCmakeLists << "set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY \"${CMAKE_BINARY_DIR}/lib\")\n";
-    // ...especially with this part
-    // this ensures that multi-configuration generators will do what we want
-    rootCmakeLists << "foreach(CONFIG IN ITEMS \"Debug\" \"Release\" \"MinSizeRel\" \"RelWithDebInfo\")\n";
-    rootCmakeLists << "  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG} \"${CMAKE_BINARY_DIR}/bin\")\n";
-    rootCmakeLists << "  set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG} \"${CMAKE_BINARY_DIR}/lib\")\n";
-    rootCmakeLists << "  set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG} \"${CMAKE_BINARY_DIR}/lib\")\n";
-    rootCmakeLists << "endforeach()\n";
-
-    // modified from code by Austin Lasher (https://medium.com/@alasher/colored-c-compiler-output-with-ninja-clang-gcc-10bfe7f2b949)
-    rootCmakeLists << "option(FORCE_COLORED_OUTPUT \"Always produce ANSI-colored output (GNU/Clang only).\" TRUE)\n";
-    rootCmakeLists << "macro(alta_add_properties target)\n"; // 
-    rootCmakeLists << "  set(COMPILER_IS_GNU_LIKE \"${CMAKE_CXX_COMPILER_ID}\" STREQUAL \"GNU\" OR \"${CMAKE_CXX_COMPILER_ID}\" STREQUAL \"Clang\" OR \"${CMAKE_CXX_COMPILER_ID}\" STREQUAL \"AppleClang\")\n";
-    rootCmakeLists << "  if(${FORCE_COLORED_OUTPUT})\n";
-    rootCmakeLists << "    if(\"${CMAKE_CXX_COMPILER_ID}\" STREQUAL \"GNU\")\n";
-    rootCmakeLists << "      target_compile_options(${target} PRIVATE -fdiagnostics-color=always)\n";
-    rootCmakeLists << "    elseif(\"${CMAKE_CXX_COMPILER_ID}\" STREQUAL \"Clang\" OR \"${CMAKE_CXX_COMPILER_ID}\" STREQUAL \"AppleClang\")\n";
-    rootCmakeLists << "      target_compile_options(${target} PRIVATE -fcolor-diagnostics)\n";
-    rootCmakeLists << "    endif()\n";
-    rootCmakeLists << "  endif()\n";
-    rootCmakeLists << "  if(${COMPILER_IS_GNU_LIKE})\n";
-    rootCmakeLists << "    target_compile_options(${target} PRIVATE -Wno-parentheses-equality -Wno-unused-value)\n";
-    rootCmakeLists << "  endif()\n";
-    rootCmakeLists << "endmacro()\n";
-
-    rootCmakeLists << "project(ALTA_TOPLEVEL_PROJECT-" << fn.dirname().basename() << ")\n";
-
-    if (std::find(hiddenWarnings.begin(), hiddenWarnings.end(), "msvc-crt-secure") != hiddenWarnings.end()) {
-      // silence MSVC warnings about insecure C functions
-      rootCmakeLists << "add_compile_definitions(_CRT_SECURE_NO_WARNINGS=1)\n";
-    }
-
     for (auto& target: targets) {
       fn = target.main;
       outDir = origOutDir / target.name;
@@ -792,9 +644,6 @@ int main(int argc, char** argv) {
         std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": main module (\"" << fn.toString() << "\") for target \"" << target.name << "\" not found" << std::endl;
         return 8;
       }
-
-      rootCmakeLists << "set(ALTA_CURRENT_PROJECT_BINARY_DIR \"${CMAKE_BINARY_DIR}/" << target.name << "\")\n";
-      rootCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/" << target.name << "\")\n";
 
       std::ifstream file(fn.toString());
       std::string line;
@@ -862,7 +711,7 @@ int main(int argc, char** argv) {
 
       AltaCore::registerGlobalAttributes();
       registerAttributes(fn);
-      Talta::registerAttributes(fn);
+      AltaLL::registerAttributes(fn);
 
       AltaCore::Lexer::Lexer lexer(fn);
 
@@ -913,7 +762,7 @@ int main(int argc, char** argv) {
         auto path = AltaCore::Modules::resolve(importRequest, requestingModulePath);
 
         registerAttributes(path);
-        Talta::registerAttributes(path);
+        AltaLL::registerAttributes(path);
 
         try {
           using namespace AltaCore;
@@ -943,7 +792,7 @@ int main(int argc, char** argv) {
             lexer.tokens.pop_back();
           }
 
-          Parser::Parser parser(lexer.tokens, *parsingDefinitions, modPath);
+          AltaCore::Parser::Parser parser(lexer.tokens, *parsingDefinitions, modPath);
           parser.parse();
           auto root = std::dynamic_pointer_cast<AST::RootNode>(*parser.root);
           //root->detail(modPath);
@@ -1036,677 +885,23 @@ int main(int argc, char** argv) {
         return 11;
       }
 
-      // generate the bridge (only if modified)
-      // the bridge really should be the same for every module, so it doesn't matter which one we use
-      // it only needs to be generated so that we can modify the `_internal` package in the stdlib
-      // and the runtime/transpilation however we want and have the values for these definitions automatically updated
-      //
-      // in other words, once Alta has a stable ABI, we can get rid of this and have it be a static runtime source
-      {
-        bool output = true;
-        auto tmppath = outdirRuntime / ".bridge.h";
-        auto outpath = outdirRuntime / "bridge.h";
-
-        std::ofstream tmpHeaderOut(tmppath.toString());
-
-        tmpHeaderOut << "// auto-generated. do not modify.\n";
-        tmpHeaderOut << "#ifndef _ALTA_RUNTIME_BRIDGE_H\n";
-        tmpHeaderOut << "#define _ALTA_RUNTIME_BRIDGE_H\n";
-        tmpHeaderOut << "\n";
-        tmpHeaderOut << "#define _ALTA_SCHEDULER_CLASS_NAME " << Talta::mangleName(root->info->module->internal.schedulerClass.get()) << '\n';
-        tmpHeaderOut << "#define _ALTA_SCHEDULER_CLASS_CONSTRUCTOR _cn_" << Talta::mangleName(root->info->module->internal.schedulerClass->defaultConstructor.get()) << '\n';
-        tmpHeaderOut << "#define _ALTA_SCHEDULER_CLASS_DESTRUCTOR _d_" << Talta::mangleName(root->info->module->internal.schedulerClass->destructor.get()) << '\n';
-        tmpHeaderOut << "\n";
-        tmpHeaderOut << "#define _ALTA_CLASS_" << Talta::mangleName(root->info->module->internal.schedulerClass.get()) << '\n';
-        tmpHeaderOut << "#define _ALTA_FUNCTION_" << Talta::mangleName(root->info->module->internal.schedulerClass->defaultConstructor.get()) << '\n';
-        tmpHeaderOut << "#include _ALTA_INTERNAL_COROUTINES_HEADER_FULL_PATH\n";
-        tmpHeaderOut << "\n";
-        tmpHeaderOut << "#include _ALTA_INTERNAL_MAIN_HEADER_FULL_PATH\n";
-        tmpHeaderOut << "\n";
-        tmpHeaderOut << "#endif // _ALTA_RUNTIME_BRIDGE_H\n";
-
-        tmpHeaderOut.close();
-
-        if (outpath.exists()) {
-          std::ifstream fileIn(tmppath.toString(), std::ios::in | std::ios::binary);
-          std::ifstream fileOut(outpath.toString(), std::ios::in | std::ios::binary);
-          std::vector<unsigned char> hashIn(picosha2::k_digest_size);
-          std::vector<unsigned char> hashOut(picosha2::k_digest_size);
-          picosha2::hash256(fileIn, hashIn.begin(), hashIn.end());
-          picosha2::hash256(fileOut, hashOut.begin(), hashOut.end());
-          auto hashInString = picosha2::bytes_to_hex_string(hashIn.begin(), hashIn.end());
-          auto hashOutString = picosha2::bytes_to_hex_string(hashOut.begin(), hashOut.end());
-          if (hashInString == hashOutString) {
-            output = false;
-          }
-        }
-        if (output) {
-          copyFile(tmppath, outpath);
-        }
-      };
-
       AltaCore::Filesystem::mkdirp(outDir); // ensure the output directory has been created
 
-      ALTACORE_MAP<std::string, std::tuple<std::shared_ptr<Ceetah::AST::RootNode>, std::shared_ptr<Ceetah::AST::RootNode>, std::vector<std::shared_ptr<Ceetah::AST::RootNode>>, std::vector<std::shared_ptr<AltaCore::DET::ScopeItem>>, std::vector<bool>, std::shared_ptr<AltaCore::DET::Module>>> transpiledModules;
-
       try {
-        transpiledModules = Talta::recursivelyTranspileToC(root);
+        AltaLL::compile(root, outDir / target.name);
       } catch (AltaCore::Errors::ValidationError& e) {
-        std::cerr << CLI::COLOR_RED << "AST failed to transpile" << CLI::COLOR_NORMAL << std::endl;
+        std::cerr << CLI::COLOR_RED << "AST failed to compile" << CLI::COLOR_NORMAL << std::endl;
         logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         return 11;
       }
-
-      Ceetah::AST::newlineOnExpressions = false;
-
-      // TL;DR: reset the attributes, otherwise you'll end up with dangling
-      //        references in the attribute callbacks for attributes in the
-      //        `CTranspiler` domain
-      //
-      // reseting the attributes is necessary because otherwise
-      // any modules used in for this target that are reused for any
-      // other targets retain the old attribute callbacks;
-      // each target uses a different transpiler instance,
-      // so that would leave attribute callbacks created for
-      // with a reference to a transpiler instance that has
-      // already been disposed of, leading to LOTS of dangling references
-      AltaCore::Attributes::clearAllAttributes();
-
-      auto generalCmakeListsPath = outDir / "CMakeLists.txt";
-      std::ofstream generalCmakeLists(generalCmakeListsPath.toString());
-
-      auto dummySourcePath = outDir / "dummy.c";
-
-      if (!dummySourcePath.exists()) {
-        std::ofstream dummySource(dummySourcePath.toString());
-        dummySource << "\n";
-        dummySource.close();
-      }
-
-      ALTACORE_MAP<std::string, std::pair<std::ofstream, AltaCore::Modules::PackageInfo>> cmakeListsCollection;
-      ALTACORE_MAP<std::string, std::set<std::string>> packageDependencies;
-      ALTACORE_MAP<std::string, std::vector<std::shared_ptr<AltaCore::DET::ScopeItem>>> genericsUsed;
-
-      std::string indexUUID = picosha2::hash256_hex_string(target.main.toString() + ':' + target.name + ':' + std::to_string((size_t)target.type));
-
-      // setup root cmakelists
-      generalCmakeLists << "cmake_minimum_required(VERSION 3.10)\n";
-      generalCmakeLists << "project(" << indexUUID << ")\n";
-      generalCmakeLists << "add_compile_definitions(\n";
-      generalCmakeLists << "  _ALTA_INTERNAL_COROUTINES_HEADER_FULL_PATH=\"${PROJECT_SOURCE_DIR}/_internal/lib/coroutines/main.h\"\n";
-      generalCmakeLists << "  _ALTA_INTERNAL_MAIN_HEADER_FULL_PATH=\"${PROJECT_SOURCE_DIR}/_internal/main.h\"\n";
-      generalCmakeLists << ")\n";
-      if (target.name != "_runtime_init") {
-        generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/../_runtime\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/_runtime\")\n";
-      }
-      generalCmakeLists << "add_subdirectory(\"${PROJECT_SOURCE_DIR}/" << root->info->module->packageInfo.name << "\")\n";
-      generalCmakeLists.close();
-
-      for (auto& [moduleName, info]: transpiledModules) {
-        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
-
-        if (packageDependencies.find(mod->packageInfo.name) == packageDependencies.end()) {
-          packageDependencies[mod->packageInfo.name] = std::set<std::string>();
-        }
-
-        for (auto& dep: mod->dependencies) {
-          if (dep->packageInfo.name == mod->packageInfo.name) continue;
-          packageDependencies[mod->packageInfo.name].insert(dep->packageInfo.name);
-        }
-
-        for (auto& generic: mod->genericsUsed) {
-          auto gMod = AltaCore::Util::getModule(generic->parentScope.lock().get()).lock();
-          if (gMod->packageInfo.name == mod->packageInfo.name) continue;
-          genericsUsed[mod->packageInfo.name].push_back(generic);
-        }
-      }
-
-      ALTACORE_MAP<std::string, std::unordered_set<std::string>> depIndex;
-      ALTACORE_MAP<std::string, std::string> includeMap;
-      ALTACORE_MAP<std::string, std::shared_ptr<Ceetah::AST::ConditionalPreprocessorDirective>> includeBlocks;
-
-      for (auto& [moduleName, info]: transpiledModules) {
-        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
-        auto base = outDir / moduleName;
-        auto hOut = base + ".h";
-        auto mangledModuleName = Talta::mangleName(mod.get());
-        for (auto& dependent: mod->dependents) {
-          auto name = "_ALTA_MODULE_" + Talta::mangleName(dependent.get()) + "_0_INCLUDE_" + mangledModuleName;
-          auto headerPath = hOut.relativeTo(outDir / (dependent->name + ".h")).toString('/');
-          if (headerPath.empty())
-            headerPath = hOut.components.back();
-          depIndex[dependent->id].insert("#define " + name + " \"" + headerPath + '"');
-          includeMap[name] = headerPath;
-        }
-        auto name = "_ALTA_MODULE_" + mangledModuleName + "_0_INCLUDE_" + mangledModuleName;
-        auto headerPath = hOut.relativeTo(outDir / (mod->name + ".h")).toString('/');
-        if (headerPath.empty())
-          headerPath = hOut.components.back();
-        depIndex[mod->id].insert("#define " + name + " \"" + headerPath + '"');
-        includeMap[name] = headerPath;
-      }
-
-      auto populateBlocks = [&](std::shared_ptr<Ceetah::AST::RootNode> root) {
-        auto builder = Ceetah::Builder(root);
-        while (true) {
-          if (builder.insertionPoint->index >= builder.insertionPoint->containerLength()) {
-            if (builder.insertionPoint->parent) {
-              builder.exitInsertionPoint();
-              builder.insertionPoint->moveForward();
-              continue;
-            } else {
-              break;
-            }
-          }
-          auto node = builder.insertionPoint->container()[builder.insertionPoint->index];
-          if (auto cond = std::dynamic_pointer_cast<Ceetah::AST::ConditionalPreprocessorDirective>(node)) {
-            if (cond->test.substr(0, 9) == "(defined(") {
-              includeBlocks[cond->test.substr(9, cond->test.find(')') - 9)] = cond;
-            }
-            builder.enterInsertionPoint();
-          } else {
-            builder.insertionPoint->moveForward();
-          }
-        }
-      };
-
-      auto replaceItems = [&](std::shared_ptr<Ceetah::AST::RootNode> root, bool isHeader = false) {
-        auto builder = Ceetah::Builder(root);
-        std::unordered_set<std::string> included;
-        while (true) {
-          if (builder.insertionPoint->index >= builder.insertionPoint->containerLength()) {
-            if (builder.insertionPoint->parent) {
-              builder.exitInsertionPoint();
-              builder.insertionPoint->moveForward();
-              continue;
-            } else {
-              break;
-            }
-          }
-          bool moveForward = true;
-          auto node = builder.insertionPoint->container()[builder.insertionPoint->index];
-          if (!isHeader) {
-            if (auto def = std::dynamic_pointer_cast<Ceetah::AST::DefinitivePreprocessorDirective>(node)) {
-              if (def->definition.substr(0, 6) == "_ALTA_") {
-                builder.insertionPoint->moveForward();
-                if (builder.insertionPoint->index < builder.insertionPoint->containerLength()) {
-                  auto newNode = builder.insertionPoint->container()[builder.insertionPoint->index];
-                  if (auto incl = std::dynamic_pointer_cast<Ceetah::AST::InclusionalPreprocessorDirective>(newNode)) {
-                    auto defName = trimCopy(def->definition);
-                    auto query = trimCopy(incl->includeQuery);
-                    if (incl->type == Ceetah::AST::InclusionType::Computed && includeMap.find(query) != includeMap.end()) {
-                      auto block = includeBlocks[defName];
-                      bool ok = included.find(defName) == included.end();
-                      bool insertChildren = block && block->test == "(defined(" + defName + ")) && !defined(_DEFINED_" + defName + ')';
-                      builder.insertionPoint->moveBackward();
-                      builder.insertionPoint->remove(false);
-                      builder.insertionPoint->remove(false);
-                      if (block) {
-                        if (ok) {
-                          if (insertChildren) {
-                            auto point = builder.insertionPoint->save();
-                            builder.insertPreprocessorConditional("!defined(_DEFINED_" + defName + ')');
-                            for (auto& child: block->nodes) {
-                              builder.insert(child->clone());
-                            }
-                            builder.exitInsertionPoint();
-                            builder.insertionPoint->restore(point);
-                          } else {
-                            builder.insert(block->clone());
-                            builder.insertionPoint->moveBackward();
-                          }
-                        }
-                      }
-                      included.insert(defName);
-                      moveForward = false;
-                    }
-                  } else {
-                    builder.insertionPoint->moveBackward();
-                  }
-                }
-              }
-            }
-          }
-          if (moveForward) {
-            if (auto incl = std::dynamic_pointer_cast<Ceetah::AST::InclusionalPreprocessorDirective>(node)) {
-              if (incl->type == Ceetah::AST::InclusionType::Computed && includeMap.find(incl->includeQuery) != includeMap.end()) {
-                incl->type = Ceetah::AST::InclusionType::Local;
-                incl->includeQuery = includeMap[incl->includeQuery];
-              }
-            }
-          }
-          if (auto cond = std::dynamic_pointer_cast<Ceetah::AST::ConditionalPreprocessorDirective>(node)) {
-            builder.enterInsertionPoint();
-          } else if (moveForward) {
-            builder.insertionPoint->moveForward();
-          }
-        }
-      };
-
-      for (auto& [moduleName, info]: transpiledModules) {
-        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
-        populateBlocks(hRoot);
-      }
-
-      for (auto& [moduleName, info]: transpiledModules) {
-        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
-        auto base = outDir / moduleName;
-        auto hOut = base + ".h";
-        auto cOut = base + ".c";
-        for (size_t i = 0; i < gRoots.size(); i++) {
-          auto gOut = i == 0 ? cOut : base + "-" + std::to_string(i - 1) + ".c";
-          auto& gRoot = gRoots[i];
-          auto& gItem = gItems[i];
-          Ceetah::Builder builder = Ceetah::Builder(gRoot);
-          auto mangledModuleName = Talta::mangleName(mod.get());
-          builder.insertPreprocessorInclusion(hOut.relativeTo(gOut).toString('/'), Ceetah::AST::InclusionType::Local);
-          if (gItem) {
-            builder.insertPreprocessorDefinition(Talta::headerMangle(gItem.get()));
-          }
-          builder.insertPreprocessorInclusion("_ALTA_MODULE_" + mangledModuleName + "_0_INCLUDE_" + mangledModuleName, Ceetah::AST::InclusionType::Computed);
-          replaceItems(gRoot);
-        }
-      }
-
-      for (auto& [moduleName, info]: transpiledModules) {
-        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
-        auto base = outDir / moduleName;
-        auto modOutDir = outDir / mod->packageInfo.name;
-        auto cOut = base + ".c";
-        auto hOut = base + ".h";
-        auto dOut = base + ".d.h";
-        std::vector<AltaCore::Filesystem::Path> gOuts;
-        auto cmakeOut = modOutDir / "CMakeLists.txt";
-
-        replaceItems(hRoot, true);
-
-        manifest["targets"][target.name][mod->packageInfo.name]["module-names"].push_back(mod->name);
-        manifest["targets"][target.name][mod->packageInfo.name]["original-sources"].push_back(mod->path.absolutify().normalize().toString());
-
-        auto ok = AltaCore::Filesystem::mkdirp(base.dirname());
-        if (!ok) {
-          auto str = base.dirname().toString();
-          std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to create output directory (\"" << str.c_str() << "\")" << std::endl;
-          return 1;
-        }
-
-        std::stringstream outstringH;
-        std::stringstream outstringD;
-        std::vector<std::stringstream> outstringGs;
-
-        for (size_t i = 0; i < gRoots.size(); i++) {
-          auto gOut = i == 0 ? cOut : base + "-" + std::to_string(i - 1) + ".c";
-          gOuts.push_back(gOut);
-          outstringGs.push_back(std::stringstream());
-        }
-
-        if (cmakeListsCollection.find(mod->packageInfo.name) == cmakeListsCollection.end()) {
-          // set up the cmakelists for this package
-          cmakeListsCollection[mod->packageInfo.name] = { std::ofstream(cmakeOut.toString()), mod->packageInfo };
-          auto& lists = cmakeListsCollection[mod->packageInfo.name].first;
-          lists << "cmake_minimum_required(VERSION 3.10)\n";
-          lists << "project(" << mod->packageInfo.name << ")\n";
-          lists << "add_custom_target(alta-dummy-target-" << mod->packageInfo.name << '-' << target.name << ")\n";
-
-          for (auto& item: packageDependencies[mod->packageInfo.name]) {
-            lists << "if (NOT TARGET alta-dummy-target-" << item << '-' << target.name << ")\n";
-            lists << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << item << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << item << "\")\n";
-            lists << "endif()\n";
-          }
-
-          lists << "add_library(" << mod->packageInfo.name << "-core-" << target.name << "\n";
-
-          manifest["targets"][target.name][mod->packageInfo.name]["info"] = packageInfoToJSON(mod->packageInfo);
-        }
-
-        auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
-
-        for (size_t i = 0; i < gRoots.size(); i++) {
-          auto& gRoot = gRoots[i];
-          auto& outstringG = outstringGs[i];
-          auto& gOut = gOuts[i];
-          auto& gItem = gItems[i];
-          outstringG << gRoot->toStringWithIndent();
-        }
-
-        auto mangledModuleName = Talta::mangleName(mod.get());
-
-        // include the Alta common runtime header
-        outstringH << "#define _ALTA_RUNTIME_COMMON_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/common.h\"\n";
-        outstringH << "#define _ALTA_RUNTIME_DEFINITIONS_HEADER_" << mangledModuleName << " \"" << outdirRuntime.relativeTo(hOut).toString('/') << "/definitions.h\"\n";
-
-        outstringH << "#ifndef _ALTA_HEADER_DEFS_" << mangledModuleName << '\n';
-        outstringH << "#define _ALTA_HEADER_DEFS_" << mangledModuleName << '\n';
-        // define the definition header include path
-        outstringH << "#define _ALTA_DEF_HEADER_" << mangledModuleName << " \"" << dOut.relativeTo(hOut).toString('/') << "\"\n";
-
-        for (size_t i = 0; i < gRoots.size(); i++) {
-          auto gBool = gBools[i];
-          if (!gBool) continue;
-          auto& gItem = gItems[i];
-          for (auto& item: mod->genericDependencies[gItem->id]) {
-            auto mangledImportName = Talta::mangleName(item.get());
-            auto depBase = outDir / item->name;
-            auto depHOut = depBase + ".h";
-            outstringH << "#define _ALTA_MODULE_" << mangledModuleName << "_0_INCLUDE_" << mangledImportName << " \"" << depHOut.relativeTo(cOut).toString('/') << "\"\n";
-          }
-        }
-        outstringH << "#endif /* _ALTA_HEADER_DEFS_" << mangledModuleName << " */\n";
-
-        outstringH << hRoot->toStringWithIndent();
-
-        for (size_t i = 0; i < gRoots.size(); i++) {
-          auto gBool = gBools[i];
-          if (gBool) continue;
-          auto gOut = i == 0 ? cOut : base + "-" + std::to_string(i - 1) + ".c";
-          outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << gOut.relativeTo(modOutDir).toString('/') << "\"\n";
-          manifest["targets"][target.name][mod->packageInfo.name]["sources"].push_back(gOut.absolutify().normalize().toString());
-        }
-
-        manifest["targets"][target.name][mod->packageInfo.name]["headers"].push_back(hOut.absolutify().normalize().toString());
-        manifest["targets"][target.name][mod->packageInfo.name]["definition-headers"].push_back(dOut.absolutify().normalize().toString());
-
-        outstringD << dRoot->toStringWithIndent();
-
-        bool outputH = true;
-        if (hOut.exists()) {
-          if (checkHashes(hOut, outstringH)) {
-            outputH = false;
-          }
-        }
-        if (outputH) {
-          std::ofstream outfileH(hOut.toString());
-          outfileH << outstringH.rdbuf();
-          outfileH.close();
-        }
-
-        bool outputD = true;
-        if (dOut.exists()) {
-          if (checkHashes(dOut, outstringD)) {
-            outputD = false;
-          }
-        }
-        if (outputD) {
-          std::ofstream outfileD(dOut.toString());
-          outfileD << outstringD.rdbuf();
-          outfileD.close();
-        }
-
-        for (size_t i = 0; i < gRoots.size(); i++) {
-          auto& outstringG = outstringGs[i];
-          auto& gOut = gOuts[i];
-
-          bool outputG = true;
-          if (gOut.exists()) {
-            if (checkHashes(gOut, outstringG)) {
-              outputG = false;
-            }
-          }
-          if (outputG) {
-            std::ofstream outfileG(gOut.toString());
-            outfileG << outstringG.rdbuf();
-            outfileG.close();
-          }
-        }
-      }
-
-      for (auto& [packageName, cmakeInfo]: cmakeListsCollection) {
-        auto& [cmakeLists, modInfo] = cmakeInfo;
-
-        cmakeLists << ")\n";
-        cmakeLists << "alta_add_properties(" << packageName << "-core-" << target.name << ")\n";
-
-        cmakeLists << "set_target_properties(" << packageName << "-core-" << target.name << " PROPERTIES\n";
-        cmakeLists << "  C_STANDARD 99\n";
-        cmakeLists << ")\n";
-
-        if (
-          target.name != "_runtime_init"      ||
-          packageDependencies.size() > 0 ||
-          genericsUsed.size() > 0        ||
-          libsToLink.size() > 0
-        ) {
-          cmakeLists << "target_link_libraries(" << packageName << "-core-" << target.name << " PUBLIC\n";
-
-          manifest["targets"][target.name][packageName]["uses-runtime"] = target.name != "_runtime_init";
-
-          std::unordered_set<std::string> depsLinked;
-
-          for (auto& dep: packageDependencies[packageName]) {
-            auto name = dep + '-' + target.name;
-            if (depsLinked.find(name) == depsLinked.end()) {
-              cmakeLists << "  " << name << '\n';
-              manifest["targets"][target.name][packageName]["dependencies"].push_back(dep);
-              depsLinked.insert(name);
-            }
-          }
-
-          for (auto& generic: genericsUsed[packageName]) {
-            auto genMod = AltaCore::Util::getModule(generic->parentScope.lock().get()).lock();
-            auto pkgName = Talta::mangleName(genMod.get());
-            auto name = pkgName + '-' + std::to_string(generic->moduleIndex) + '-' + target.name;
-            if (depsLinked.find(name) == depsLinked.end()) {
-              cmakeLists << "  " << name << '\n';
-              manifest["targets"][target.name][packageName]["generics-used"].push_back({
-                {"module", genMod->name},
-                {"id", std::to_string(generic->moduleIndex)},
-              });
-              depsLinked.insert(name);
-            }
-          }
-
-          for (auto& lib: libsToLink[packageName]) {
-            cmakeLists << "  " << lib << '\n';
-            manifest["targets"][target.name][packageName]["extra-links"].push_back(lib);
-          }
-
-          cmakeLists << ")\n";
-        }
-      }
-
-      for (auto& [moduleName, info]: transpiledModules) {
-        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
-        auto base = outDir / moduleName;
-        auto modOutDir = outDir / mod->packageInfo.name;
-        auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
-        auto mangledModuleName = Talta::mangleName(mod.get());
-        auto moduleNamePath = AltaCore::Filesystem::Path(moduleName);
-
-        for (size_t i = 0; i < gRoots.size(); i++) {
-          auto gBool = gBools[i];
-          if (!gBool) continue;
-          auto gOut = base + "-" + std::to_string(i - 1) + ".c";
-          auto cOut = base + ".c";
-          auto hOut = base + ".h";
-          auto& gItem = gItems[i];
-          auto targetName = Talta::mangleName(AltaCore::Util::getModule(gItem->parentScope.lock().get()).lock().get()) + '-' + std::to_string(gItem->moduleIndex) + '-' + target.name;
-          auto& genEntry = manifest["targets"][target.name][mod->packageInfo.name]["generics"][i];
-          genEntry["id"] = gItem->moduleIndex;
-
-          for (auto& item: mod->genericDependencies[gItem->id]) {
-            auto& name = item->packageInfo.name;
-            auto mangledImportName = Talta::mangleName(item.get());
-            auto depBase = outDir / item->name;
-            auto depHOut = depBase + ".h";
-            genEntry["generic-dependencies"].push_back(item->name);
-            outfileCmake << "if (NOT TARGET alta-dummy-target-" << name << '-' << target.name << ")\n";
-            outfileCmake << "  add_subdirectory(\"${PROJECT_SOURCE_DIR}/../" << name << "\" \"${ALTA_CURRENT_PROJECT_BINARY_DIR}/" << name << "\")\n";
-            outfileCmake << "endif()\n";
-          }
-
-          genEntry["source"] = gOut.absolutify().normalize().toString();
-
-          outfileCmake << "add_library(" << targetName << '\n';
-          if (!gItem->instantiatedFromSamePackage) {
-            outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << gOut.relativeTo(modOutDir).toString('/') << "\"\n";
-          } else {
-            outfileCmake << "  \"${PROJECT_SOURCE_DIR}/../" << dummySourcePath.relativeTo(modOutDir).toString('/') << "\"\n";
-          }
-          outfileCmake << ")\n";
-          outfileCmake << "alta_add_properties(" << targetName << ")\n";
-          outfileCmake << "set_target_properties(" << targetName << " PROPERTIES\n";
-          auto dashName = (moduleNamePath + "-" + std::to_string(i)).toString('-');
-          outfileCmake << "  OUTPUT_NAME " << dashName << '\n';
-          outfileCmake << "  COMPILE_PDB_NAME " << dashName << '\n';
-          outfileCmake << "  C_STANDARD 99\n";
-          outfileCmake << ")\n";
-          if (gItem->instantiatedFromSamePackage) {
-            outfileCmake << "target_sources(" << mod->packageInfo.name << "-core-" << target.name << " PUBLIC\n";
-            outfileCmake << "  \"${PROJECT_SOURCE_DIR}/" << gOut.relativeTo(modOutDir).toString('/') << "\"\n";
-            outfileCmake << ")\n";
-            genEntry["used-in-core"] = true;
-          }
-          outfileCmake << "target_link_libraries(" << targetName << " PUBLIC\n";
-          if (gItem->instantiatedFromSamePackage || !mod->packageInfo.isEntryPackage || (mod->packageInfo.isEntryPackage && target.type != AltaCore::Modules::OutputBinaryType::Exectuable)) {
-            outfileCmake << "  alta-global-runtime\n";
-            outfileCmake << "  " << mod->packageInfo.name << "-core-" << target.name << '\n';
-          }
-
-          outfileCmake << "  alta-global-runtime\n";
-
-          if (gItem->instantiatedFromSamePackage) {
-            outfileCmake << ")\n";
-            outfileCmake << "target_link_libraries(" << mod->packageInfo.name << "-core-" << target.name << " PUBLIC\n";
-          }
-
-          for (auto& item: mod->genericDependencies[gItem->id]) {
-            outfileCmake << "  " << item->packageInfo.name << '-' << target.name << '\n';
-          }
-
-          if (auto klass = std::dynamic_pointer_cast<AltaCore::DET::Class>(gItem)) {
-            for (auto& generic: klass->genericArguments) {
-              if (generic->klass && generic->klass->genericParameterCount > 0) {
-                auto genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
-                outfileCmake << "  " << Talta::mangleName(genMod.get()) << '-' << generic->klass->moduleIndex << '-' << target.name << '\n';
-                genEntry["generic-arguments"].push_back({
-                  {"info", packageInfoToJSON(genMod->packageInfo)},
-                  {"id", generic->klass->moduleIndex},
-                });
-              }
-            }
-          } else if (auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(gItem)) {
-            for (auto& generic: func->genericArguments) {
-              if (generic->klass && generic->klass->genericParameterCount > 0) {
-                auto genMod = AltaCore::Util::getModule(generic->klass->parentScope.lock().get()).lock();
-                outfileCmake << "  " << Talta::mangleName(genMod.get()) << '-' << generic->klass->moduleIndex << '-' << target.name << '\n';
-                genEntry["generic-arguments"].push_back({
-                  {"info", packageInfoToJSON(genMod->packageInfo)},
-                  {"id", generic->klass->moduleIndex},
-                });
-              }
-            }
-          } else {
-            throw std::runtime_error("wth");
-          }
-
-          outfileCmake << ")\n";
-        }
-      }
-
-      for (auto& [moduleName, info]: transpiledModules) {
-        auto& [hRoot, dRoot, gRoots, gItems, gBools, mod] = info;
-        auto base = outDir / moduleName;
-        auto modOutDir = outDir / mod->packageInfo.name;
-        auto& outfileCmake = cmakeListsCollection[mod->packageInfo.name].first;
-
-        if (mod->packageInfo.name == entryPackageInfo.name) {
-          if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
-            outfileCmake << "add_executable(";
-          } else {
-            outfileCmake << "add_library(";
-          }
-        } else {
-          outfileCmake << "add_library(";
-        }
-
-        outfileCmake << mod->packageInfo.name << '-' << target.name << '\n';
-        outfileCmake << "  \"${PROJECT_SOURCE_DIR}/../" << dummySourcePath.relativeTo(modOutDir).toString('/') << "\"\n";
-        outfileCmake << ")\n";
-        outfileCmake << "alta_add_properties(" << mod->packageInfo.name << '-' << target.name << ")\n";
-        outfileCmake << "target_link_libraries(" << mod->packageInfo.name << '-' << target.name << " PUBLIC\n";
-        outfileCmake << "  alta-global-runtime\n";
-        outfileCmake << "  " << mod->packageInfo.name << "-core-" << target.name << '\n';
-        outfileCmake << "  alta-global-runtime\n";
-        outfileCmake << ")\n";
-
-        if (mod->packageInfo.isEntryPackage) {
-          std::string extensionVar;
-          if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
-            extensionVar = "${ALTA_EXECUTABLE_EXTENSION}";
-          } else {
-            extensionVar = "${ALTA_STATLIB_EXTENSION}";
-          }
-          outfileCmake << "add_custom_command(TARGET " << mod->packageInfo.name << '-' << target.name << " POST_BUILD\n";
-          std::string outFileDir;
-          if (target.type == AltaCore::Modules::OutputBinaryType::Exectuable) {
-            outFileDir = "bin";
-          } else {
-            outFileDir = "lib";
-          }
-          outfileCmake << "  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:" << mod->packageInfo.name << '-' << target.name << "> \"${CMAKE_BINARY_DIR}/" << outFileDir << '/' << target.name << extensionVar << "\"\n";
-          outfileCmake << ")\n";
-
-          outfileCmake << "set_target_properties(" << mod->packageInfo.name << '-' << target.name << " PROPERTIES\n";
-          outfileCmake << "  OUTPUT_NAME " << target.name << '\n';
-          outfileCmake << "  C_STANDARD 99\n";
-          outfileCmake << ")\n";
-        }
-
-        outfileCmake.close();
-      }
     }
-
-    rootCmakeLists.close();
 
     auto manifestOutpath = origOutDir / "manifest.json";
     std::ofstream manifestOutfile(manifestOutpath.toString());
     manifestOutfile << manifest;
     manifestOutfile.close();
 
-    std::cout << CLI::COLOR_GREEN << "Successfully transpiled input!" << CLI::COLOR_NORMAL << std::endl;
-
-    if (compileSwitch) {
-      if (system(NULL) == 0) {
-        std::cerr << CLI::COLOR_RED << "Error" << CLI::COLOR_NORMAL << ": failed to compile the C code - no command processor is available." << std::endl;
-        return 11;
-      }
-
-      auto rootBuildDir = origOutDir / "_build";
-      auto rbdAsString = rootBuildDir.toString();
-
-      AltaCore::Filesystem::mkdirp(rootBuildDir);
-
-      std::string configureCommand = "cmake \"" + origOutDir.toString() + "\" -DCMAKE_BUILD_TYPE=\"" + (buildForDebug ? "Debug" : "Release") + '"';
-      std::string compileCommand = "cmake --build \"" + rootBuildDir.toString() + "\" --config \"" + (buildForDebug ? "Debug" : "Release") + '"';
-
-      if (!generatorArg.value().empty()) {
-        configureCommand += " -G \"" + generatorArg.value() + "\"";
-      }
-
-      auto currDir = AltaCore::Filesystem::cwd();
-
-      changeDir(rbdAsString.c_str());
-      auto configureResult = system(configureCommand.c_str());
-      changeDir(currDir.c_str());
-
-      if (configureResult != 0) {
-        std::cerr << CLI::COLOR_RED << "Failed to configure the C code for building." << CLI::COLOR_NORMAL << std::endl;
-        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": The command that was executed was `" << configureCommand << '`' << std::endl;
-        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": CMake exited with status code " << configureResult << std::endl;
-        return 9;
-      }
-
-      auto compileResult = system(compileCommand.c_str());
-
-      if (compileResult != 0) {
-        std::cerr << CLI::COLOR_RED << "Failed to compile the C code." << CLI::COLOR_NORMAL << std::endl;
-        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": The command that was executed was `" << compileCommand << '`' << std::endl;
-        std::cout << CLI::COLOR_BLUE << "Info" << CLI::COLOR_NORMAL << ": CMake exited with status code " << compileResult << std::endl;
-        return 10;
-      }
-
-      std::cout << CLI::COLOR_GREEN << "Successfully compiled the generated C code!" << CLI::COLOR_NORMAL << std::endl;
-    }
+    std::cout << CLI::COLOR_GREEN << "Successfully compiled input!" << CLI::COLOR_NORMAL << std::endl;
 
     return 0;
   }  catch (AltaCore::Logging::Message& e) {

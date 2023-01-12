@@ -1,4 +1,4 @@
-#include "../include/printers.hpp"
+#include <altac/printers.hpp>
 
 void CLI::Printers::printAST(AltaCore::AST::Node* node, std::string indent, bool indentName, bool autoPrint) {
   using AltaCore::AST::NodeType;

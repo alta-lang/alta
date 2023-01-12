@@ -1,5 +1,5 @@
-#ifndef ALTA_CLI_PRINTERS_HPP
-#define ALTA_CLI_PRINTERS_HPP
+#ifndef ALTAC_PRINTERS_HPP
+#define ALTAC_PRINTERS_HPP
 
 #include <altacore.hpp>
 
@@ -19,4 +19,4 @@ namespace CLI {
   };
 };
 
-#endif // ALTA_CLI_PRINTERS_HPP
+#endif // ALTAC_PRINTERS_HPP

@@ -7,6 +7,10 @@ project(alta
   LANGUAGES C CXX
 )
 
+find_package(LLVM REQUIRED CONFIG)
+
+set(BUILD_AMAKE OFF)
+
 # `_version.hpp` is never actually produced, it's just there to force
 # CMake to always rerun this command
 add_custom_command(
@@ -22,11 +26,10 @@ if (NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 endif()
 
-# we only need to add Talta
-# it'll automatically pull in AltaCore as well
 # btw, we add EXCLUDE_FROM_ALL to prevent the the subdirectories
 # from installing anything
-add_subdirectory("${PROJECT_SOURCE_DIR}/deps/talta" EXCLUDE_FROM_ALL)
+add_subdirectory("${PROJECT_SOURCE_DIR}/deps/alta-core" EXCLUDE_FROM_ALL)
+add_subdirectory("${PROJECT_SOURCE_DIR}/deps/PicoSHA2" EXCLUDE_FROM_ALL)
 
 add_executable(altac
   "${PROJECT_SOURCE_DIR}/src/altac/main.cpp"
@@ -42,6 +45,22 @@ target_include_directories(altac
   PRIVATE "${PROJECT_BINARY_DIR}/gen/include"
 )
 
+add_library(altall
+  "${PROJECT_SOURCE_DIR}/src/altall/altall.cpp"
+  "${PROJECT_SOURCE_DIR}/src/altall/mangle.cpp"
+  "${PROJECT_SOURCE_DIR}/src/altall/util.cpp"
+)
+target_include_directories(altall
+  PRIVATE ${LLVM_INCLUDE_DIRS}
+  PUBLIC "${PROJECT_SOURCE_DIR}/include"
+)
+separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
+target_compile_definitions(altall PRIVATE ${LLVM_DEFINITIONS_LIST})
+
+target_link_libraries(altall PUBLIC altacore)
+target_link_libraries(altall PRIVATE picosha2)
+llvm_config(altall support core codegen AllTargetsCodeGens)
+
 # credit to Austin Lasher (https://medium.com/@alasher/colored-c-compiler-output-with-ninja-clang-gcc-10bfe7f2b949)
 option(FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
 if(${FORCE_COLORED_OUTPUT})
@@ -52,7 +71,7 @@ if(${FORCE_COLORED_OUTPUT})
   endif()
 endif()
 
-target_link_libraries(altac PUBLIC altacore talta crossguid)
+target_link_libraries(altac PUBLIC crossguid picosha2 altall)
 
 # define the stdlib directory for debug builds
 target_compile_definitions(altac PRIVATE ALTA_DEBUG_STDLIB_PATH="${PROJECT_SOURCE_DIR}/stdlib" PRIVATE ALTA_DEBUG_RUNTIME_PATH="${PROJECT_SOURCE_DIR}/runtime")
@@ -67,25 +86,37 @@ set_target_properties(altac
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
+set_target_properties(altall
+  PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED on
+  CXX_EXTENSIONS off
+  ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+
 FILE(GLOB_RECURSE AMAKE_SOURCES FOLLOW_SYMLINKS LIST_DIRECTORIES true ${PROJECT_BINARY_DIR}/*)
 
-# we use `runtime-override` and `stdlib-override` to ensure
-# the right paths are used in release builds
-add_custom_target(amake ALL
-  "$<TARGET_FILE:altac>" -c -g "${CMAKE_GENERATOR}" -d -o "${PROJECT_BINARY_DIR}/amake" -nw msvc-crt-secure --runtime-override "${PROJECT_SOURCE_DIR}/runtime" --stdlib-override "${PROJECT_SOURCE_DIR}/stdlib" "${PROJECT_SOURCE_DIR}/src/amake"
-  SOURCES ${AMAKE_SOURCES}
-  USES_TERMINAL
-)
+if (BUILD_AMAKE)
+  # we use `runtime-override` and `stdlib-override` to ensure
+  # the right paths are used in release builds
+  add_custom_target(amake ALL
+    "$<TARGET_FILE:altac>" -c -g "${CMAKE_GENERATOR}" -d -o "${PROJECT_BINARY_DIR}/amake" -nw msvc-crt-secure --runtime-override "${PROJECT_SOURCE_DIR}/runtime" --stdlib-override "${PROJECT_SOURCE_DIR}/stdlib" "${PROJECT_SOURCE_DIR}/src/amake"
+    SOURCES ${AMAKE_SOURCES}
+    USES_TERMINAL
+  )
 
-if (WIN32)
-  set(PLATFORM_EXECUTABLE_EXTENSION ".exe")
-else()
-  set(PLATFORM_EXECUTABLE_EXTENSION "")
+  if (WIN32)
+    set(PLATFORM_EXECUTABLE_EXTENSION ".exe")
+  else()
+    set(PLATFORM_EXECUTABLE_EXTENSION "")
+  endif()
+
+  add_custom_command(TARGET amake POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_BINARY_DIR}/amake/_build/bin/amake${PLATFORM_EXECUTABLE_EXTENSION}" "${CMAKE_BINARY_DIR}/bin/amake${PLATFORM_EXECUTABLE_EXTENSION}"
+  )
 endif()
-
-add_custom_command(TARGET amake POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy "${PROJECT_BINARY_DIR}/amake/_build/bin/amake${PLATFORM_EXECUTABLE_EXTENSION}" "${CMAKE_BINARY_DIR}/bin/amake${PLATFORM_EXECUTABLE_EXTENSION}"
-)
 
 if (WIN32)
   set(ALTA_DOC_DIR "doc")
@@ -126,37 +157,37 @@ install(FILES "${PROJECT_SOURCE_DIR}/deps/json.LICENSE.txt"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
 )
-install(FILES "${PROJECT_SOURCE_DIR}/deps/talta/deps/PicoSHA2/LICENSE"
+install(FILES "${PROJECT_SOURCE_DIR}/deps/PicoSHA2/LICENSE"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
   RENAME "PicoSHA2.LICENSE.txt"
 )
-install(FILES "${PROJECT_SOURCE_DIR}/deps/talta/deps/alta-core/deps/any/LICENSE_1_0.txt"
+install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/any/LICENSE_1_0.txt"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
   RENAME "any.LICENSE.txt"
 )
-install(FILES "${PROJECT_SOURCE_DIR}/deps/talta/deps/alta-core/deps/crossguid/LICENSE"
+install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/crossguid/LICENSE"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
   RENAME "crossguid.LICENSE.txt"
 )
-install(FILES "${PROJECT_SOURCE_DIR}/deps/talta/deps/alta-core/deps/optional/COPYING"
+install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/optional/COPYING"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
   RENAME "optional.LICENSE.txt"
 )
-install(FILES "${PROJECT_SOURCE_DIR}/deps/talta/deps/alta-core/deps/semver.c/LICENSE"
+install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/semver.c/LICENSE"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
   RENAME "semver.c.LICENSE.txt"
 )
-install(FILES "${PROJECT_SOURCE_DIR}/deps/talta/deps/alta-core/deps/variant/LICENSE.md"
+install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/variant/LICENSE.md"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
   RENAME "variant.LICENSE.txt"
 )
-install(FILES "${PROJECT_SOURCE_DIR}/deps/talta/deps/alta-core/deps/yaml-cpp/LICENSE"
+install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/yaml-cpp/LICENSE"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
   RENAME "yaml-cpp.LICENSE.txt"
@@ -187,19 +218,21 @@ else()
   )
 endif()
 
-set(AMAKE_EXECUTABLE "${CMAKE_BINARY_DIR}/bin/amake${PLATFORM_EXECUTABLE_EXTENSION}")
+if (BUILD_AMAKE)
+  set(AMAKE_EXECUTABLE "${CMAKE_BINARY_DIR}/bin/amake${PLATFORM_EXECUTABLE_EXTENSION}")
 
-# install files for amake
-if (WIN32)
-  install(PROGRAMS "${AMAKE_EXECUTABLE}"
-    DESTINATION .
-    COMPONENT Utilities
-  )
-else()
-  install(PROGRAMS "${AMAKE_EXECUTABLE}"
-    DESTINATION bin
-    COMPONENT Utilities
-  )
+  # install files for amake
+  if (WIN32)
+    install(PROGRAMS "${AMAKE_EXECUTABLE}"
+      DESTINATION .
+      COMPONENT Utilities
+    )
+  else()
+    install(PROGRAMS "${AMAKE_EXECUTABLE}"
+      DESTINATION bin
+      COMPONENT Utilities
+    )
+  endif()
 endif()
 
 # install standard library
