@@ -8,18 +8,21 @@
 
 namespace AltaLL {
 
-	#define ALTALL_LLWRAP_DEF(_type, _dispose) \
-		static inline std::shared_ptr<std::remove_pointer_t<_type>> llwrap(_type val) { \
-			return std::shared_ptr<std::remove_pointer_t<_type>>(val, _dispose); \
+	#define ALTALL_LLWRAP_DEF_CUSTOM(_type, _dispose) \
+		using LL ## _type = std::shared_ptr<std::remove_pointer_t<LLVM ## _type ## Ref>>; \
+		static inline LL ## _type llwrap(LLVM ## _type ## Ref val) { \
+			return LL ## _type(val, _dispose); \
 		};
 
+	#define ALTALL_LLWRAP_DEF(_type) ALTALL_LLWRAP_DEF_CUSTOM(_type, LLVMDispose ## _type)
+
 	// using a template doesn't work properly (the compiler doesn't use the explicit instantiations in some cases)
-	ALTALL_LLWRAP_DEF(LLVMContextRef, LLVMContextDispose);
-	ALTALL_LLWRAP_DEF(LLVMModuleRef, LLVMDisposeModule);
-	ALTALL_LLWRAP_DEF(LLVMBuilderRef, LLVMDisposeBuilder);
-	ALTALL_LLWRAP_DEF(LLVMTargetMachineRef, LLVMDisposeTargetMachine);
-	ALTALL_LLWRAP_DEF(LLVMTargetDataRef, LLVMDisposeTargetData);
-	ALTALL_LLWRAP_DEF(LLVMPassManagerRef, LLVMDisposePassManager);
+	ALTALL_LLWRAP_DEF_CUSTOM(Context, LLVMContextDispose);
+	ALTALL_LLWRAP_DEF(Module);
+	ALTALL_LLWRAP_DEF(Builder);
+	ALTALL_LLWRAP_DEF(TargetMachine);
+	ALTALL_LLWRAP_DEF(TargetData);
+	ALTALL_LLWRAP_DEF(PassManager);
 
 	static inline std::string wrapMessage(char* msg) {
 		std::string str(msg);

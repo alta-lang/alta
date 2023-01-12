@@ -49,6 +49,7 @@ add_library(altall
   "${PROJECT_SOURCE_DIR}/src/altall/altall.cpp"
   "${PROJECT_SOURCE_DIR}/src/altall/mangle.cpp"
   "${PROJECT_SOURCE_DIR}/src/altall/util.cpp"
+  "${PROJECT_SOURCE_DIR}/src/altall/compiler.cpp"
 )
 target_include_directories(altall
   PRIVATE ${LLVM_INCLUDE_DIRS}
@@ -88,7 +89,7 @@ set_target_properties(altac
 
 set_target_properties(altall
   PROPERTIES
-  CXX_STANDARD 17
+  CXX_STANDARD 20
   CXX_STANDARD_REQUIRED on
   CXX_EXTENSIONS off
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"

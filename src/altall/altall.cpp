@@ -3,6 +3,8 @@
 #include <altall/util.hpp>
 #include <llvm-c/Target.h>
 #include <llvm-c/TargetMachine.h>
+#include <altall/compiler.hpp>
+#include <stack>
 
 static ALTACORE_MAP<std::string, bool> varargTable;
 static ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> invalidValueExpressionTable;
@@ -53,8 +55,33 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	std::string hostCPUFeatures = wrapMessage(LLVMGetHostCPUFeatures());
 	LLVMTargetRef rawTarget = NULL;
 	auto outputPathStr = binaryOutputPath.absolutify().toString();
+	Compiler altaCompiler(llmod);
 
-	// TODO: compile
+	std::stack<std::pair<std::shared_ptr<AltaCore::AST::RootNode>, size_t>> rootStack;
+	std::unordered_set<std::string> processedRoots;
+
+	// iterate through all the root nodes and compile them
+	// (not recursively, to reduce stack usage and avoid stack overflows)
+	rootStack.push(std::make_pair(root, 0));
+	while (!rootStack.empty()) {
+		auto& [curr, idx] = rootStack.top();
+
+		if (idx == 0) {
+			processedRoots.insert(curr->id);
+		}
+
+		if (idx < curr->info->dependencyASTs.size()) {
+			if (processedRoots.find(curr->info->dependencyASTs[idx]->id) == processedRoots.end()) {
+				auto depIdx = idx++;
+				rootStack.push(std::make_pair(curr->info->dependencyASTs[depIdx], 0));
+				continue;
+			}
+		}
+
+		altaCompiler.compile(curr);
+
+		rootStack.pop();
+	}
 
 	LLVMInitializeNativeTarget();
 	LLVMInitializeNativeAsmPrinter();
