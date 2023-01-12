@@ -29,7 +29,6 @@
 #include <setjmp.h>
 #include <string.h>
 #include <stdarg.h>
-#include <stdio.h>
 #endif
 
 #include "definitions.h"

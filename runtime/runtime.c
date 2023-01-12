@@ -1,6 +1,17 @@
 #define _ALTA_RUNTIME_EXPORTING
 #include "common.h"
 
+#define __STDC_LIMIT_MACROS
+#define __STDC_CONSTANT_MACROS
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <setjmp.h>
+#include <string.h>
+#include <stdarg.h>
+#include <stdio.h>
+
 _Alta_global_runtime_type _Alta_global_runtime;
 
 _Alta_runtime_export void _Alta_init_global_runtime() {
