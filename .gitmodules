@@ -1,3 +1,0 @@
-[submodule "deps/talta"]
-	path = deps/talta
-	url = https://github.com/alta-lang/talta.git
