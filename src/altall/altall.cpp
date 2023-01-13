@@ -5,6 +5,7 @@
 #include <llvm-c/TargetMachine.h>
 #include <altall/compiler.hpp>
 #include <stack>
+#include <string.h>
 
 static ALTACORE_MAP<std::string, bool> varargTable;
 static ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> invalidValueExpressionTable;
@@ -96,7 +97,13 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	LLVMSetModuleDataLayout(llmod.get(), targetData.get());
 	LLVMSetTarget(llmod.get(), defaultTriple.c_str());
 
-	if (LLVMTargetMachineEmitToFile(targetMachine.get(), llmod.get(), outputPathStr.c_str(), LLVMObjectFile, NULL)) {
+	// on some platforms, the LLVM headers are wrong and specify the filename argument to LLVMTargetMachineEmitToFile as `char*` instead of `const char*`.
+	// just in case, let's duplicate the string data.
+	auto dupstr = strdup(outputPathStr.c_str());
+
+	if (LLVMTargetMachineEmitToFile(targetMachine.get(), llmod.get(), dupstr, LLVMObjectFile, NULL)) {
 		throw std::runtime_error("Failed to emit object file");
 	}
+
+	free(dupstr);
 };
