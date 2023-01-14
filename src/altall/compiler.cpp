@@ -1,468 +1,1463 @@
 #include <altall/compiler.hpp>
+#include <altall/mangle.hpp>
+#include <altall/altall.hpp>
+#include <bit>
 
-// DEBUGGING
+// DEBUGGING/DEVELOPMENT
 #include <iostream>
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::returnNull() {
+static ALTACORE_MAP<std::string, bool> varargTable;
+ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> AltaLL::Compiler::invalidValueExpressionTable;
+
+#define AC_ATTRIBUTE_FUNC [=](std::shared_ptr<AltaCore::AST::Node> _target, std::shared_ptr<AltaCore::DH::Node> _info, std::vector<AltaCore::Attributes::AttributeArgument> args) -> void
+#define AC_ATTRIBUTE_CAST(x) auto target = std::dynamic_pointer_cast<AltaCore::AST::x>(_target);\
+	auto info = std::dynamic_pointer_cast<AltaCore::DH::x>(_info);\
+	if (!target || !info) throw std::runtime_error("this isn't supposed to happen");
+#define AC_ATTRIBUTE(x, ...) AltaCore::Attributes::registerAttribute({ __VA_ARGS__ }, { AltaCore::AST::NodeType::x }, AC_ATTRIBUTE_FUNC {\
+	AC_ATTRIBUTE_CAST(x);
+#define AC_GENERAL_ATTRIBUTE(...) AltaCore::Attributes::registerAttribute({ __VA_ARGS__ }, {}, AC_ATTRIBUTE_FUNC {
+#define AC_END_ATTRIBUTE }, modulePath.toString())
+
+void AltaLL::registerAttributes(AltaCore::Filesystem::Path modulePath) {
+	AC_ATTRIBUTE(Parameter, "native", "vararg");
+		varargTable[target->id] = true;
+	AC_END_ATTRIBUTE;
+	AC_ATTRIBUTE(SpecialFetchExpression, "invalid");
+		if (args.size() != 1) {
+			throw std::runtime_error("expected a single type argument to special fetch expression @invalid attribute");
+		}
+		if (!args.front().isScopeItem) {
+			throw std::runtime_error("expected a type argument for special fetch expression @invalid attribute");
+		}
+		auto type = std::dynamic_pointer_cast<AltaCore::DET::Type>(args.front().item);
+		if (!type) {
+			throw std::runtime_error("expected a type argument for special fetch expression @invalid attribute");
+		}
+		Compiler::invalidValueExpressionTable[info->id] = type;
+		info->items.push_back(type);
+	AC_END_ATTRIBUTE;
+};
+
+AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::endBranch(LLVMBasicBlockRef mergeBlock, std::vector<LLVMBasicBlockRef> mergingBlocks) {
+	auto size = sizesDuringBranching.top();
+	sizesDuringBranching.pop();
+
+	for (size_t i = size; i < items.size(); ++i) {
+		auto& item = items[i];
+		auto lltype = co_await compiler.translateType(item.type->destroyReferences()->reference());
+		auto nullVal = LLVMConstNull(lltype);
+
+		auto merged = LLVMBuildPhi(compiler._builders.top().get(), lltype, "");
+
+		for (size_t j = 0; j < mergingBlocks.size(); ++j) {
+			if (mergingBlocks[j] == item.sourceBlock) {
+				LLVMAddIncoming(merged, &item.source, &mergingBlocks[j], 1);
+			} else {
+				LLVMAddIncoming(merged, &nullVal, &mergingBlocks[j], 1);
+			}
+		}
+
+		item.sourceBlock = mergeBlock;
+		item.source = merged;
+	}
+
+	co_return;
+};
+
+AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::cleanup() {
+	// TODO
+	co_return;
+};
+
+void AltaLL::Compiler::ScopeStack::pushItem(LLVMValueRef memory, std::shared_ptr<AltaCore::DET::Type> type) {
+	pushItem(memory, type, LLVMGetInsertBlock(compiler._builders.top().get()));
+};
+
+void AltaLL::Compiler::ScopeStack::pushItem(LLVMValueRef memory, std::shared_ptr<AltaCore::DET::Type> type, LLVMBasicBlockRef sourceBlock) {
+	items.emplace_back(ScopeItem { sourceBlock, memory, type });
+};
+
+AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::shared_ptr<AltaCore::DET::Type> type) {
+	if (_definedTypes[type->id]) {
+		co_return _definedTypes[type->id];
+	}
+
+	LLVMTypeRef result = NULL;
+
+	if (type->isNative && !type->isFunction) {
+		switch (type->nativeTypeName) {
+			case AltaCore::DET::NativeType::Integer: {
+				uint8_t bits = 32;
+
+				for (const auto& modifier: type->modifiers) {
+					if (modifier & static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long)) {
+						if (bits < 64) {
+							bits *= 2;
+						}
+					}
+
+					if (modifier & static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Short)) {
+						if (bits > 8) {
+							bits /= 2;
+						}
+					}
+
+					if (modifier & (static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Pointer) | static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Reference))) {
+						break;
+					}
+				}
+
+				result = LLVMIntTypeInContext(_llcontext.get(), bits);
+			} break;
+			case AltaCore::DET::NativeType::Byte:        result = LLVMInt8TypeInContext(_llcontext.get()); break;
+			case AltaCore::DET::NativeType::Bool:        result = LLVMInt1TypeInContext(_llcontext.get()); break;
+			case AltaCore::DET::NativeType::Void:        result = LLVMVoidTypeInContext(_llcontext.get()); break;
+			case AltaCore::DET::NativeType::Double:      result = LLVMDoubleTypeInContext(_llcontext.get()); break;
+			case AltaCore::DET::NativeType::Float:       result = LLVMFloatTypeInContext(_llcontext.get()); break;
+			case AltaCore::DET::NativeType::UserDefined: result = NULL; break;
+		}
+	} else if (type->isFunction) {
+		if (type->isRawFunction) {
+			auto retType = co_await translateType(type->returnType);
+			std::vector<LLVMTypeRef> params;
+
+			for (const auto& [name, paramType, isVariable, id]: type->parameters) {
+				params.push_back(co_await translateType(paramType));
+
+				if (isVariable) {
+					throw std::runtime_error("TODO: handle `isVariable`");
+				}
+			}
+
+			result = LLVMFunctionType(retType, params.data(), params.size(), false);
+		} else {
+			throw std::runtime_error("TODO: handle non-raw function types");
+		}
+	} else if (type->isUnion()) {
+		std::array<LLVMTypeRef, 2> members;
+		size_t unionSize = 0;
+		size_t alignment = 0;
+
+		members[0] = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(type->unionOf.size() - 1));
+
+		for (const auto& component: type->unionOf) {
+			auto lltype = co_await translateType(component);
+			auto llsize = LLVMStoreSizeOfType(_targetData.get(), lltype);
+			auto llalign = LLVMPreferredAlignmentOfType(_targetData.get(), lltype);
+			if (llsize > unionSize) {
+				unionSize = llsize;
+			}
+			if (llalign > alignment) {
+				alignment = llalign;
+			}
+		}
+
+		// FIXME: we need to take into account the right alignment for members
+		members[1] = LLVMArrayType(LLVMInt8TypeInContext(_llcontext.get()), unionSize);
+
+		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+	} else if (type->isOptional) {
+		std::array<LLVMTypeRef, 2> members;
+
+		members[0] = LLVMInt1TypeInContext(_llcontext.get());
+		members[1] = co_await translateType(type->optionalTarget);
+
+		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+	} else if (type->bitfield) {
+		result = co_await translateType(type->bitfield->underlyingBitfieldType.lock());
+	} else if (type->klass) {
+		if (!_definedTypes[type->klass->id]) {
+			_definedTypes[type->klass->id] = LLVMStructCreateNamed(_llcontext.get(), type->klass->id.c_str());
+		}
+		result = _definedTypes[type->klass->id];
+	}
+
+	if (!result) {
+		co_return result;
+	}
+
+	for (const auto& modifier: type->modifiers) {
+		if (modifier & (static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Pointer) | static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Reference))) {
+			result = LLVMPointerType(result, 0);
+		}
+	}
+
+	_definedTypes[type->id] = result;
+
+	co_return result;
+};
+
+const AltaLL::Compiler::CopyInfo AltaLL::Compiler::defaultCopyInfo = std::make_pair(false, false);
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, std::shared_ptr<AltaCore::DET::Type> dest, bool copy, CopyInfo additionalCopyInfo, bool manual, AltaCore::Errors::Position* position) {
+	namespace DET = AltaCore::DET;
+
+	if (dest->isExactlyCompatibleWith(*exprType)) {
+		if (
+			copy &&
+			additionalCopyInfo.first &&
+			(
+				dest->indirectionLevel() < 1 ||
+				(!dest->isUnion() && exprType->isUnion())
+			)
+		) {
+			expr = co_await doCopyCtor(expr, exprType, additionalCopyInfo);
+		}
+		co_return expr;
+	}
+
+	// native type (e.g. integer) -> bool
+	//
+	// done instead of simple coercion because simple coercion might truncate/overflow the value
+	// and end up with zero (which is falsy) instead of the proper truthy value
+	if (*dest == DET::Type(DET::NativeType::Bool) && exprType->isNative && exprType->referenceLevel() == 0) {
+		if (!(*exprType == DET::Type(DET::NativeType::Bool))) {
+			expr = LLVMBuildICmp(_builders.top().get(), LLVMIntNE, expr, LLVMConstInt(co_await translateType(exprType), 0, false), "");
+		}
+		co_return expr;
+	}
+
+	auto path = AltaCore::DET::Type::findCast(exprType, dest, manual);
+
+	if (path.size() == 0) {
+		std::string message = "no way to cast from (" + exprType->toString() + ") to (" + dest->toString() + ')';
+		if (position) {
+			throw AltaCore::Errors::ValidationError(message, *position);
+		} else {
+			throw std::runtime_error(message);
+		}
+	}
+
+	LLVMValueRef result = expr;
+
+	auto currentType = exprType;
+	auto canCopy = [&](std::shared_ptr<DET::Type> type = nullptr) {
+		if (!type) type = currentType;
+		return (!type->isNative || !type->isRawFunction) && type->indirectionLevel() < 1 && (!type->klass || type->klass->copyConstructor);
+	};
+
+	for (size_t i = 0; i < path.size(); i++) {
+		using CCT = AltaCore::DET::CastComponentType;
+		using SCT = AltaCore::DET::SpecialCastType;
+		auto& component = path[i];
+		if (component.type == CCT::Destination) {
+			if (component.special == SCT::OptionalPresent) {
+				result = LLVMBuildExtractValue(_builders.top().get(), expr, 0, "");
+				currentType = std::make_shared<DET::Type>(DET::NativeType::Bool);
+				copy = false;
+			} else if (component.special == SCT::EmptyOptional) {
+				std::array<LLVMValueRef, 2> vals;
+				vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
+				vals[1] = LLVMGetUndef(co_await translateType(currentType));
+				result = LLVMConstStructInContext(_llcontext.get(), vals.data(), vals.size(), false);
+				currentType = dest;
+				copy = false;
+			} else if (component.special == SCT::WrapFunction) {
+				throw std::runtime_error("TODO: support function wrapping");
+
+				auto wrappedCopy = exprType->copy();
+				wrappedCopy->isRawFunction = false;
+				currentType = dest;
+				copy = false;
+			}
+			bool didCopy = false;
+			if (copy && additionalCopyInfo.first && canCopy()) {
+				result = co_await doCopyCtor(result, currentType, additionalCopyInfo, &didCopy);
+			}
+		} else if (component.type == CCT::SimpleCoercion) {
+			if (currentType->referenceLevel() > 0 || component.target->referenceLevel() > 0) {
+				throw std::runtime_error("Unsupported cast (cannot simply coerce with references)");
+			}
+
+			auto lltarget = co_await translateType(component.target);
+			bool currentIsFP = currentType->nativeTypeName == DET::NativeType::Float || currentType->nativeTypeName == DET::NativeType::Double;
+			bool targetIsFP = component.target->nativeTypeName == DET::NativeType::Float || component.target->nativeTypeName == DET::NativeType::Double;
+
+			if (currentType->pointerLevel() > 0 && component.target->isNative) {
+				result = LLVMBuildPtrToInt(_builders.top().get(), result, lltarget, "");
+			} else if (currentType->isNative && component.target->pointerLevel() > 0) {
+				result = LLVMBuildIntToPtr(_builders.top().get(), result, lltarget, "");
+			} else if (currentType->pointerLevel() > 0 && component.target->pointerLevel() > 0) {
+				result = LLVMBuildBitCast(_builders.top().get(), result, lltarget, "");
+			} else if (currentIsFP && targetIsFP) {
+				result = LLVMBuildFPCast(_builders.top().get(), result, lltarget, "");
+			} else if (currentIsFP) {
+				result = (component.target->isSigned() ? LLVMBuildFPToSI : LLVMBuildFPToUI)(_builders.top().get(), result, lltarget, "");
+			} else if (targetIsFP) {
+				result = (currentType->isSigned() ? LLVMBuildSIToFP : LLVMBuildUIToFP)(_builders.top().get(), result, lltarget, "");
+			} else {
+				result = LLVMBuildIntCast2(_builders.top().get(), result, lltarget, component.target->isSigned(), "");
+			}
+
+			currentType = component.target;
+			copy = false;
+			additionalCopyInfo = std::make_pair(false, true);
+		} else if (component.type == CCT::Upcast) {
+			bool didRetrieval = false;
+			auto nextType = std::make_shared<DET::Type>(component.klass);
+
+			if (currentType->pointerLevel() > 0) {
+				nextType = nextType->point();
+			} else if (currentType->referenceLevel() > 0) {
+				nextType = nextType->reference();
+			}
+
+			if (currentType->pointerLevel() > 1) {
+				throw std::runtime_error("too much indirection for upcast");
+			}
+
+			result = co_await doParentRetrieval(result, currentType, nextType, &didRetrieval);
+			if (!didRetrieval) {
+				throw std::runtime_error("supposed to be able to do parent retrieval");
+			}
+
+			currentType = nextType;
+			additionalCopyInfo = std::make_pair(true, false);
+		} else if (component.type == CCT::Downcast) {
+			bool didRetrieval = false;
+			auto nextType = std::make_shared<DET::Type>(component.klass);
+
+			if (currentType->pointerLevel() > 0) {
+				nextType = nextType->point();
+			} else if (currentType->referenceLevel() > 0) {
+				nextType = nextType->reference();
+			}
+
+			if (currentType->pointerLevel() > 1) {
+				throw std::runtime_error("too much indirection for downcast");
+			}
+
+			result = co_await doChildRetrieval(result, currentType, nextType, &didRetrieval);
+			if (!didRetrieval) {
+				throw std::runtime_error("supposed to be able to do child retrieval");
+			}
+
+			currentType = nextType;
+			additionalCopyInfo = std::make_pair(false, false);
+		} else if (component.type == CCT::Reference) {
+			if (additionalCopyInfo.second) {
+				result = co_await tmpify(result, currentType, false);
+			}
+
+			currentType = currentType->reference();
+			copy = false;
+			additionalCopyInfo = std::make_pair(false, true);
+		} else if (component.type == CCT::Dereference) {
+			result = LLVMBuildLoad2(_builders.top().get(), co_await translateType(currentType->dereference()), result, "");
+			currentType = currentType->dereference();
+			additionalCopyInfo = std::make_pair(true, true);
+		} else if (component.type == CCT::Wrap) {
+			bool didCopy = false;
+
+			if (copy && additionalCopyInfo.first && canCopy()) {
+				result = co_await doCopyCtor(result, currentType, additionalCopyInfo, &didCopy);
+				copy = false;
+			}
+
+			auto lltype = co_await translateType(component.target);
+			auto tmp = LLVMBuildInsertValue(_builders.top().get(), LLVMGetUndef(lltype), LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 1, false), 0, "");
+			result = LLVMBuildInsertValue(_builders.top().get(), tmp, result, 1, "");
+
+			currentType = std::make_shared<DET::Type>(true, currentType);
+			copy = false;
+			additionalCopyInfo = std::make_pair(false, true);
+		} else if (component.type == CCT::Unwrap) {
+			result = co_await loadRef(result, currentType);
+			result = LLVMBuildExtractValue(_builders.top().get(), result, 1, "");
+			currentType = currentType->optionalTarget;
+			additionalCopyInfo = std::make_pair(true, true);
+		} else if (component.type == CCT::Widen) {
+			auto memberType = component.via;
+			size_t memberIndex = 0;
+
+			for (; memberIndex < component.target->unionOf.size(); ++memberIndex) {
+				if (*component.target->unionOf[memberIndex] == *memberType) {
+					memberIndex = memberIndex;
+					break;
+				}
+			}
+
+			if (memberIndex == component.target->unionOf.size()) {
+				throw std::runtime_error("impossible");
+			}
+
+			auto lltarget = co_await translateType(component.target);
+			auto allocated = LLVMBuildAlloca(_builders.top().get(), lltarget, "");
+
+			std::array<LLVMTypeRef, 2> members;
+			members[0] = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(component.target->unionOf.size() - 1));
+			members[1] = co_await translateType(component.via);
+			auto llactual = LLVMStructType(members.data(), members.size(), false);
+
+			auto casted = LLVMBuildBitCast(_builders.top().get(), allocated, LLVMPointerType(llactual, 0), "");
+
+			auto tmp = LLVMBuildInsertValue(_builders.top().get(), LLVMGetUndef(llactual), LLVMConstInt(members[0], memberIndex, false), 0, "");
+			result = LLVMBuildInsertValue(_builders.top().get(), tmp, result, 1, "");
+
+			LLVMBuildStore(_builders.top().get(), result, allocated);
+
+			result = LLVMBuildLoad2(_builders.top().get(), lltarget, allocated, "");
+
+			currentType = component.target;
+			copy = false;
+			additionalCopyInfo = std::make_pair(false, true);
+		} else if (component.type == CCT::Narrow) {
+			result = co_await loadRef(result, currentType);
+
+			size_t memberIdx = 0;
+
+			for (size_t i = 0; i < currentType->unionOf.size(); i++) {
+				auto& item = currentType->unionOf[i];
+				if (*item == *component.target) {
+					memberIdx = i;
+					break;
+				}
+			}
+
+			if (memberIdx == currentType->unionOf.size()) {
+				throw std::runtime_error("impossible");
+			}
+
+			auto llcurrent = co_await translateType(currentType->destroyReferences());
+			auto allocated = LLVMBuildAlloca(_builders.top().get(), llcurrent, "");
+
+			LLVMBuildStore(_builders.top().get(), result, allocated);
+
+			std::array<LLVMTypeRef, 2> members;
+			members[0] = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(component.target->unionOf.size() - 1));
+			members[1] = co_await translateType(component.target);
+			auto llactual = LLVMStructType(members.data(), members.size(), false);
+
+			auto casted = LLVMBuildBitCast(_builders.top().get(), allocated, LLVMPointerType(llactual, 0), "");
+
+			auto tmp = LLVMBuildLoad2(_builders.top().get(), llactual, casted, "");
+			result = LLVMBuildExtractValue(_builders.top().get(), tmp, 1, "");
+
+			additionalCopyInfo = std::make_pair(true, true);
+			currentType = component.target;
+			bool didCopy = false;
+
+			if (copy && additionalCopyInfo.first && canCopy()) {
+				result = co_await doCopyCtor(result, currentType, additionalCopyInfo, &didCopy);
+				copy = false;
+			}
+		} else if (component.type == CCT::From) {
+			// this one is a little different, because we need to make sure we always copy if we can
+			// because we're passing the value into a function that assumes it receives a copy it can
+			// push onto the stack and destroy, so we need to make sure that's what it gets
+			if (/*copy &&*/ additionalCopyInfo.first && canCopy(component.method->parameterVariables[0]->type)) {
+				result = co_await doCopyCtor(result, currentType, additionalCopyInfo);
+				copy = false;
+			}
+
+			auto funcType = DET::Type::getUnderlyingType(component.method);
+			auto lltype = co_await translateType(funcType);
+
+			if (!_definedFunctions[component.method->id]) {
+				auto mangled = mangleName(component.method.get());
+				_definedFunctions[component.method->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), lltype);
+			}
+
+			std::array<LLVMValueRef, 1> args { result };
+			result = LLVMBuildCall2(_builders.top().get(), lltype, _definedFunctions[component.method->id], args.data(), args.size(), "");
+
+			copy = false;
+			additionalCopyInfo = std::make_pair(false, true);
+			currentType = std::make_shared<DET::Type>(component.method->parentScope.lock()->parentClass.lock());
+		} else if (component.type == CCT::To) {
+			auto to = component.method;
+			auto classType = std::make_shared<DET::Type>(component.method->parentScope.lock()->parentClass.lock());
+
+			if (currentType->referenceLevel() == 0) {
+				result = co_await tmpify(result, currentType, false);
+			}
+
+			auto funcType = DET::Type::getUnderlyingType(component.method);
+			auto lltype = co_await translateType(funcType);
+
+			if (!_definedFunctions[component.method->id]) {
+				auto mangled = mangleName(component.method.get());
+				_definedFunctions[component.method->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), lltype);
+			}
+
+			std::array<LLVMValueRef, 1> args { result };
+			result = LLVMBuildCall2(_builders.top().get(), lltype, _definedFunctions[component.method->id], args.data(), args.size(), "");
+
+			currentType = component.method->returnType;
+			copy = false;
+			additionalCopyInfo = std::make_pair(false, true);
+		} else if (component.type == CCT::Multicast) {
+			bool didCopy = false;
+
+			if (copy && additionalCopyInfo.first && canCopy()) {
+				result = co_await doCopyCtor(result, currentType, additionalCopyInfo, &didCopy);
+				copy = false;
+			}
+
+			auto funcType_Alta_bad_cast = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+
+			if (!_definedFunctions["_Alta_bad_cast"]) {
+				_definedFunctions["_Alta_bad_cast"] = LLVMAddFunction(_llmod.get(), "_Alta_bad_cast", funcType_Alta_bad_cast);
+			}
+
+			auto func_Alta_bad_cast = _definedFunctions["_Alta_bad_cast"];
+			auto parentFunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+			std::vector<LLVMBasicBlockRef> phiBlocks;
+			std::vector<LLVMValueRef> phiVals;
+
+			// first, add the default (bad cast) block
+			auto badCastBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
+
+			// now start creating the switch
+			auto val = LLVMBuildExtractValue(_builders.top().get(), result, 0, "");
+			auto tmpified = co_await tmpify(result, currentType, false);
+			auto switchInstr = LLVMBuildSwitch(_builders.top().get(), val, badCastBlock, currentType->unionOf.size());
+
+			// now move the builder to the bad cast block and build it
+			LLVMPositionBuilderAtEnd(_builders.top().get(), badCastBlock);
+			LLVMBuildCall2(_builders.top().get(), funcType_Alta_bad_cast, func_Alta_bad_cast, nullptr, 0, "");
+			LLVMBuildUnreachable(_builders.top().get());
+
+			// now create the block we go to after we're done here
+			auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
+
+			auto idxType = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(currentType->unionOf.size() - 1));
+
+			for (size_t i = 0; i < currentType->unionOf.size(); ++i) {
+				if (component.multicasts[i].second.size() == 0) {
+					LLVMAddCase(switchInstr, LLVMConstInt(idxType, i, false), badCastBlock);
+				} else {
+					auto& unionMember = currentType->unionOf[i];
+					auto thisBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
+					LLVMAddCase(switchInstr, LLVMConstInt(idxType, i, false), thisBlock);
+					LLVMPositionBuilderAtEnd(_builders.top().get(), thisBlock);
+
+					std::array<LLVMTypeRef, 2> members;
+					members[0] = idxType;
+					members[1] = co_await translateType(unionMember);
+					auto llactual = LLVMStructType(members.data(), members.size(), false);
+
+					auto castedUnion = LLVMBuildBitCast(_builders.top().get(), tmpified, LLVMPointerType(llactual, 0), "");
+					auto loadedUnion = LLVMBuildLoad2(_builders.top().get(), llactual, castedUnion, "");
+					auto member = LLVMBuildExtractValue(_builders.top().get(), loadedUnion, 1, "");
+
+					auto casted = co_await cast(member, unionMember, component.target, false, std::make_pair(false, true), false, position);
+					phiBlocks.push_back(thisBlock);
+					phiVals.push_back(casted);
+				}
+			}
+
+			// now finish building the "done" block
+			LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+
+			result = LLVMBuildPhi(_builders.top().get(), co_await translateType(component.target), "");
+			LLVMAddIncoming(result, phiVals.data(), phiBlocks.data(), phiVals.size());
+
+			currentType = component.target;
+			copy = false;
+			additionalCopyInfo = std::make_pair(false, true);
+		}
+	}
+
+	co_return result;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, CopyInfo additionalCopyInfo, bool* didCopy) {
+	auto result = expr;
+
+	if (exprType->isNative) {
+		if (exprType->isFunction && !exprType->isRawFunction) {
+			throw std::runtime_error("TODO: support non-raw functions");
+		}
+	} else {
+		if (additionalCopyInfo.second && exprType->indirectionLevel() < 1) {
+			result = co_await tmpify(result, exprType);
+			exprType = exprType->reference();
+		}
+
+		LLVMValueRef copyFunc = NULL;
+		LLVMTypeRef copyFuncType = NULL;
+
+		if (exprType->isUnion()) {
+			auto llunionType = co_await translateType(exprType);
+			std::array<LLVMTypeRef, 1> params { LLVMPointerType(llunionType, 0) };
+			copyFuncType = LLVMFunctionType(llunionType, params.data(), params.size(), false);
+
+			if (!_definedFunctions["_Alta_copy_" + mangleType(exprType.get())]) {
+				auto name = "_Alta_copy_" + mangleType(exprType.get());
+				_definedFunctions["_Alta_copy_" + mangleType(exprType.get())] = LLVMAddFunction(_llmod.get(), name.c_str(), copyFuncType);
+			}
+
+			copyFunc = _definedFunctions["_Alta_copy_" + mangleType(exprType.get())];
+		} else if (exprType->isOptional) {
+			auto lloptionalType = co_await translateType(exprType);
+			std::array<LLVMTypeRef, 1> params { LLVMPointerType(lloptionalType, 0) };
+			copyFuncType = LLVMFunctionType(lloptionalType, params.data(), params.size(), false);
+
+			if (!_definedFunctions["_Alta_copy_" + mangleType(exprType.get())]) {
+				auto name = "_Alta_copy_" + mangleType(exprType.get());
+				_definedFunctions["_Alta_copy_" + mangleType(exprType.get())] = LLVMAddFunction(_llmod.get(), name.c_str(), copyFuncType);
+			}
+
+			copyFunc = _definedFunctions["_Alta_copy_" + mangleType(exprType.get())];
+		} else if (
+			// make sure we have a copy constructor,
+			// otherwise, there's no point in continuing
+			exprType->klass->copyConstructor
+		) {
+			auto type = AltaCore::DET::Type::getUnderlyingType(exprType->klass->copyConstructor);
+			copyFuncType = co_await translateType(type);
+
+			if (!_definedFunctions[exprType->klass->copyConstructor->id]) {
+				auto mangled = mangleName(exprType->klass->copyConstructor.get());
+				_definedFunctions[exprType->klass->copyConstructor->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), copyFuncType);
+			}
+
+			copyFunc = _definedFunctions[exprType->klass->copyConstructor->id];
+		}
+
+		if (copyFunc && copyFuncType) {
+			std::array<LLVMValueRef, 1> args { result };
+			result = LLVMBuildCall2(_builders.top().get(), copyFuncType, copyFunc, args.data(), args.size(), "");
+
+			if (didCopy) {
+				*didCopy = true;
+			}
+		}
+	}
+
+	co_return result;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtor(LLVMValueRef compiled, std::shared_ptr<AltaCore::AST::ExpressionNode> expr, std::shared_ptr<AltaCore::DH::ExpressionNode> info, bool* didCopy) {
+	auto exprType = AltaCore::DET::Type::getUnderlyingType(info.get());
+	auto nodeType = expr->nodeType();
+
+	if (didCopy) {
+		*didCopy = false;
+	}
+
+	if (
+		// pointers are copied by value
+		//
+		// note that this does not include references,
+		// those do need to be copied
+		exprType->pointerLevel() < 1 &&
+		// check that the expression isn't a class instantiation
+		// or a function call, since:
+		//   a) for class insts., we *just* created the class. there's
+		//      no need to copy it
+		//   b) for function calls, returned expressions are automatically
+		//      copied if necessary (via this same method, `doCopyCtor`)
+		nodeType != AltaCore::AST::NodeType::ClassInstantiationExpression &&
+		nodeType != AltaCore::AST::NodeType::FunctionCallExpression
+	) {
+		compiled = co_await doCopyCtorInternal(compiled, exprType, additionalCopyInfo(expr, info), didCopy);
+	}
+
+	co_return compiled;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, CopyInfo additionalCopyInfo, bool* didCopy) {
+	if (didCopy) {
+		*didCopy = false;
+	}
+
+	if (
+		// pointers are copied by value
+		//
+		// note that this does not include references,
+		// those do need to be copied
+		exprType->pointerLevel() < 1
+	) {
+		expr = co_await doCopyCtorInternal(expr, exprType, additionalCopyInfo, didCopy);
+	}
+
+	co_return expr;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType) {
+	for (size_t i = 0; i < exprType->referenceLevel(); ++i) {
+		expr = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType->dereference()), expr, "");
+	}
+	co_return expr;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRealInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType) {
+	auto result = expr;
+
+	if (
+		!exprType->isNative &&
+		!exprType->isUnion() &&
+		exprType->klass
+	) {
+		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto lltype = co_await translateType(exprType);
+		auto lltypeRef = co_await translateType(exprType->destroyReferences()->reference());
+
+		if (exprType->indirectionLevel() == 0) {
+			result = co_await tmpify(result, exprType, false);
+		}
+
+		std::array<LLVMValueRef, 3> accessGEP {
+			LLVMConstInt(gepIndexType, 0, false), // first element in "array"
+			LLVMConstInt(gepIndexType, 0, false), // instance_info member within class structure
+			LLVMConstInt(gepIndexType, 0, false), // class_info pointer within instance info
+		};
+		auto classInfoPtrType = LLVMPointerType(_definedTypes["_Alta_class_info"], 0);
+		auto tmp = LLVMBuildGEP2(_builders.top().get(), LLVMPointerType(classInfoPtrType, 0), result, accessGEP.data(), accessGEP.size(), "");
+		auto classInfoPointer = LLVMBuildLoad2(_builders.top().get(), classInfoPtrType, tmp, "");
+
+		std::array<LLVMValueRef, 2> offsetGEP {
+			LLVMConstInt(gepIndexType, 0, false), // first element in "array"
+			LLVMConstInt(gepIndexType, 3, false), // offset_from_real member within class_info
+		};
+		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
+		auto offsetFromRealPointer = LLVMBuildGEP2(_builders.top().get(), LLVMPointerType(i64Type, 0), classInfoPointer, offsetGEP.data(), offsetGEP.size(), "");
+		auto offsetFromReal = LLVMBuildLoad2(_builders.top().get(), i64Type, offsetFromRealPointer, "");
+
+		auto classPointerAsInt = LLVMBuildPtrToInt(_builders.top().get(), result, i64Type, "");
+		auto subtracted = LLVMBuildSub(_builders.top().get(), classPointerAsInt, offsetFromReal, "");
+		result = LLVMBuildIntToPtr(_builders.top().get(), subtracted, lltypeRef, "");
+
+		if (exprType->indirectionLevel() == 0) {
+			result = LLVMBuildLoad2(_builders.top().get(), lltype, result, "");
+		}
+	}
+
+	co_return result;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doParentRetrieval(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, std::shared_ptr<AltaCore::DET::Type> targetType, bool* didRetrieval) {
+	auto result = expr;
+
+	if (didRetrieval != nullptr) {
+		*didRetrieval = false;
+	}
+
+	if (
+		!exprType->isNative &&
+		!exprType->isUnion() &&
+		!targetType->isNative &&
+		!targetType->isUnion() &&
+		exprType->klass &&
+		targetType->klass &&
+		exprType->klass->id != targetType->klass->id &&
+		exprType->klass->hasParent(targetType->klass)
+	) {
+		std::vector<std::shared_ptr<AltaCore::DET::Class>> parentAccessors;
+		std::vector<LLVMValueRef> gepIndices;
+		std::stack<size_t> idxs;
+
+		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+
+		parentAccessors.push_back(exprType->klass);
+		gepIndices.push_back(LLVMConstInt(gepIndexType, 0, false));
+		idxs.push(0);
+
+		while (parentAccessors.size() > 0) {
+			auto& parents = parentAccessors.back()->parents;
+			bool cont = false;
+			bool done = false;
+			for (size_t i = idxs.top(); i < parents.size(); i++) {
+				auto& parent = parents[i];
+				parentAccessors.push_back(parent);
+				gepIndices.push_back(LLVMConstInt(gepIndexType, i, false));
+				if (parent->id == targetType->klass->id) {
+					done = true;
+					break;
+				} else if (parent->parents.size() > 0) {
+					cont = true;
+					idxs.push(0);
+					break;
+				} else {
+					parentAccessors.pop_back();
+					gepIndices.pop_back();
+				}
+			}
+			if (done) break;
+			if (cont) continue;
+			parentAccessors.pop_back();
+			gepIndices.pop_back();
+			idxs.pop();
+			if (idxs.size() > 0) {
+				++idxs.top();
+			}
+		}
+
+		if (exprType->indirectionLevel() == 0) {
+			result = co_await tmpify(result, exprType, false);
+		}
+
+		auto refTargetType = targetType->indirectionLevel() > 0 ? targetType : targetType->reference();
+		auto lltype = co_await translateType(refTargetType);
+		result = LLVMBuildGEP2(_builders.top().get(), lltype, result, gepIndices.data(), gepIndices.size(), "");
+		result = co_await getRealInstance(result, refTargetType);
+
+		if (targetType->indirectionLevel() == 0) {
+			result = LLVMBuildLoad2(_builders.top().get(), co_await translateType(targetType), result, "");
+		}
+
+		if (didRetrieval != nullptr) {
+			*didRetrieval = true;
+		}
+	}
+
+	co_return result;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doChildRetrieval(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, std::shared_ptr<AltaCore::DET::Type> targetType, bool* didRetrieval) {
+	auto result = expr;
+
+	if (didRetrieval != nullptr) {
+		*didRetrieval = false;
+	}
+
+	if (
+		!exprType->isNative &&
+		!exprType->isUnion() &&
+		!targetType->isNative &&
+		!targetType->isUnion() &&
+		exprType->klass &&
+		targetType->klass &&
+		exprType->klass->id != targetType->klass->id &&
+		targetType->klass->hasParent(exprType->klass)
+	) {
+		std::vector<std::shared_ptr<AltaCore::DET::Class>> parentAccessors;
+		std::stack<size_t> idxs;
+
+		parentAccessors.push_back(targetType->klass);
+		idxs.push(0);
+
+		while (parentAccessors.size() > 0) {
+			auto& parents = parentAccessors.back()->parents;
+			bool cont = false;
+			bool done = false;
+			for (size_t i = idxs.top(); i < parents.size(); i++) {
+				auto& parent = parents[i];
+				parentAccessors.push_back(parent);
+				if (parent->id == exprType->klass->id) {
+					done = true;
+					break;
+				} else if (parent->parents.size() > 0) {
+					cont = true;
+					idxs.push(0);
+					break;
+				} else {
+					parentAccessors.pop_back();
+				}
+			}
+			if (done) break;
+			if (cont) continue;
+			parentAccessors.pop_back();
+			idxs.pop();
+			if (idxs.size() > 0) {
+				++idxs.top();
+			}
+		}
+
+		auto voidPointerType = LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0);
+		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
+		std::array<LLVMTypeRef, 2> funcParams_Alta_get_child { voidPointerType, i64Type };
+		auto funcType_Alta_get_child = LLVMFunctionType(voidPointerType, funcParams_Alta_get_child.data(), funcParams_Alta_get_child.size(), true);
+
+		if (!_definedFunctions["_Alta_get_child"]) {
+			_definedFunctions["_Alta_get_child"] = LLVMAddFunction(_llmod.get(), "_Alta_get_child", funcType_Alta_get_child);
+		}
+
+		auto func_Alta_get_child = _definedFunctions["_Alta_get_child"];
+
+		std::vector<LLVMValueRef> args { LLVMBuildPointerCast(_builders.top().get(), result, voidPointerType, ""), LLVMConstInt(i64Type, parentAccessors.size() - 1, false) };
+
+		for (size_t i = parentAccessors.size() - 1; i > 0; i--) {
+			auto mangled = mangleName(parentAccessors[i - 1].get());
+			args.push_back(LLVMConstStringInContext(_llcontext.get(), mangled.c_str(), mangled.size(), false));
+		}
+
+		result = LLVMBuildCall2(_builders.top().get(), funcType_Alta_get_child, func_Alta_get_child, args.data(), args.size(), "");
+
+		if (didRetrieval != nullptr) {
+			*didRetrieval = true;
+		}
+	}
+
+	co_return result;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::tmpify(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, bool withStack) {
+	if (_inGenerator) {
+		throw std::runtime_error("TODO: tmpify in generators");
+	}
+
+	auto lltype = co_await translateType(type->deconstify()->destroyReferences());
+	auto var = LLVMBuildAlloca(_builders.top().get(), lltype, "");
+
+	if (withStack) {
+		throw std::runtime_error("TODO: tmpify with stack");
+	}
+
+	LLVMBuildStore(_builders.top().get(), expr, var);
+
+	co_return var;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::returnNull() {
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileNode(std::shared_ptr<AltaCore::AST::Node> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileNode(std::shared_ptr<AltaCore::AST::Node> node, std::shared_ptr<AltaCore::DH::Node> info) {
 	switch (node->nodeType()) {
-		case AltaCore::AST::NodeType::ExpressionStatement: return compileExpressionStatement(std::dynamic_pointer_cast<AltaCore::AST::ExpressionStatement>(node));
-		case AltaCore::AST::NodeType::Type: return compileType(std::dynamic_pointer_cast<AltaCore::AST::Type>(node));
-		case AltaCore::AST::NodeType::Parameter: return compileParameter(std::dynamic_pointer_cast<AltaCore::AST::Parameter>(node));
-		case AltaCore::AST::NodeType::BlockNode: return compileBlockNode(std::dynamic_pointer_cast<AltaCore::AST::BlockNode>(node));
-		case AltaCore::AST::NodeType::FunctionDefinitionNode: return compileFunctionDefinitionNode(std::dynamic_pointer_cast<AltaCore::AST::FunctionDefinitionNode>(node));
-		case AltaCore::AST::NodeType::ReturnDirectiveNode: return compileReturnDirectiveNode(std::dynamic_pointer_cast<AltaCore::AST::ReturnDirectiveNode>(node));
-		case AltaCore::AST::NodeType::IntegerLiteralNode: return compileIntegerLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::IntegerLiteralNode>(node));
-		case AltaCore::AST::NodeType::VariableDefinitionExpression: return compileVariableDefinitionExpression(std::dynamic_pointer_cast<AltaCore::AST::VariableDefinitionExpression>(node));
-		case AltaCore::AST::NodeType::Accessor: return compileAccessor(std::dynamic_pointer_cast<AltaCore::AST::Accessor>(node));
-		case AltaCore::AST::NodeType::Fetch: return compileFetch(std::dynamic_pointer_cast<AltaCore::AST::Fetch>(node));
-		case AltaCore::AST::NodeType::AssignmentExpression: return compileAssignmentExpression(std::dynamic_pointer_cast<AltaCore::AST::AssignmentExpression>(node));
-		case AltaCore::AST::NodeType::BooleanLiteralNode: return compileBooleanLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::BooleanLiteralNode>(node));
-		case AltaCore::AST::NodeType::BinaryOperation: return compileBinaryOperation(std::dynamic_pointer_cast<AltaCore::AST::BinaryOperation>(node));
-		case AltaCore::AST::NodeType::ImportStatement: return compileImportStatement(std::dynamic_pointer_cast<AltaCore::AST::ImportStatement>(node));
-		case AltaCore::AST::NodeType::FunctionCallExpression: return compileFunctionCallExpression(std::dynamic_pointer_cast<AltaCore::AST::FunctionCallExpression>(node));
-		case AltaCore::AST::NodeType::StringLiteralNode: return compileStringLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::StringLiteralNode>(node));
-		case AltaCore::AST::NodeType::FunctionDeclarationNode: return compileFunctionDeclarationNode(std::dynamic_pointer_cast<AltaCore::AST::FunctionDeclarationNode>(node));
-		case AltaCore::AST::NodeType::AttributeNode: return compileAttributeNode(std::dynamic_pointer_cast<AltaCore::AST::AttributeNode>(node));
-		case AltaCore::AST::NodeType::LiteralNode: return compileLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::LiteralNode>(node));
-		case AltaCore::AST::NodeType::AttributeStatement: return compileAttributeStatement(std::dynamic_pointer_cast<AltaCore::AST::AttributeStatement>(node));
-		case AltaCore::AST::NodeType::ConditionalStatement: return compileConditionalStatement(std::dynamic_pointer_cast<AltaCore::AST::ConditionalStatement>(node));
-		case AltaCore::AST::NodeType::ConditionalExpression: return compileConditionalExpression(std::dynamic_pointer_cast<AltaCore::AST::ConditionalExpression>(node));
-		case AltaCore::AST::NodeType::ClassDefinitionNode: return compileClassDefinitionNode(std::dynamic_pointer_cast<AltaCore::AST::ClassDefinitionNode>(node));
-		case AltaCore::AST::NodeType::ClassStatementNode: return compileClassStatementNode(std::dynamic_pointer_cast<AltaCore::AST::ClassStatementNode>(node));
-		case AltaCore::AST::NodeType::ClassMemberDefinitionStatement: return compileClassMemberDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassMemberDefinitionStatement>(node));
-		case AltaCore::AST::NodeType::ClassMethodDefinitionStatement: return compileClassMethodDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassMethodDefinitionStatement>(node));
-		case AltaCore::AST::NodeType::ClassSpecialMethodDefinitionStatement: return compileClassSpecialMethodDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassSpecialMethodDefinitionStatement>(node));
-		case AltaCore::AST::NodeType::ClassInstantiationExpression: return compileClassInstantiationExpression(std::dynamic_pointer_cast<AltaCore::AST::ClassInstantiationExpression>(node));
-		case AltaCore::AST::NodeType::PointerExpression: return compilePointerExpression(std::dynamic_pointer_cast<AltaCore::AST::PointerExpression>(node));
-		case AltaCore::AST::NodeType::DereferenceExpression: return compileDereferenceExpression(std::dynamic_pointer_cast<AltaCore::AST::DereferenceExpression>(node));
-		case AltaCore::AST::NodeType::WhileLoopStatement: return compileWhileLoopStatement(std::dynamic_pointer_cast<AltaCore::AST::WhileLoopStatement>(node));
-		case AltaCore::AST::NodeType::CastExpression: return compileCastExpression(std::dynamic_pointer_cast<AltaCore::AST::CastExpression>(node));
-		case AltaCore::AST::NodeType::ClassReadAccessorDefinitionStatement: return compileClassReadAccessorDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassReadAccessorDefinitionStatement>(node));
-		case AltaCore::AST::NodeType::CharacterLiteralNode: return compileCharacterLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::CharacterLiteralNode>(node));
-		case AltaCore::AST::NodeType::TypeAliasStatement: return compileTypeAliasStatement(std::dynamic_pointer_cast<AltaCore::AST::TypeAliasStatement>(node));
-		case AltaCore::AST::NodeType::SubscriptExpression: return compileSubscriptExpression(std::dynamic_pointer_cast<AltaCore::AST::SubscriptExpression>(node));
-		case AltaCore::AST::NodeType::RetrievalNode: return compileRetrievalNode(std::dynamic_pointer_cast<AltaCore::AST::RetrievalNode>(node));
-		case AltaCore::AST::NodeType::SuperClassFetch: return compileSuperClassFetch(std::dynamic_pointer_cast<AltaCore::AST::SuperClassFetch>(node));
-		case AltaCore::AST::NodeType::InstanceofExpression: return compileInstanceofExpression(std::dynamic_pointer_cast<AltaCore::AST::InstanceofExpression>(node));
-		case AltaCore::AST::NodeType::Generic: return compileGeneric(std::dynamic_pointer_cast<AltaCore::AST::Generic>(node));
-		case AltaCore::AST::NodeType::ForLoopStatement: return compileForLoopStatement(std::dynamic_pointer_cast<AltaCore::AST::ForLoopStatement>(node));
-		case AltaCore::AST::NodeType::RangedForLoopStatement: return compileRangedForLoopStatement(std::dynamic_pointer_cast<AltaCore::AST::RangedForLoopStatement>(node));
-		case AltaCore::AST::NodeType::UnaryOperation: return compileUnaryOperation(std::dynamic_pointer_cast<AltaCore::AST::UnaryOperation>(node));
-		case AltaCore::AST::NodeType::SizeofOperation: return compileSizeofOperation(std::dynamic_pointer_cast<AltaCore::AST::SizeofOperation>(node));
-		case AltaCore::AST::NodeType::FloatingPointLiteralNode: return compileFloatingPointLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::FloatingPointLiteralNode>(node));
-		case AltaCore::AST::NodeType::StructureDefinitionStatement: return compileStructureDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::StructureDefinitionStatement>(node));
-		case AltaCore::AST::NodeType::ExportStatement: return compileExportStatement(std::dynamic_pointer_cast<AltaCore::AST::ExportStatement>(node));
-		case AltaCore::AST::NodeType::VariableDeclarationStatement: return compileVariableDeclarationStatement(std::dynamic_pointer_cast<AltaCore::AST::VariableDeclarationStatement>(node));
-		case AltaCore::AST::NodeType::AliasStatement: return compileAliasStatement(std::dynamic_pointer_cast<AltaCore::AST::AliasStatement>(node));
-		case AltaCore::AST::NodeType::DeleteStatement: return compileDeleteStatement(std::dynamic_pointer_cast<AltaCore::AST::DeleteStatement>(node));
-		case AltaCore::AST::NodeType::ControlDirective: return compileControlDirective(std::dynamic_pointer_cast<AltaCore::AST::ControlDirective>(node));
-		case AltaCore::AST::NodeType::TryCatchBlock: return compileTryCatchBlock(std::dynamic_pointer_cast<AltaCore::AST::TryCatchBlock>(node));
-		case AltaCore::AST::NodeType::ThrowStatement: return compileThrowStatement(std::dynamic_pointer_cast<AltaCore::AST::ThrowStatement>(node));
-		case AltaCore::AST::NodeType::NullptrExpression: return compileNullptrExpression(std::dynamic_pointer_cast<AltaCore::AST::NullptrExpression>(node));
-		case AltaCore::AST::NodeType::CodeLiteralNode: return compileCodeLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::CodeLiteralNode>(node));
-		case AltaCore::AST::NodeType::BitfieldDefinitionNode: return compileBitfieldDefinitionNode(std::dynamic_pointer_cast<AltaCore::AST::BitfieldDefinitionNode>(node));
-		case AltaCore::AST::NodeType::LambdaExpression: return compileLambdaExpression(std::dynamic_pointer_cast<AltaCore::AST::LambdaExpression>(node));
-		case AltaCore::AST::NodeType::SpecialFetchExpression: return compileSpecialFetchExpression(std::dynamic_pointer_cast<AltaCore::AST::SpecialFetchExpression>(node));
-		case AltaCore::AST::NodeType::ClassOperatorDefinitionStatement: return compileClassOperatorDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassOperatorDefinitionStatement>(node));
-		case AltaCore::AST::NodeType::EnumerationDefinitionNode: return compileEnumerationDefinitionNode(std::dynamic_pointer_cast<AltaCore::AST::EnumerationDefinitionNode>(node));
-		case AltaCore::AST::NodeType::YieldExpression: return compileYieldExpression(std::dynamic_pointer_cast<AltaCore::AST::YieldExpression>(node));
-		case AltaCore::AST::NodeType::AssertionStatement: return compileAssertionStatement(std::dynamic_pointer_cast<AltaCore::AST::AssertionStatement>(node));
-		case AltaCore::AST::NodeType::AwaitExpression: return compileAwaitExpression(std::dynamic_pointer_cast<AltaCore::AST::AwaitExpression>(node));
+		case AltaCore::AST::NodeType::ExpressionStatement: return compileExpressionStatement(std::dynamic_pointer_cast<AltaCore::AST::ExpressionStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ExpressionStatement>(info));
+		case AltaCore::AST::NodeType::Type: return compileType(std::dynamic_pointer_cast<AltaCore::AST::Type>(node), std::dynamic_pointer_cast<AltaCore::DH::Type>(info));
+		case AltaCore::AST::NodeType::Parameter: return compileParameter(std::dynamic_pointer_cast<AltaCore::AST::Parameter>(node), std::dynamic_pointer_cast<AltaCore::DH::Parameter>(info));
+		case AltaCore::AST::NodeType::BlockNode: return compileBlockNode(std::dynamic_pointer_cast<AltaCore::AST::BlockNode>(node), std::dynamic_pointer_cast<AltaCore::DH::BlockNode>(info));
+		case AltaCore::AST::NodeType::FunctionDefinitionNode: return compileFunctionDefinitionNode(std::dynamic_pointer_cast<AltaCore::AST::FunctionDefinitionNode>(node), std::dynamic_pointer_cast<AltaCore::DH::FunctionDefinitionNode>(info));
+		case AltaCore::AST::NodeType::ReturnDirectiveNode: return compileReturnDirectiveNode(std::dynamic_pointer_cast<AltaCore::AST::ReturnDirectiveNode>(node), std::dynamic_pointer_cast<AltaCore::DH::ReturnDirectiveNode>(info));
+		case AltaCore::AST::NodeType::IntegerLiteralNode: return compileIntegerLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::IntegerLiteralNode>(node), std::dynamic_pointer_cast<AltaCore::DH::IntegerLiteralNode>(info));
+		case AltaCore::AST::NodeType::VariableDefinitionExpression: return compileVariableDefinitionExpression(std::dynamic_pointer_cast<AltaCore::AST::VariableDefinitionExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::VariableDefinitionExpression>(info));
+		case AltaCore::AST::NodeType::Accessor: return compileAccessor(std::dynamic_pointer_cast<AltaCore::AST::Accessor>(node), std::dynamic_pointer_cast<AltaCore::DH::Accessor>(info));
+		case AltaCore::AST::NodeType::Fetch: return compileFetch(std::dynamic_pointer_cast<AltaCore::AST::Fetch>(node), std::dynamic_pointer_cast<AltaCore::DH::Fetch>(info));
+		case AltaCore::AST::NodeType::AssignmentExpression: return compileAssignmentExpression(std::dynamic_pointer_cast<AltaCore::AST::AssignmentExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::AssignmentExpression>(info));
+		case AltaCore::AST::NodeType::BooleanLiteralNode: return compileBooleanLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::BooleanLiteralNode>(node), std::dynamic_pointer_cast<AltaCore::DH::BooleanLiteralNode>(info));
+		case AltaCore::AST::NodeType::BinaryOperation: return compileBinaryOperation(std::dynamic_pointer_cast<AltaCore::AST::BinaryOperation>(node), std::dynamic_pointer_cast<AltaCore::DH::BinaryOperation>(info));
+		case AltaCore::AST::NodeType::ImportStatement: return compileImportStatement(std::dynamic_pointer_cast<AltaCore::AST::ImportStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ImportStatement>(info));
+		case AltaCore::AST::NodeType::FunctionCallExpression: return compileFunctionCallExpression(std::dynamic_pointer_cast<AltaCore::AST::FunctionCallExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::FunctionCallExpression>(info));
+		case AltaCore::AST::NodeType::StringLiteralNode: return compileStringLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::StringLiteralNode>(node), std::dynamic_pointer_cast<AltaCore::DH::StringLiteralNode>(info));
+		case AltaCore::AST::NodeType::FunctionDeclarationNode: return compileFunctionDeclarationNode(std::dynamic_pointer_cast<AltaCore::AST::FunctionDeclarationNode>(node), std::dynamic_pointer_cast<AltaCore::DH::FunctionDeclarationNode>(info));
+		case AltaCore::AST::NodeType::AttributeNode: return compileAttributeNode(std::dynamic_pointer_cast<AltaCore::AST::AttributeNode>(node), std::dynamic_pointer_cast<AltaCore::DH::AttributeNode>(info));
+		case AltaCore::AST::NodeType::LiteralNode: return compileLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::LiteralNode>(node), std::dynamic_pointer_cast<AltaCore::DH::LiteralNode>(info));
+		case AltaCore::AST::NodeType::AttributeStatement: return compileAttributeStatement(std::dynamic_pointer_cast<AltaCore::AST::AttributeStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::AttributeStatement>(info));
+		case AltaCore::AST::NodeType::ConditionalStatement: return compileConditionalStatement(std::dynamic_pointer_cast<AltaCore::AST::ConditionalStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ConditionalStatement>(info));
+		case AltaCore::AST::NodeType::ConditionalExpression: return compileConditionalExpression(std::dynamic_pointer_cast<AltaCore::AST::ConditionalExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::ConditionalExpression>(info));
+		case AltaCore::AST::NodeType::ClassDefinitionNode: return compileClassDefinitionNode(std::dynamic_pointer_cast<AltaCore::AST::ClassDefinitionNode>(node), std::dynamic_pointer_cast<AltaCore::DH::ClassDefinitionNode>(info));
+		case AltaCore::AST::NodeType::ClassStatementNode: return compileClassStatementNode(std::dynamic_pointer_cast<AltaCore::AST::ClassStatementNode>(node), std::dynamic_pointer_cast<AltaCore::DH::ClassStatementNode>(info));
+		case AltaCore::AST::NodeType::ClassMemberDefinitionStatement: return compileClassMemberDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassMemberDefinitionStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ClassMemberDefinitionStatement>(info));
+		case AltaCore::AST::NodeType::ClassMethodDefinitionStatement: return compileClassMethodDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassMethodDefinitionStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ClassMethodDefinitionStatement>(info));
+		case AltaCore::AST::NodeType::ClassSpecialMethodDefinitionStatement: return compileClassSpecialMethodDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassSpecialMethodDefinitionStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ClassSpecialMethodDefinitionStatement>(info));
+		case AltaCore::AST::NodeType::ClassInstantiationExpression: return compileClassInstantiationExpression(std::dynamic_pointer_cast<AltaCore::AST::ClassInstantiationExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::ClassInstantiationExpression>(info));
+		case AltaCore::AST::NodeType::PointerExpression: return compilePointerExpression(std::dynamic_pointer_cast<AltaCore::AST::PointerExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::PointerExpression>(info));
+		case AltaCore::AST::NodeType::DereferenceExpression: return compileDereferenceExpression(std::dynamic_pointer_cast<AltaCore::AST::DereferenceExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::DereferenceExpression>(info));
+		case AltaCore::AST::NodeType::WhileLoopStatement: return compileWhileLoopStatement(std::dynamic_pointer_cast<AltaCore::AST::WhileLoopStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::WhileLoopStatement>(info));
+		case AltaCore::AST::NodeType::CastExpression: return compileCastExpression(std::dynamic_pointer_cast<AltaCore::AST::CastExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::CastExpression>(info));
+		case AltaCore::AST::NodeType::ClassReadAccessorDefinitionStatement: return compileClassReadAccessorDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassReadAccessorDefinitionStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ClassReadAccessorDefinitionStatement>(info));
+		case AltaCore::AST::NodeType::CharacterLiteralNode: return compileCharacterLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::CharacterLiteralNode>(node), std::dynamic_pointer_cast<AltaCore::DH::CharacterLiteralNode>(info));
+		case AltaCore::AST::NodeType::TypeAliasStatement: return compileTypeAliasStatement(std::dynamic_pointer_cast<AltaCore::AST::TypeAliasStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::TypeAliasStatement>(info));
+		case AltaCore::AST::NodeType::SubscriptExpression: return compileSubscriptExpression(std::dynamic_pointer_cast<AltaCore::AST::SubscriptExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::SubscriptExpression>(info));
+		case AltaCore::AST::NodeType::RetrievalNode: return compileRetrievalNode(std::dynamic_pointer_cast<AltaCore::AST::RetrievalNode>(node), std::dynamic_pointer_cast<AltaCore::DH::RetrievalNode>(info));
+		case AltaCore::AST::NodeType::SuperClassFetch: return compileSuperClassFetch(std::dynamic_pointer_cast<AltaCore::AST::SuperClassFetch>(node), std::dynamic_pointer_cast<AltaCore::DH::SuperClassFetch>(info));
+		case AltaCore::AST::NodeType::InstanceofExpression: return compileInstanceofExpression(std::dynamic_pointer_cast<AltaCore::AST::InstanceofExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::InstanceofExpression>(info));
+		case AltaCore::AST::NodeType::Generic: return compileGeneric(std::dynamic_pointer_cast<AltaCore::AST::Generic>(node), std::dynamic_pointer_cast<AltaCore::DH::Generic>(info));
+		case AltaCore::AST::NodeType::ForLoopStatement: return compileForLoopStatement(std::dynamic_pointer_cast<AltaCore::AST::ForLoopStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ForLoopStatement>(info));
+		case AltaCore::AST::NodeType::RangedForLoopStatement: return compileRangedForLoopStatement(std::dynamic_pointer_cast<AltaCore::AST::RangedForLoopStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::RangedForLoopStatement>(info));
+		case AltaCore::AST::NodeType::UnaryOperation: return compileUnaryOperation(std::dynamic_pointer_cast<AltaCore::AST::UnaryOperation>(node), std::dynamic_pointer_cast<AltaCore::DH::UnaryOperation>(info));
+		case AltaCore::AST::NodeType::SizeofOperation: return compileSizeofOperation(std::dynamic_pointer_cast<AltaCore::AST::SizeofOperation>(node), std::dynamic_pointer_cast<AltaCore::DH::SizeofOperation>(info));
+		case AltaCore::AST::NodeType::FloatingPointLiteralNode: return compileFloatingPointLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::FloatingPointLiteralNode>(node), std::dynamic_pointer_cast<AltaCore::DH::FloatingPointLiteralNode>(info));
+		case AltaCore::AST::NodeType::StructureDefinitionStatement: return compileStructureDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::StructureDefinitionStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::StructureDefinitionStatement>(info));
+		case AltaCore::AST::NodeType::ExportStatement: return compileExportStatement(std::dynamic_pointer_cast<AltaCore::AST::ExportStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ExportStatement>(info));
+		case AltaCore::AST::NodeType::VariableDeclarationStatement: return compileVariableDeclarationStatement(std::dynamic_pointer_cast<AltaCore::AST::VariableDeclarationStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::VariableDeclarationStatement>(info));
+		case AltaCore::AST::NodeType::AliasStatement: return compileAliasStatement(std::dynamic_pointer_cast<AltaCore::AST::AliasStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::AliasStatement>(info));
+		case AltaCore::AST::NodeType::DeleteStatement: return compileDeleteStatement(std::dynamic_pointer_cast<AltaCore::AST::DeleteStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::DeleteStatement>(info));
+		case AltaCore::AST::NodeType::ControlDirective: return compileControlDirective(std::dynamic_pointer_cast<AltaCore::AST::ControlDirective>(node), std::dynamic_pointer_cast<AltaCore::DH::Node>(info));
+		case AltaCore::AST::NodeType::TryCatchBlock: return compileTryCatchBlock(std::dynamic_pointer_cast<AltaCore::AST::TryCatchBlock>(node), std::dynamic_pointer_cast<AltaCore::DH::TryCatchBlock>(info));
+		case AltaCore::AST::NodeType::ThrowStatement: return compileThrowStatement(std::dynamic_pointer_cast<AltaCore::AST::ThrowStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ThrowStatement>(info));
+		case AltaCore::AST::NodeType::NullptrExpression: return compileNullptrExpression(std::dynamic_pointer_cast<AltaCore::AST::NullptrExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::NullptrExpression>(info));
+		case AltaCore::AST::NodeType::CodeLiteralNode: return compileCodeLiteralNode(std::dynamic_pointer_cast<AltaCore::AST::CodeLiteralNode>(node), std::dynamic_pointer_cast<AltaCore::DH::CodeLiteralNode>(info));
+		case AltaCore::AST::NodeType::BitfieldDefinitionNode: return compileBitfieldDefinitionNode(std::dynamic_pointer_cast<AltaCore::AST::BitfieldDefinitionNode>(node), std::dynamic_pointer_cast<AltaCore::DH::BitfieldDefinitionNode>(info));
+		case AltaCore::AST::NodeType::LambdaExpression: return compileLambdaExpression(std::dynamic_pointer_cast<AltaCore::AST::LambdaExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::LambdaExpression>(info));
+		case AltaCore::AST::NodeType::SpecialFetchExpression: return compileSpecialFetchExpression(std::dynamic_pointer_cast<AltaCore::AST::SpecialFetchExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::SpecialFetchExpression>(info));
+		case AltaCore::AST::NodeType::ClassOperatorDefinitionStatement: return compileClassOperatorDefinitionStatement(std::dynamic_pointer_cast<AltaCore::AST::ClassOperatorDefinitionStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::ClassOperatorDefinitionStatement>(info));
+		case AltaCore::AST::NodeType::EnumerationDefinitionNode: return compileEnumerationDefinitionNode(std::dynamic_pointer_cast<AltaCore::AST::EnumerationDefinitionNode>(node), std::dynamic_pointer_cast<AltaCore::DH::EnumerationDefinitionNode>(info));
+		case AltaCore::AST::NodeType::YieldExpression: return compileYieldExpression(std::dynamic_pointer_cast<AltaCore::AST::YieldExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::YieldExpression>(info));
+		case AltaCore::AST::NodeType::AssertionStatement: return compileAssertionStatement(std::dynamic_pointer_cast<AltaCore::AST::AssertionStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::AssertionStatement>(info));
+		case AltaCore::AST::NodeType::AwaitExpression: return compileAwaitExpression(std::dynamic_pointer_cast<AltaCore::AST::AwaitExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::AwaitExpression>(info));
 		default: return returnNull();
 	}
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileExpressionStatement(std::shared_ptr<AltaCore::AST::ExpressionStatement> node) {
-	// TODO
-	std::cout << "TODO: ExpressionStatement" << std::endl;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileExpressionStatement(std::shared_ptr<AltaCore::AST::ExpressionStatement> node, std::shared_ptr<AltaCore::DH::ExpressionStatement> info) {
+	co_await compileNode(node->expression, info->expression);
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileType(std::shared_ptr<AltaCore::AST::Type> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileType(std::shared_ptr<AltaCore::AST::Type> node, std::shared_ptr<AltaCore::DH::Type> info) {
 	// TODO
 	std::cout << "TODO: Type" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileParameter(std::shared_ptr<AltaCore::AST::Parameter> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileParameter(std::shared_ptr<AltaCore::AST::Parameter> node, std::shared_ptr<AltaCore::DH::Parameter> info) {
 	// TODO
 	std::cout << "TODO: Parameter" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileBlockNode(std::shared_ptr<AltaCore::AST::BlockNode> node) {
-	// TODO
-	std::cout << "TODO: BlockNode" << std::endl;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBlockNode(std::shared_ptr<AltaCore::AST::BlockNode> node, std::shared_ptr<AltaCore::DH::BlockNode> info) {
+	for (size_t i = 0; i < node->statements.size(); ++i) {
+		co_await compileNode(node->statements[i], info->statements[i]);
+	}
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileFunctionDefinitionNode(std::shared_ptr<AltaCore::AST::FunctionDefinitionNode> node) {
-	// TODO
-	std::cout << "TODO: FunctionDefinitionNode" << std::endl;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(std::shared_ptr<AltaCore::AST::FunctionDefinitionNode> node, std::shared_ptr<AltaCore::DH::FunctionDefinitionNode> mainInfo) {
+	bool isGeneric = mainInfo->genericInstantiations.size() > 0;
+	size_t iterationCount = isGeneric ? mainInfo->genericInstantiations.size() : 1;
 
-	// just for testing:
-	auto ret = co_await compileNode(node->body);
+	for (size_t i = 0; i < iterationCount; ++i) {
+		auto info = isGeneric ? mainInfo->genericInstantiations[i] : mainInfo;
 
-	std::cout << "compiling the body returned " << ret << std::endl;
+		auto retType = co_await translateType(info->returnType->type);
+		std::vector<LLVMTypeRef> paramTypes;
+
+		for (const auto& param: info->parameters) {
+			paramTypes.push_back(co_await translateType(param->type->type));
+		}
+
+		auto mangled = mangleName(info->function.get());
+		auto llfuncType = LLVMFunctionType(retType, paramTypes.data(), paramTypes.size(), false);
+
+		if (!_definedFunctions[info->function->id]) {
+			_definedFunctions[info->function->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), llfuncType);
+		}
+
+		auto llfunc = _definedFunctions[info->function->id];
+
+		LLVMSetLinkage(llfunc, mangled == "main" ? LLVMExternalLinkage : LLVMPrivateLinkage);
+
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+		_builders.push(builder);
+		_stacks.emplace(*this);
+
+		co_await compileNode(node->body, info->body);
+
+		if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(_builders.top().get()))) {
+			auto functionReturnType = info->function->isGenerator ? info->function->generatorReturnType : (info->function->isAsync ? info->function->coroutineReturnType : info->function->returnType);
+
+			if (functionReturnType && *functionReturnType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
+				// insert an implicit return
+				co_await _stacks.top().cleanup();
+
+				LLVMBuildRetVoid(_builders.top().get());
+			} else {
+				throw std::runtime_error("Reached end of function without a terminator");
+			}
+		}
+
+		_stacks.pop();
+		_builders.pop();
+	}
 
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileReturnDirectiveNode(std::shared_ptr<AltaCore::AST::ReturnDirectiveNode> node) {
-	// TODO
-	std::cout << "TODO: ReturnDirectiveNode" << std::endl;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::shared_ptr<AltaCore::AST::ReturnDirectiveNode> node, std::shared_ptr<AltaCore::DH::ReturnDirectiveNode> info) {
+	if (node->expression) {
+		auto functionReturnType = info->parentFunction ? (info->parentFunction->isGenerator ? info->parentFunction->generatorReturnType : (info->parentFunction->isAsync ? info->parentFunction->coroutineReturnType : info->parentFunction->returnType)) : nullptr;
+		auto expr = co_await compileNode(node->expression, info->expression);
+
+		if (functionReturnType && functionReturnType->referenceLevel() > 0) {
+			// if we're returning a reference, there's no need to copy anything
+		} else {
+			auto exprType = AltaCore::DET::Type::getUnderlyingType(info->expression.get());
+			expr = co_await cast(expr, exprType, functionReturnType, true, additionalCopyInfo(node->expression, info->expression), false, &node->expression->position);
+		}
+
+		co_await _stacks.top().cleanup();
+
+		LLVMBuildRet(_builders.top().get(), expr);
+	} else {
+		co_await _stacks.top().cleanup();
+
+		LLVMBuildRetVoid(_builders.top().get());
+	}
+
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileIntegerLiteralNode(std::shared_ptr<AltaCore::AST::IntegerLiteralNode> node) {
-	// TODO
-	std::cout << "TODO: IntegerLiteralNode" << std::endl;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileIntegerLiteralNode(std::shared_ptr<AltaCore::AST::IntegerLiteralNode> node, std::shared_ptr<AltaCore::DH::IntegerLiteralNode> info) {
+	auto type = AltaCore::DET::Type::getUnderlyingType(info.get());
+	auto lltype = co_await translateType(type);
+	co_return LLVMConstInt(lltype, node->integer, type->isSigned());
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpression(std::shared_ptr<AltaCore::AST::VariableDefinitionExpression> node, std::shared_ptr<AltaCore::DH::VariableDefinitionExpression> info) {
+	bool inModuleRoot = !info->variable->parentScope.expired() && !info->variable->parentScope.lock()->parentModule.expired();
+
+
+
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileVariableDefinitionExpression(std::shared_ptr<AltaCore::AST::VariableDefinitionExpression> node) {
-	// TODO
-	std::cout << "TODO: VariableDefinitionExpression" << std::endl;
-	co_return NULL;
-};
-
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<AltaCore::AST::Accessor> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<AltaCore::AST::Accessor> node, std::shared_ptr<AltaCore::DH::Accessor> info) {
 	// TODO
 	std::cout << "TODO: Accessor" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileFetch(std::shared_ptr<AltaCore::AST::Fetch> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<AltaCore::AST::Fetch> node, std::shared_ptr<AltaCore::DH::Fetch> info) {
 	// TODO
 	std::cout << "TODO: Fetch" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileAssignmentExpression(std::shared_ptr<AltaCore::AST::AssignmentExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std::shared_ptr<AltaCore::AST::AssignmentExpression> node, std::shared_ptr<AltaCore::DH::AssignmentExpression> info) {
 	// TODO
 	std::cout << "TODO: AssignmentExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileBooleanLiteralNode(std::shared_ptr<AltaCore::AST::BooleanLiteralNode> node) {
-	// TODO
-	std::cout << "TODO: BooleanLiteralNode" << std::endl;
-	co_return NULL;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBooleanLiteralNode(std::shared_ptr<AltaCore::AST::BooleanLiteralNode> node, std::shared_ptr<AltaCore::DH::BooleanLiteralNode> info) {
+	co_return LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), node->value ? 1 : 0, false);
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileBinaryOperation(std::shared_ptr<AltaCore::AST::BinaryOperation> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shared_ptr<AltaCore::AST::BinaryOperation> node, std::shared_ptr<AltaCore::DH::BinaryOperation> info) {
 	// TODO
 	std::cout << "TODO: BinaryOperation" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileImportStatement(std::shared_ptr<AltaCore::AST::ImportStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileImportStatement(std::shared_ptr<AltaCore::AST::ImportStatement> node, std::shared_ptr<AltaCore::DH::ImportStatement> info) {
 	// TODO
 	std::cout << "TODO: ImportStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileFunctionCallExpression(std::shared_ptr<AltaCore::AST::FunctionCallExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(std::shared_ptr<AltaCore::AST::FunctionCallExpression> node, std::shared_ptr<AltaCore::DH::FunctionCallExpression> info) {
 	// TODO
 	std::cout << "TODO: FunctionCallExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileStringLiteralNode(std::shared_ptr<AltaCore::AST::StringLiteralNode> node) {
-	// TODO
-	std::cout << "TODO: StringLiteralNode" << std::endl;
-	co_return NULL;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileStringLiteralNode(std::shared_ptr<AltaCore::AST::StringLiteralNode> node, std::shared_ptr<AltaCore::DH::StringLiteralNode> info) {
+	co_return LLVMConstStringInContext(_llcontext.get(), node->value.c_str(), node->value.size(), false);
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileFunctionDeclarationNode(std::shared_ptr<AltaCore::AST::FunctionDeclarationNode> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDeclarationNode(std::shared_ptr<AltaCore::AST::FunctionDeclarationNode> node, std::shared_ptr<AltaCore::DH::FunctionDeclarationNode> info) {
 	// TODO
 	std::cout << "TODO: FunctionDeclarationNode" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileAttributeNode(std::shared_ptr<AltaCore::AST::AttributeNode> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAttributeNode(std::shared_ptr<AltaCore::AST::AttributeNode> node, std::shared_ptr<AltaCore::DH::AttributeNode> info) {
 	// TODO
 	std::cout << "TODO: AttributeNode" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileLiteralNode(std::shared_ptr<AltaCore::AST::LiteralNode> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLiteralNode(std::shared_ptr<AltaCore::AST::LiteralNode> node, std::shared_ptr<AltaCore::DH::LiteralNode> info) {
 	// TODO
 	std::cout << "TODO: LiteralNode" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileAttributeStatement(std::shared_ptr<AltaCore::AST::AttributeStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAttributeStatement(std::shared_ptr<AltaCore::AST::AttributeStatement> node, std::shared_ptr<AltaCore::DH::AttributeStatement> info) {
 	// TODO
 	std::cout << "TODO: AttributeStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileConditionalStatement(std::shared_ptr<AltaCore::AST::ConditionalStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalStatement(std::shared_ptr<AltaCore::AST::ConditionalStatement> node, std::shared_ptr<AltaCore::DH::ConditionalStatement> info) {
 	// TODO
 	std::cout << "TODO: ConditionalStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileConditionalExpression(std::shared_ptr<AltaCore::AST::ConditionalExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std::shared_ptr<AltaCore::AST::ConditionalExpression> node, std::shared_ptr<AltaCore::DH::ConditionalExpression> info) {
 	// TODO
 	std::cout << "TODO: ConditionalExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileClassDefinitionNode(std::shared_ptr<AltaCore::AST::ClassDefinitionNode> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::shared_ptr<AltaCore::AST::ClassDefinitionNode> node, std::shared_ptr<AltaCore::DH::ClassDefinitionNode> info) {
 	// TODO
 	std::cout << "TODO: ClassDefinitionNode" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileClassStatementNode(std::shared_ptr<AltaCore::AST::ClassStatementNode> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassStatementNode(std::shared_ptr<AltaCore::AST::ClassStatementNode> node, std::shared_ptr<AltaCore::DH::ClassStatementNode> info) {
 	// TODO
 	std::cout << "TODO: ClassStatementNode" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileClassMemberDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassMemberDefinitionStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassMemberDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassMemberDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassMemberDefinitionStatement> info) {
 	// TODO
 	std::cout << "TODO: ClassMemberDefinitionStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileClassMethodDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassMethodDefinitionStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassMethodDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassMethodDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassMethodDefinitionStatement> info) {
 	// TODO
 	std::cout << "TODO: ClassMethodDefinitionStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileClassSpecialMethodDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassSpecialMethodDefinitionStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassSpecialMethodDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassSpecialMethodDefinitionStatement> info) {
 	// TODO
 	std::cout << "TODO: ClassSpecialMethodDefinitionStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileClassInstantiationExpression(std::shared_ptr<AltaCore::AST::ClassInstantiationExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpression(std::shared_ptr<AltaCore::AST::ClassInstantiationExpression> node, std::shared_ptr<AltaCore::DH::ClassInstantiationExpression> info) {
 	// TODO
 	std::cout << "TODO: ClassInstantiationExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compilePointerExpression(std::shared_ptr<AltaCore::AST::PointerExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compilePointerExpression(std::shared_ptr<AltaCore::AST::PointerExpression> node, std::shared_ptr<AltaCore::DH::PointerExpression> info) {
 	// TODO
 	std::cout << "TODO: PointerExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileDereferenceExpression(std::shared_ptr<AltaCore::AST::DereferenceExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDereferenceExpression(std::shared_ptr<AltaCore::AST::DereferenceExpression> node, std::shared_ptr<AltaCore::DH::DereferenceExpression> info) {
 	// TODO
 	std::cout << "TODO: DereferenceExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileWhileLoopStatement(std::shared_ptr<AltaCore::AST::WhileLoopStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileWhileLoopStatement(std::shared_ptr<AltaCore::AST::WhileLoopStatement> node, std::shared_ptr<AltaCore::DH::WhileLoopStatement> info) {
 	// TODO
 	std::cout << "TODO: WhileLoopStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileCastExpression(std::shared_ptr<AltaCore::AST::CastExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileCastExpression(std::shared_ptr<AltaCore::AST::CastExpression> node, std::shared_ptr<AltaCore::DH::CastExpression> info) {
 	// TODO
 	std::cout << "TODO: CastExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileClassReadAccessorDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassReadAccessorDefinitionStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassReadAccessorDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassReadAccessorDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassReadAccessorDefinitionStatement> info) {
 	// TODO
 	std::cout << "TODO: ClassReadAccessorDefinitionStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileCharacterLiteralNode(std::shared_ptr<AltaCore::AST::CharacterLiteralNode> node) {
-	// TODO
-	std::cout << "TODO: CharacterLiteralNode" << std::endl;
-	co_return NULL;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileCharacterLiteralNode(std::shared_ptr<AltaCore::AST::CharacterLiteralNode> node, std::shared_ptr<AltaCore::DH::CharacterLiteralNode> info) {
+	co_return LLVMConstInt(LLVMInt8TypeInContext(_llcontext.get()), node->value, false);
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileTypeAliasStatement(std::shared_ptr<AltaCore::AST::TypeAliasStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileTypeAliasStatement(std::shared_ptr<AltaCore::AST::TypeAliasStatement> node, std::shared_ptr<AltaCore::DH::TypeAliasStatement> info) {
 	// TODO
 	std::cout << "TODO: TypeAliasStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileSubscriptExpression(std::shared_ptr<AltaCore::AST::SubscriptExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::shared_ptr<AltaCore::AST::SubscriptExpression> node, std::shared_ptr<AltaCore::DH::SubscriptExpression> info) {
 	// TODO
 	std::cout << "TODO: SubscriptExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileRetrievalNode(std::shared_ptr<AltaCore::AST::RetrievalNode> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRetrievalNode(std::shared_ptr<AltaCore::AST::RetrievalNode> node, std::shared_ptr<AltaCore::DH::RetrievalNode> info) {
 	// TODO
 	std::cout << "TODO: RetrievalNode" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileSuperClassFetch(std::shared_ptr<AltaCore::AST::SuperClassFetch> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSuperClassFetch(std::shared_ptr<AltaCore::AST::SuperClassFetch> node, std::shared_ptr<AltaCore::DH::SuperClassFetch> info) {
 	// TODO
 	std::cout << "TODO: SuperClassFetch" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileInstanceofExpression(std::shared_ptr<AltaCore::AST::InstanceofExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileInstanceofExpression(std::shared_ptr<AltaCore::AST::InstanceofExpression> node, std::shared_ptr<AltaCore::DH::InstanceofExpression> info) {
 	// TODO
 	std::cout << "TODO: InstanceofExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileGeneric(std::shared_ptr<AltaCore::AST::Generic> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileGeneric(std::shared_ptr<AltaCore::AST::Generic> node, std::shared_ptr<AltaCore::DH::Generic> info) {
 	// TODO
 	std::cout << "TODO: Generic" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileForLoopStatement(std::shared_ptr<AltaCore::AST::ForLoopStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileForLoopStatement(std::shared_ptr<AltaCore::AST::ForLoopStatement> node, std::shared_ptr<AltaCore::DH::ForLoopStatement> info) {
 	// TODO
 	std::cout << "TODO: ForLoopStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileRangedForLoopStatement(std::shared_ptr<AltaCore::AST::RangedForLoopStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(std::shared_ptr<AltaCore::AST::RangedForLoopStatement> node, std::shared_ptr<AltaCore::DH::RangedForLoopStatement> info) {
 	// TODO
 	std::cout << "TODO: RangedForLoopStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileUnaryOperation(std::shared_ptr<AltaCore::AST::UnaryOperation> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileUnaryOperation(std::shared_ptr<AltaCore::AST::UnaryOperation> node, std::shared_ptr<AltaCore::DH::UnaryOperation> info) {
 	// TODO
 	std::cout << "TODO: UnaryOperation" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileSizeofOperation(std::shared_ptr<AltaCore::AST::SizeofOperation> node) {
-	// TODO
-	std::cout << "TODO: SizeofOperation" << std::endl;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSizeofOperation(std::shared_ptr<AltaCore::AST::SizeofOperation> node, std::shared_ptr<AltaCore::DH::SizeofOperation> info) {
+	co_return LLVMSizeOf(co_await translateType(info->target->type));
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFloatingPointLiteralNode(std::shared_ptr<AltaCore::AST::FloatingPointLiteralNode> node, std::shared_ptr<AltaCore::DH::FloatingPointLiteralNode> info) {
+	auto type = AltaCore::DET::Type::getUnderlyingType(info.get());
+	co_return LLVMConstRealOfStringAndSize(co_await translateType(type), node->raw.c_str(), node->raw.size());
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileStructureDefinitionStatement(std::shared_ptr<AltaCore::AST::StructureDefinitionStatement> node, std::shared_ptr<AltaCore::DH::StructureDefinitionStatement> info) {
+	if (!_definedTypes[info->structure->id]) {
+		_definedTypes[info->structure->id] = LLVMStructCreateNamed(_llcontext.get(), info->structure->id.c_str());
+	}
+
+	auto llstructType = _definedTypes[info->structure->id];
+	std::vector<LLVMTypeRef> members;
+
+	for (const auto& member: info->memberTypes) {
+		members.push_back(co_await translateType(member->type));
+	}
+
+	LLVMStructSetBody(llstructType, members.data(), members.size(), false);
+
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileFloatingPointLiteralNode(std::shared_ptr<AltaCore::AST::FloatingPointLiteralNode> node) {
-	// TODO
-	std::cout << "TODO: FloatingPointLiteralNode" << std::endl;
-	co_return NULL;
-};
-
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileStructureDefinitionStatement(std::shared_ptr<AltaCore::AST::StructureDefinitionStatement> node) {
-	// TODO
-	std::cout << "TODO: StructureDefinitionStatement" << std::endl;
-	co_return NULL;
-};
-
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileExportStatement(std::shared_ptr<AltaCore::AST::ExportStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileExportStatement(std::shared_ptr<AltaCore::AST::ExportStatement> node, std::shared_ptr<AltaCore::DH::ExportStatement> info) {
 	// TODO
 	std::cout << "TODO: ExportStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileVariableDeclarationStatement(std::shared_ptr<AltaCore::AST::VariableDeclarationStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDeclarationStatement(std::shared_ptr<AltaCore::AST::VariableDeclarationStatement> node, std::shared_ptr<AltaCore::DH::VariableDeclarationStatement> info) {
 	// TODO
 	std::cout << "TODO: VariableDeclarationStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileAliasStatement(std::shared_ptr<AltaCore::AST::AliasStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAliasStatement(std::shared_ptr<AltaCore::AST::AliasStatement> node, std::shared_ptr<AltaCore::DH::AliasStatement> info) {
 	// TODO
 	std::cout << "TODO: AliasStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileDeleteStatement(std::shared_ptr<AltaCore::AST::DeleteStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDeleteStatement(std::shared_ptr<AltaCore::AST::DeleteStatement> node, std::shared_ptr<AltaCore::DH::DeleteStatement> info) {
 	// TODO
 	std::cout << "TODO: DeleteStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileControlDirective(std::shared_ptr<AltaCore::AST::ControlDirective> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileControlDirective(std::shared_ptr<AltaCore::AST::ControlDirective> node, std::shared_ptr<AltaCore::DH::Node> info) {
 	// TODO
 	std::cout << "TODO: ControlDirective" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileTryCatchBlock(std::shared_ptr<AltaCore::AST::TryCatchBlock> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileTryCatchBlock(std::shared_ptr<AltaCore::AST::TryCatchBlock> node, std::shared_ptr<AltaCore::DH::TryCatchBlock> info) {
 	// TODO
 	std::cout << "TODO: TryCatchBlock" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileThrowStatement(std::shared_ptr<AltaCore::AST::ThrowStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileThrowStatement(std::shared_ptr<AltaCore::AST::ThrowStatement> node, std::shared_ptr<AltaCore::DH::ThrowStatement> info) {
 	// TODO
 	std::cout << "TODO: ThrowStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileNullptrExpression(std::shared_ptr<AltaCore::AST::NullptrExpression> node) {
-	// TODO
-	std::cout << "TODO: NullptrExpression" << std::endl;
-	co_return NULL;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileNullptrExpression(std::shared_ptr<AltaCore::AST::NullptrExpression> node, std::shared_ptr<AltaCore::DH::NullptrExpression> info) {
+	auto type = AltaCore::DET::Type::getUnderlyingType(info.get());
+	auto lltype = co_await translateType(type);
+	co_return LLVMConstNull(lltype);
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileCodeLiteralNode(std::shared_ptr<AltaCore::AST::CodeLiteralNode> node) {
-	// TODO
-	std::cout << "TODO: CodeLiteralNode" << std::endl;
-	co_return NULL;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileCodeLiteralNode(std::shared_ptr<AltaCore::AST::CodeLiteralNode> node, std::shared_ptr<AltaCore::DH::CodeLiteralNode> info) {
+	throw std::runtime_error("CodeLiteralNode is not supported when compiling to machine code");
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileBitfieldDefinitionNode(std::shared_ptr<AltaCore::AST::BitfieldDefinitionNode> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBitfieldDefinitionNode(std::shared_ptr<AltaCore::AST::BitfieldDefinitionNode> node, std::shared_ptr<AltaCore::DH::BitfieldDefinitionNode> info) {
 	// TODO
 	std::cout << "TODO: BitfieldDefinitionNode" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileLambdaExpression(std::shared_ptr<AltaCore::AST::LambdaExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::shared_ptr<AltaCore::AST::LambdaExpression> node, std::shared_ptr<AltaCore::DH::LambdaExpression> info) {
 	// TODO
 	std::cout << "TODO: LambdaExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileSpecialFetchExpression(std::shared_ptr<AltaCore::AST::SpecialFetchExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(std::shared_ptr<AltaCore::AST::SpecialFetchExpression> node, std::shared_ptr<AltaCore::DH::SpecialFetchExpression> info) {
 	// TODO
 	std::cout << "TODO: SpecialFetchExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileClassOperatorDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassOperatorDefinitionStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassOperatorDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassOperatorDefinitionStatement> info) {
 	// TODO
 	std::cout << "TODO: ClassOperatorDefinitionStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileEnumerationDefinitionNode(std::shared_ptr<AltaCore::AST::EnumerationDefinitionNode> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode(std::shared_ptr<AltaCore::AST::EnumerationDefinitionNode> node, std::shared_ptr<AltaCore::DH::EnumerationDefinitionNode> info) {
 	// TODO
 	std::cout << "TODO: EnumerationDefinitionNode" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileYieldExpression(std::shared_ptr<AltaCore::AST::YieldExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileYieldExpression(std::shared_ptr<AltaCore::AST::YieldExpression> node, std::shared_ptr<AltaCore::DH::YieldExpression> info) {
 	// TODO
 	std::cout << "TODO: YieldExpression" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileAssertionStatement(std::shared_ptr<AltaCore::AST::AssertionStatement> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssertionStatement(std::shared_ptr<AltaCore::AST::AssertionStatement> node, std::shared_ptr<AltaCore::DH::AssertionStatement> info) {
 	// TODO
 	std::cout << "TODO: AssertionStatement" << std::endl;
 	co_return NULL;
 };
 
-AltaLL::Compiler::Coroutine AltaLL::Compiler::compileAwaitExpression(std::shared_ptr<AltaCore::AST::AwaitExpression> node) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAwaitExpression(std::shared_ptr<AltaCore::AST::AwaitExpression> node, std::shared_ptr<AltaCore::DH::AwaitExpression> info) {
 	// TODO
 	std::cout << "TODO: AwaitExpression" << std::endl;
 	co_return NULL;
 };
 
 void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
-	for (auto& node: root->statements) {
-		auto co = compileNode(node);
+	if (!_definedTypes["_Alta_class_info"]) {
+		/*
+		struct _Alta_class_info {
+			const char* type_name;
+			void (*destructor)(void*);
+			const char* child_name;
+			uint64_t offset_from_real;
+			uint64_t offset_from_base;
+			uint64_t offset_from_owner;
+		};
+		*/
+		std::array<LLVMTypeRef, 6> members;
+		std::array<LLVMTypeRef, 1> dtorParams { LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0) };
+		auto stringType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
+		members[0] = stringType;
+		members[1] = LLVMPointerType(LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), dtorParams.data(), dtorParams.size(), false), 0);
+		members[2] = stringType;
+		members[3] = i64Type;
+		members[4] = i64Type;
+		members[5] = i64Type;
+		_definedTypes["_Alta_class_info"] = LLVMStructType(members.data(), members.size(), false);
+	}
+
+	if (!_definedTypes["_Alta_instance_info"]) {
+		/*
+		struct _Alta_instance_info {
+			struct _Alta_class_info* class_info;
+		};
+		*/
+		std::array<LLVMTypeRef, 1> members;
+		members[0] = LLVMPointerType(_definedTypes["_Alta_class_info"], 0);
+		_definedTypes["_Alta_instance_info"] = LLVMStructType(members.data(), members.size(), false);
+	}
+
+	for (size_t i = 0; i < root->statements.size(); ++i) {
+		auto co = compileNode(root->statements[i], root->info->statements[i]);
 		co.coroutine.resume();
 	}
 };

@@ -6,9 +6,7 @@
 #include <altall/compiler.hpp>
 #include <stack>
 #include <string.h>
-
-static ALTACORE_MAP<std::string, bool> varargTable;
-static ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> invalidValueExpressionTable;
+#include <llvm-c/BitWriter.h>
 
 bool AltaLL::init() {
 	// nothing for now
@@ -19,35 +17,6 @@ void AltaLL::finit() {
 	// nothing for now
 };
 
-#define AC_ATTRIBUTE_FUNC [=](std::shared_ptr<AltaCore::AST::Node> _target, std::shared_ptr<AltaCore::DH::Node> _info, std::vector<AltaCore::Attributes::AttributeArgument> args) -> void
-#define AC_ATTRIBUTE_CAST(x) auto target = std::dynamic_pointer_cast<AltaCore::AST::x>(_target);\
-  auto info = std::dynamic_pointer_cast<AltaCore::DH::x>(_info);\
-  if (!target || !info) throw std::runtime_error("this isn't supposed to happen");
-#define AC_ATTRIBUTE(x, ...) AltaCore::Attributes::registerAttribute({ __VA_ARGS__ }, { AltaCore::AST::NodeType::x }, AC_ATTRIBUTE_FUNC {\
-  AC_ATTRIBUTE_CAST(x);
-#define AC_GENERAL_ATTRIBUTE(...) AltaCore::Attributes::registerAttribute({ __VA_ARGS__ }, {}, AC_ATTRIBUTE_FUNC {
-#define AC_END_ATTRIBUTE }, modulePath.toString())
-
-void AltaLL::registerAttributes(AltaCore::Filesystem::Path modulePath) {
-	AC_ATTRIBUTE(Parameter, "native", "vararg");
-		varargTable[target->id] = true;
-	AC_END_ATTRIBUTE;
-	AC_ATTRIBUTE(SpecialFetchExpression, "invalid");
-		if (args.size() != 1) {
-			throw std::runtime_error("expected a single type argument to special fetch expression @invalid attribute");
-		}
-		if (!args.front().isScopeItem) {
-			throw std::runtime_error("expected a type argument for special fetch expression @invalid attribute");
-		}
-		auto type = std::dynamic_pointer_cast<AltaCore::DET::Type>(args.front().item);
-		if (!type) {
-			throw std::runtime_error("expected a type argument for special fetch expression @invalid attribute");
-		}
-		invalidValueExpressionTable[info->id] = type;
-		info->items.push_back(type);
-  AC_END_ATTRIBUTE;
-};
-
 void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Filesystem::Path binaryOutputPath) {
 	auto llcontext = llwrap(LLVMContextCreate());
 	auto llmod = llwrap(LLVMModuleCreateWithNameInContext("alta_product", llcontext.get()));
@@ -56,10 +25,25 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	std::string hostCPUFeatures = wrapMessage(LLVMGetHostCPUFeatures());
 	LLVMTargetRef rawTarget = NULL;
 	auto outputPathStr = binaryOutputPath.absolutify().toString();
-	Compiler altaCompiler(llmod);
+	auto outputBitcodePathStr = outputPathStr + ".bc";
 
 	std::stack<std::pair<std::shared_ptr<AltaCore::AST::RootNode>, size_t>> rootStack;
 	std::unordered_set<std::string> processedRoots;
+
+	LLVMInitializeNativeTarget();
+	LLVMInitializeNativeAsmPrinter();
+
+	if (LLVMGetTargetFromTriple(defaultTriple.c_str(), &rawTarget, NULL)) {
+		throw std::runtime_error("Failed to get target");
+	}
+
+	auto targetMachine = llwrap(LLVMCreateTargetMachine(rawTarget, defaultTriple.c_str(), hostCPU.c_str(), hostCPUFeatures.c_str(), LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault));
+	auto targetData = llwrap(LLVMCreateTargetDataLayout(targetMachine.get()));
+
+	LLVMSetModuleDataLayout(llmod.get(), targetData.get());
+	LLVMSetTarget(llmod.get(), defaultTriple.c_str());
+
+	Compiler altaCompiler(llcontext, llmod, targetMachine, targetData);
 
 	// iterate through all the root nodes and compile them
 	// (not recursively, to reduce stack usage and avoid stack overflows)
@@ -84,18 +68,8 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 		rootStack.pop();
 	}
 
-	LLVMInitializeNativeTarget();
-	LLVMInitializeNativeAsmPrinter();
-
-	if (LLVMGetTargetFromTriple(defaultTriple.c_str(), &rawTarget, NULL)) {
-		throw std::runtime_error("Failed to get target");
-	}
-
-	auto targetMachine = llwrap(LLVMCreateTargetMachine(rawTarget, defaultTriple.c_str(), hostCPU.c_str(), hostCPUFeatures.c_str(), LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault));
-	auto targetData = llwrap(LLVMCreateTargetDataLayout(targetMachine.get()));
-
-	LLVMSetModuleDataLayout(llmod.get(), targetData.get());
-	LLVMSetTarget(llmod.get(), defaultTriple.c_str());
+	// the bitcode is not strictly necessary; ignore it if we fail
+	LLVMWriteBitcodeToFile(llmod.get(), outputBitcodePathStr.c_str());
 
 	// on some platforms, the LLVM headers are wrong and specify the filename argument to LLVMTargetMachineEmitToFile as `char*` instead of `const char*`.
 	// just in case, let's duplicate the string data.
