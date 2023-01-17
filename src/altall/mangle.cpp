@@ -1,19 +1,19 @@
 #include <altall/mangle.hpp>
 #include <picosha2.h>
 
-std::string AltaLL::cTypeNameify(AltaCore::DET::Type* type, bool mangled) {
+std::string AltaLL::cTypeNameify(std::shared_ptr<AltaCore::DET::Type> type, bool mangled) {
 	using NT = AltaCore::DET::NativeType;
 	if (type->isOptional) {
-		return "_Alta_optional_" + mangleType(type->optionalTarget.get());
+		return "_Alta_optional_" + mangleType(type->optionalTarget);
 	} if (type->isFunction) {
 		if (!type->isRawFunction) {
 			return "_Alta_basic_function";
 		}
-		std::string result = "_Alta_func_ptr_" + mangleType(type->returnType.get());
+		std::string result = "_Alta_func_ptr_" + mangleType(type->returnType);
 		for (auto& [name, param, isVariable, id]: type->parameters) {
 			result += '_';
 			auto target = isVariable ? param->point() : param;
-			result += mangleType(target.get());
+			result += mangleType(target);
 		}
 		return result;
 	} else if (type->isNative) {
@@ -39,15 +39,15 @@ std::string AltaLL::cTypeNameify(AltaCore::DET::Type* type, bool mangled) {
 		std::string result = "_Alta_union";
 		for (auto& item: type->unionOf) {
 			result += '_';
-			result += mangleType(item.get());
+			result += mangleType(item);
 		}
 		return result;
 	} else {
-		return mangleName(type->klass.get());
+		return mangleName(type->klass);
 	}
 };
 
-std::string AltaLL::mangleType(AltaCore::DET::Type* type) {
+std::string AltaLL::mangleType(std::shared_ptr<AltaCore::DET::Type> type) {
 	using TypeModifier = AltaCore::Shared::TypeModifierFlag;
 	std::string mangled;
 
@@ -80,15 +80,15 @@ std::string AltaLL::mangleType(AltaCore::DET::Type* type) {
 	if (!type->isRawFunction) {
 		auto rawCopy = type->copy();
 		rawCopy->isRawFunction = true;
-		mangled += cTypeNameify(rawCopy.get(), true);
+		mangled += cTypeNameify(rawCopy, true);
 	}
 
 	return mangled;
 };
 
-AltaCore::DET::ScopeItem* AltaLL::followAlias(AltaCore::DET::ScopeItem* maybeAlias) {
-	while (auto alias = dynamic_cast<AltaCore::DET::Alias*>(maybeAlias)) {
-		maybeAlias = alias->target.get();
+std::shared_ptr<AltaCore::DET::ScopeItem> AltaLL::followAlias(std::shared_ptr<AltaCore::DET::ScopeItem> maybeAlias) {
+	while (auto alias = std::dynamic_pointer_cast<AltaCore::DET::Alias>(maybeAlias)) {
+		maybeAlias = alias->target;
 	}
 	return maybeAlias;
 };
@@ -130,7 +130,7 @@ std::string AltaLL::escapeName(std::string name) {
 	return escaped;
 };
 
-std::string AltaLL::mangleName(AltaCore::DET::Module* mod, bool fullName) {
+std::string AltaLL::mangleName(std::shared_ptr<AltaCore::DET::Module> mod, bool fullName) {
 	auto version = mod->packageInfo.version;
 	// since we use underscores as special escape characters,
 	// and dashes aren't allowed in identifiers,
@@ -153,17 +153,17 @@ std::string AltaLL::mangleName(AltaCore::DET::Module* mod, bool fullName) {
 	return result;
 };
 
-std::string AltaLL::mangleName(AltaCore::DET::Scope* scope, bool fullName) {
+std::string AltaLL::mangleName(std::shared_ptr<AltaCore::DET::Scope> scope, bool fullName) {
 	std::string mangled = "_4_" + std::to_string(scope->relativeID);
 	if (!fullName) return mangled;
 	if (auto mod = scope->parentModule.lock()) {
-		mangled = mangleName(mod.get(), true) + "_0_" + mangled;
+		mangled = mangleName(mod, true) + "_0_" + mangled;
 	} else if (auto func = scope->parentFunction.lock()) {
-		mangled = mangleName(func.get(), true) + "_0_" + mangled;
+		mangled = mangleName(func, true) + "_0_" + mangled;
 	} else if (auto parent = scope->parent.lock()) {
-		mangled = mangleName(parent.get(), true) + "_0_" + mangled;
+		mangled = mangleName(parent, true) + "_0_" + mangled;
 	} else if (auto ns = scope->parentNamespace.lock()) {
-		mangled = mangleName(ns.get(), true) + "_0_" + mangled;
+		mangled = mangleName(ns, true) + "_0_" + mangled;
 	}
 #if 0
 	friendlyNames[mangled] = "<scope#" + std::to_string(scope->relativeID) + ">";
@@ -171,7 +171,7 @@ std::string AltaLL::mangleName(AltaCore::DET::Scope* scope, bool fullName) {
 	return mangled;
 };
 
-std::string AltaLL::mangleName(AltaCore::DET::ScopeItem* item, bool fullName) {
+std::string AltaLL::mangleName(std::shared_ptr<AltaCore::DET::ScopeItem> item, bool fullName) {
 	item = followAlias(item);
 
 	using NodeType = AltaCore::DET::NodeType;
@@ -182,28 +182,28 @@ std::string AltaLL::mangleName(AltaCore::DET::ScopeItem* item, bool fullName) {
 	std::string mangled;
 
 	if (nodeType == NodeType::Function) {
-		auto func = dynamic_cast<DET::Function*>(item);
+		auto func = std::dynamic_pointer_cast<DET::Function>(item);
 		isLiteral = func->isLiteral;
 		itemName = isLiteral ? func->name : escapeName(func->name);
 		for (auto arg: func->genericArguments) {
-			itemName += "_2_" + mangleType(arg.get());
+			itemName += "_2_" + mangleType(arg);
 		}
 
 		if (!isLiteral) {
 			itemName = escapeName(itemName);
 			for (auto& [name, type, isVariable, id]: func->parameters) {
-				itemName += "_9_" + escapeName(name) + ((isVariable) ? "_8_" : "_1_") + mangleType(type.get());
+				itemName += "_9_" + escapeName(name) + ((isVariable) ? "_8_" : "_1_") + mangleType(type);
 			}
 			if (func->returnType) {
 				if (func->returnType->klass && func->returnType->klass->scope->hasParent(func->scope)) {
 					itemName += "_11__64_CaptureClass_64_";
 				} else {
-					itemName += "_11_" + mangleType(func->returnType.get());
+					itemName += "_11_" + mangleType(func->returnType);
 				}
 			}
 		}
 	} else if (nodeType == NodeType::Variable) {
-		auto var = dynamic_cast<DET::Variable*>(item);
+		auto var = std::dynamic_pointer_cast<DET::Variable>(item);
 		isLiteral = isLiteral || var->isLiteral;
 		if (!isLiteral) {
 			if (auto ps = var->parentScope.lock()) {
@@ -220,16 +220,18 @@ std::string AltaLL::mangleName(AltaCore::DET::ScopeItem* item, bool fullName) {
 			return tmp;
 		}
 	} else if (nodeType == NodeType::Namespace) {
-		auto ns = dynamic_cast<DET::Namespace*>(item);
+		auto ns = std::dynamic_pointer_cast<DET::Namespace>(item);
 		isLiteral = false;
 		itemName = isLiteral ? ns->name : escapeName(ns->name);
 	} else if (nodeType == NodeType::Class) {
-		auto klass = dynamic_cast<DET::Class*>(item);
+		auto klass = std::dynamic_pointer_cast<DET::Class>(item);
 		isLiteral = klass->isLiteral;
 		itemName = isLiteral ? klass->name : escapeName(klass->name);
 		for (auto arg: klass->genericArguments) {
-			itemName += "_2_" + mangleType(arg.get());
+			itemName += "_2_" + mangleType(arg);
 		}
+	} else {
+		throw std::runtime_error("Cannot use mangleName to mangle the name of this scope item: " + item->toString());
 	}
 
 #if 0
@@ -244,19 +246,19 @@ std::string AltaLL::mangleName(AltaCore::DET::ScopeItem* item, bool fullName) {
 		while (!maybeScope.expired()) {
 			auto scope = maybeScope.lock();
 			if (!scope->parentModule.expired()) {
-				mangled += mangleName(scope->parentModule.lock().get()) + "_0_" + mangled;
+				mangled += mangleName(scope->parentModule.lock()) + "_0_" + mangled;
 				maybeScope = std::weak_ptr<DET::Scope>(); // modules are root nodes, stop because we found one
 			} else if (!scope->parentFunction.expired()) {
-				mangled += mangleName(scope->parentFunction.lock().get()) + "_0_" + mangled;
+				mangled += mangleName(scope->parentFunction.lock()) + "_0_" + mangled;
 				maybeScope = scope->parentFunction.lock()->parentScope;
 			} else if (!scope->parent.expired()) {
 				mangled += "_4_" + std::to_string(scope->relativeID) + "_0_" + mangled;
 				maybeScope = scope->parent;
 			} else if (!scope->parentNamespace.expired()) {
-				mangled += mangleName(scope->parentNamespace.lock().get()) + "_0_" + mangled;
+				mangled += mangleName(scope->parentNamespace.lock()) + "_0_" + mangled;
 				maybeScope = scope->parentNamespace.lock()->parentScope;
 			} else if (!scope->parentClass.expired()) {
-				mangled += mangleName(scope->parentClass.lock().get()) + "_0_" + mangled;
+				mangled += mangleName(scope->parentClass.lock()) + "_0_" + mangled;
 				maybeScope = scope->parentClass.lock()->parentScope;
 			}
 		}
@@ -273,6 +275,13 @@ std::string AltaLL::mangleName(AltaCore::DET::ScopeItem* item, bool fullName) {
 
 #if 0
 	friendlyNames[mangled] = item->name;
+#endif
+
+#if 0
+	{
+		auto tmp = item->toString();
+		printf("%s mangled to %s\n", tmp.c_str(), mangled.c_str());
+	}
 #endif
 
 	return mangled;

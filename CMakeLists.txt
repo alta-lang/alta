@@ -60,7 +60,16 @@ target_compile_definitions(altall PRIVATE ${LLVM_DEFINITIONS_LIST})
 
 target_link_libraries(altall PUBLIC altacore)
 target_link_libraries(altall PRIVATE picosha2)
-llvm_config(altall support core codegen AllTargetsCodeGens bitwriter)
+
+option(USE_SHARED_LLVM "Link to LLVM as a shared library rather than statically" OFF)
+
+if(USE_SHARED_LLVM)
+  set(LLVM_CONFIG_SHARED_ARG "USE_SHARED")
+else()
+  set(LLVM_CONFIG_SHARED_ARG "")
+endif()
+
+llvm_config(altall "${LLVM_CONFIG_SHARED_ARG}" support core codegen AllTargetsCodeGens bitwriter)
 
 # credit to Austin Lasher (https://medium.com/@alasher/colored-c-compiler-output-with-ninja-clang-gcc-10bfe7f2b949)
 option(FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)

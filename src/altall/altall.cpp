@@ -68,6 +68,8 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 		rootStack.pop();
 	}
 
+	LLVMDumpModule(llmod.get());
+
 	// the bitcode is not strictly necessary; ignore it if we fail
 	LLVMWriteBitcodeToFile(llmod.get(), outputBitcodePathStr.c_str());
 

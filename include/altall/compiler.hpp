@@ -36,6 +36,7 @@ namespace AltaLL {
 		bool _inGenerator = false;
 		ALTACORE_MAP<std::string, LLVMValueRef> _definedFunctions;
 		std::stack<ScopeStack> _stacks;
+		ALTACORE_MAP<std::string, LLVMValueRef> _definedVariables;
 
 		// adapted from and based on https://itnext.io/c-20-practical-coroutines-79202872ebba
 		template<typename Result>
@@ -280,15 +281,61 @@ namespace AltaLL {
 		LLCoroutine doCopyCtorInternal(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, CopyInfo additionalCopyInfo, bool* didCopy);
 		LLCoroutine doCopyCtor(LLVMValueRef compiled, std::shared_ptr<AltaCore::AST::ExpressionNode> expr, std::shared_ptr<AltaCore::DH::ExpressionNode> info, bool* didCopy = nullptr);
 		LLCoroutine doCopyCtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, CopyInfo additionalCopyInfo, bool* didCopy = nullptr);
+		LLCoroutine doDtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didDtor = nullptr);
 
 		LLCoroutine loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
 
 		LLCoroutine getRealInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
+		LLCoroutine getRootInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
 
 		LLCoroutine doParentRetrieval(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, std::shared_ptr<AltaCore::DET::Type> targetType, bool* didRetrieval = nullptr);
 		LLCoroutine doChildRetrieval(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, std::shared_ptr<AltaCore::DET::Type> targetType, bool* didRetrieval = nullptr);
 
 		LLCoroutine tmpify(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, bool withStack = true);
+		LLCoroutine tmpify(std::shared_ptr<AltaCore::AST::ExpressionNode> expr, std::shared_ptr<AltaCore::DH::ExpressionNode> info);
+
+		Coroutine<void> processArgs(std::vector<ALTACORE_VARIANT<std::pair<std::shared_ptr<AltaCore::AST::ExpressionNode>, std::shared_ptr<AltaCore::DH::ExpressionNode>>, std::vector<std::pair<std::shared_ptr<AltaCore::AST::ExpressionNode>, std::shared_ptr<AltaCore::DH::ExpressionNode>>>>> adjustedArguments, std::vector<std::tuple<std::string, std::shared_ptr<AltaCore::DET::Type>, bool, std::string>> parameters, AltaCore::Errors::Position* position, std::vector<LLVMValueRef>& outputArgs);
+
+		Coroutine<LLVMTypeRef> defineClassType(std::shared_ptr<AltaCore::DET::Class> klass);
+
+		inline bool canDestroy(std::shared_ptr<AltaCore::DET::Type> exprType) const {
+			return (
+				exprType->indirectionLevel() < 1 &&
+				(
+					(
+						!exprType->isNative &&
+						(
+							exprType->isUnion() ||
+							exprType->isOptional ||
+							exprType->klass->destructor
+						)
+					) ||
+					(
+						exprType->isFunction &&
+						!exprType->isRawFunction
+					)
+				)
+			);
+		};
+
+		inline bool canPush(std::shared_ptr<AltaCore::DET::Type> exprType) const {
+			return (
+				exprType->indirectionLevel() == 0 &&
+				(
+					(
+						!exprType->isNative &&
+						(
+							!exprType->klass ||
+							(exprType->klass && !exprType->klass->isStructure)
+						)
+					) ||
+					(
+						exprType->isFunction &&
+						!exprType->isRawFunction
+					)
+				)
+			);
+		};
 
 		LLCoroutine returnNull();
 
@@ -296,8 +343,6 @@ namespace AltaLL {
 		LLCoroutine compileNode(std::shared_ptr<AltaCore::AST::Node> node, std::shared_ptr<AltaCore::DH::Node> info);
 
 		LLCoroutine compileExpressionStatement(std::shared_ptr<AltaCore::AST::ExpressionStatement> node, std::shared_ptr<AltaCore::DH::ExpressionStatement> info);
-		LLCoroutine compileType(std::shared_ptr<AltaCore::AST::Type> node, std::shared_ptr<AltaCore::DH::Type> info);
-		LLCoroutine compileParameter(std::shared_ptr<AltaCore::AST::Parameter> node, std::shared_ptr<AltaCore::DH::Parameter> info);
 		LLCoroutine compileBlockNode(std::shared_ptr<AltaCore::AST::BlockNode> node, std::shared_ptr<AltaCore::DH::BlockNode> info);
 		LLCoroutine compileFunctionDefinitionNode(std::shared_ptr<AltaCore::AST::FunctionDefinitionNode> node, std::shared_ptr<AltaCore::DH::FunctionDefinitionNode> info);
 		LLCoroutine compileReturnDirectiveNode(std::shared_ptr<AltaCore::AST::ReturnDirectiveNode> node, std::shared_ptr<AltaCore::DH::ReturnDirectiveNode> info);
@@ -308,12 +353,9 @@ namespace AltaLL {
 		LLCoroutine compileAssignmentExpression(std::shared_ptr<AltaCore::AST::AssignmentExpression> node, std::shared_ptr<AltaCore::DH::AssignmentExpression> info);
 		LLCoroutine compileBooleanLiteralNode(std::shared_ptr<AltaCore::AST::BooleanLiteralNode> node, std::shared_ptr<AltaCore::DH::BooleanLiteralNode> info);
 		LLCoroutine compileBinaryOperation(std::shared_ptr<AltaCore::AST::BinaryOperation> node, std::shared_ptr<AltaCore::DH::BinaryOperation> info);
-		LLCoroutine compileImportStatement(std::shared_ptr<AltaCore::AST::ImportStatement> node, std::shared_ptr<AltaCore::DH::ImportStatement> info);
 		LLCoroutine compileFunctionCallExpression(std::shared_ptr<AltaCore::AST::FunctionCallExpression> node, std::shared_ptr<AltaCore::DH::FunctionCallExpression> info);
 		LLCoroutine compileStringLiteralNode(std::shared_ptr<AltaCore::AST::StringLiteralNode> node, std::shared_ptr<AltaCore::DH::StringLiteralNode> info);
 		LLCoroutine compileFunctionDeclarationNode(std::shared_ptr<AltaCore::AST::FunctionDeclarationNode> node, std::shared_ptr<AltaCore::DH::FunctionDeclarationNode> info);
-		LLCoroutine compileAttributeNode(std::shared_ptr<AltaCore::AST::AttributeNode> node, std::shared_ptr<AltaCore::DH::AttributeNode> info);
-		LLCoroutine compileLiteralNode(std::shared_ptr<AltaCore::AST::LiteralNode> node, std::shared_ptr<AltaCore::DH::LiteralNode> info);
 		LLCoroutine compileAttributeStatement(std::shared_ptr<AltaCore::AST::AttributeStatement> node, std::shared_ptr<AltaCore::DH::AttributeStatement> info);
 		LLCoroutine compileConditionalStatement(std::shared_ptr<AltaCore::AST::ConditionalStatement> node, std::shared_ptr<AltaCore::DH::ConditionalStatement> info);
 		LLCoroutine compileConditionalExpression(std::shared_ptr<AltaCore::AST::ConditionalExpression> node, std::shared_ptr<AltaCore::DH::ConditionalExpression> info);
@@ -329,21 +371,16 @@ namespace AltaLL {
 		LLCoroutine compileCastExpression(std::shared_ptr<AltaCore::AST::CastExpression> node, std::shared_ptr<AltaCore::DH::CastExpression> info);
 		LLCoroutine compileClassReadAccessorDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassReadAccessorDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassReadAccessorDefinitionStatement> info);
 		LLCoroutine compileCharacterLiteralNode(std::shared_ptr<AltaCore::AST::CharacterLiteralNode> node, std::shared_ptr<AltaCore::DH::CharacterLiteralNode> info);
-		LLCoroutine compileTypeAliasStatement(std::shared_ptr<AltaCore::AST::TypeAliasStatement> node, std::shared_ptr<AltaCore::DH::TypeAliasStatement> info);
 		LLCoroutine compileSubscriptExpression(std::shared_ptr<AltaCore::AST::SubscriptExpression> node, std::shared_ptr<AltaCore::DH::SubscriptExpression> info);
-		LLCoroutine compileRetrievalNode(std::shared_ptr<AltaCore::AST::RetrievalNode> node, std::shared_ptr<AltaCore::DH::RetrievalNode> info);
 		LLCoroutine compileSuperClassFetch(std::shared_ptr<AltaCore::AST::SuperClassFetch> node, std::shared_ptr<AltaCore::DH::SuperClassFetch> info);
 		LLCoroutine compileInstanceofExpression(std::shared_ptr<AltaCore::AST::InstanceofExpression> node, std::shared_ptr<AltaCore::DH::InstanceofExpression> info);
-		LLCoroutine compileGeneric(std::shared_ptr<AltaCore::AST::Generic> node, std::shared_ptr<AltaCore::DH::Generic> info);
 		LLCoroutine compileForLoopStatement(std::shared_ptr<AltaCore::AST::ForLoopStatement> node, std::shared_ptr<AltaCore::DH::ForLoopStatement> info);
 		LLCoroutine compileRangedForLoopStatement(std::shared_ptr<AltaCore::AST::RangedForLoopStatement> node, std::shared_ptr<AltaCore::DH::RangedForLoopStatement> info);
 		LLCoroutine compileUnaryOperation(std::shared_ptr<AltaCore::AST::UnaryOperation> node, std::shared_ptr<AltaCore::DH::UnaryOperation> info);
 		LLCoroutine compileSizeofOperation(std::shared_ptr<AltaCore::AST::SizeofOperation> node, std::shared_ptr<AltaCore::DH::SizeofOperation> info);
 		LLCoroutine compileFloatingPointLiteralNode(std::shared_ptr<AltaCore::AST::FloatingPointLiteralNode> node, std::shared_ptr<AltaCore::DH::FloatingPointLiteralNode> info);
 		LLCoroutine compileStructureDefinitionStatement(std::shared_ptr<AltaCore::AST::StructureDefinitionStatement> node, std::shared_ptr<AltaCore::DH::StructureDefinitionStatement> info);
-		LLCoroutine compileExportStatement(std::shared_ptr<AltaCore::AST::ExportStatement> node, std::shared_ptr<AltaCore::DH::ExportStatement> info);
 		LLCoroutine compileVariableDeclarationStatement(std::shared_ptr<AltaCore::AST::VariableDeclarationStatement> node, std::shared_ptr<AltaCore::DH::VariableDeclarationStatement> info);
-		LLCoroutine compileAliasStatement(std::shared_ptr<AltaCore::AST::AliasStatement> node, std::shared_ptr<AltaCore::DH::AliasStatement> info);
 		LLCoroutine compileDeleteStatement(std::shared_ptr<AltaCore::AST::DeleteStatement> node, std::shared_ptr<AltaCore::DH::DeleteStatement> info);
 		LLCoroutine compileControlDirective(std::shared_ptr<AltaCore::AST::ControlDirective> node, std::shared_ptr<AltaCore::DH::Node> info);
 		LLCoroutine compileTryCatchBlock(std::shared_ptr<AltaCore::AST::TryCatchBlock> node, std::shared_ptr<AltaCore::DH::TryCatchBlock> info);
