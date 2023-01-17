@@ -7,6 +7,7 @@
 #include <stack>
 #include <string.h>
 #include <llvm-c/BitWriter.h>
+#include <llvm-c/Analysis.h>
 
 bool AltaLL::init() {
 	// nothing for now
@@ -68,7 +69,11 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 		rootStack.pop();
 	}
 
+	// for debugging
 	LLVMDumpModule(llmod.get());
+
+	// make sure our module is good
+	LLVMVerifyModule(llmod.get(), LLVMAbortProcessAction, NULL);
 
 	// the bitcode is not strictly necessary; ignore it if we fail
 	LLVMWriteBitcodeToFile(llmod.get(), outputBitcodePathStr.c_str());

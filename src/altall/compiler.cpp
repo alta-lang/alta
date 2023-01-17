@@ -463,7 +463,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			if (!_definedFunctions[component.method->id]) {
 				auto mangled = mangleName(component.method);
 				auto func = LLVMAddFunction(_llmod.get(), mangled.c_str(), lltype);
-				LLVMSetLinkage(func, LLVMPrivateLinkage);
 				_definedFunctions[component.method->id] = func;
 			}
 
@@ -487,7 +486,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			if (!_definedFunctions[component.method->id]) {
 				auto mangled = mangleName(component.method);
 				auto func = LLVMAddFunction(_llmod.get(), mangled.c_str(), lltype);
-				LLVMSetLinkage(func, LLVMPrivateLinkage);
 				_definedFunctions[component.method->id] = func;
 			}
 
@@ -601,7 +599,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 			if (!_definedFunctions["_Alta_copy_" + mangleType(exprType)]) {
 				auto name = "_Alta_copy_" + mangleType(exprType);
 				auto func = LLVMAddFunction(_llmod.get(), name.c_str(), copyFuncType);
-				LLVMSetLinkage(func, LLVMPrivateLinkage);
 				_definedFunctions["_Alta_copy_" + mangleType(exprType)] = func;
 			}
 
@@ -614,7 +611,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 			if (!_definedFunctions["_Alta_copy_" + mangleType(exprType)]) {
 				auto name = "_Alta_copy_" + mangleType(exprType);
 				auto func = LLVMAddFunction(_llmod.get(), name.c_str(), copyFuncType);
-				LLVMSetLinkage(func, LLVMPrivateLinkage);
 				_definedFunctions["_Alta_copy_" + mangleType(exprType)] = func;
 			}
 
@@ -625,12 +621,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 			exprType->klass->copyConstructor
 		) {
 			auto type = AltaCore::DET::Type::getUnderlyingType(exprType->klass->copyConstructor);
+			type->returnType = std::make_shared<AltaCore::DET::Type>(exprType->klass);
 			copyFuncType = co_await translateType(type);
 
 			if (!_definedFunctions[exprType->klass->copyConstructor->id]) {
 				auto mangled = mangleName(exprType->klass->copyConstructor);
 				auto func = LLVMAddFunction(_llmod.get(), mangled.c_str(), copyFuncType);
-				LLVMSetLinkage(func, LLVMPrivateLinkage);
 				_definedFunctions[exprType->klass->copyConstructor->id] = func;
 			}
 
@@ -1229,8 +1225,17 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 		auto retType = co_await translateType(info->returnType->type);
 		std::vector<LLVMTypeRef> paramTypes;
 
-		for (const auto& param: info->parameters) {
-			paramTypes.push_back(co_await translateType(param->type->type));
+		for (size_t i = 0; i < info->parameters.size(); ++i) {
+			const auto& param = node->parameters[i];
+			const auto& paramInfo = info->parameters[i];
+			auto lltype = co_await translateType(paramInfo->type->type);
+
+			if (param->isVariable) {
+				paramTypes.push_back(LLVMInt64TypeInContext(_llcontext.get()));
+				paramTypes.push_back(LLVMPointerType(lltype, 0));
+			} else {
+				paramTypes.push_back(lltype);
+			}
 		}
 
 		auto mangled = mangleName(info->function);
@@ -1242,7 +1247,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 		auto llfunc = _definedFunctions[info->function->id];
 
-		LLVMSetLinkage(llfunc, mangled == "main" ? LLVMExternalLinkage : LLVMPrivateLinkage);
+		LLVMSetLinkage(llfunc, mangled == "main" ? LLVMExternalLinkage : LLVMInternalLinkage);
 
 		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
 		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
@@ -1251,10 +1256,22 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 		_builders.push(builder);
 		_stacks.emplace(*this);
 
+		size_t llparamIndex = 0;
 		for (size_t i = 0; i < info->parameters.size(); ++i) {
-			const auto& param = info->parameters[i];
+			const auto& param = node->parameters[i];
+			const auto& paramInfo = info->parameters[i];
 			const auto& var = info->function->parameterVariables[i];
-			auto llparam = LLVMGetParam(llfunc, i);
+
+			auto llparam = LLVMGetParam(llfunc, llparamIndex);
+			++llparamIndex;
+
+			LLVMValueRef llparamLen = NULL;
+
+			if (param->isVariable) {
+				llparamLen = llparam;
+				llparam = LLVMGetParam(llfunc, llparamIndex);
+				++llparamIndex;
+			}
 
 			if (var->type->indirectionLevel() == 0) {
 				llparam = co_await tmpify(llparam, var->type, false);
@@ -1262,6 +1279,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			}
 
 			_definedVariables[var->id] = llparam;
+			if (llparamLen) {
+				_definedVariables["_Alta_array_length_" + var->id] = llparamLen;
+			}
 		}
 
 		co_await compileNode(node->body, info->body);
@@ -1305,6 +1325,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 		// FIXME: we need to clean up ALL scope stacks for the current function
 		co_await _stacks.top().cleanup();
 
+		if (!expr) {
+			throw std::runtime_error("Invalid return value");
+		}
+
 		LLVMBuildRet(_builders.top().get(), expr);
 	} else {
 		// FIXME: same as above
@@ -1333,7 +1357,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 	if (!_definedVariables[info->variable->id]) {
 		if (inModuleRoot) {
 			memory = LLVMAddGlobal(_llmod.get(), lltype, mangled.c_str());
-			LLVMSetLinkage(memory, LLVMPrivateLinkage);
+			LLVMSetLinkage(memory, LLVMInternalLinkage);
 		} else {
 			memory = LLVMBuildAlloca(_builders.top().get(), lltype, mangled.c_str());
 		}
@@ -1361,7 +1385,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 		if (!_definedFunctions[info->variable->type->klass->defaultConstructor->id]) {
 			auto mangled = mangleName(info->variable->type->klass->defaultConstructor);
 			auto func = LLVMAddFunction(_llmod.get(), mangled.c_str(), funcType);
-			LLVMSetLinkage(func, LLVMPrivateLinkage);
 			_definedFunctions[info->variable->type->klass->defaultConstructor->id] = func;
 		}
 
@@ -1396,13 +1419,42 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 				auto funcType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(func));
 
 				if (!result) {
-					if (_definedFunctions[info->narrowedTo->id]) {
+					if (_definedFunctions[func->id]) {
 						throw std::runtime_error("This should be impossible");
 					}
 
-					auto mangled = mangleName(info->narrowedTo);
-					_definedFunctions[info->narrowedTo->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), funcType);
-					result = _definedFunctions[info->narrowedTo->id];
+					auto mangled = mangleName(func);
+					_definedFunctions[func->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), funcType);
+					result = _definedFunctions[func->id];
+				}
+
+				if (func->isAccessor) {
+					result = LLVMBuildCall2(_builders.top().get(), funcType, result, nullptr, 0, "");
+				}
+			} else if (info->narrowedTo->nodeType() == AltaCore::DET::NodeType::Variable) {
+				auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(info->narrowedTo);
+				auto varType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(var)->destroyReferences());
+
+				if (!result) {
+					if (_definedVariables[var->id]) {
+						throw std::runtime_error("This should be impossible");
+					}
+
+					bool ok = false;
+
+					if (var->isLiteral) {
+						ok = true;
+					} else if (auto ns = AltaCore::Util::getEnum(var->parentScope.lock()).lock()) {
+						ok = true;
+					}
+
+					if (!ok) {
+						throw std::runtime_error("This should also be impossible");
+					}
+
+					auto mangled = mangleName(var);
+					_definedVariables[var->id] = LLVMAddGlobal(_llmod.get(), varType, mangled.c_str());
+					result = _definedVariables[var->id];
 				}
 			}
 
@@ -1589,17 +1641,42 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 		auto funcType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(func));
 
 		if (!result) {
-			if (_definedFunctions[info->narrowedTo->id]) {
+			if (_definedFunctions[func->id]) {
 				throw std::runtime_error("This should be impossible");
 			}
 
-			auto mangled = mangleName(info->narrowedTo);
-			_definedFunctions[info->narrowedTo->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), funcType);
-			result = _definedFunctions[info->narrowedTo->id];
+			auto mangled = mangleName(func);
+			_definedFunctions[func->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), funcType);
+			result = _definedFunctions[func->id];
 		}
 
 		if (func->isAccessor) {
 			result = LLVMBuildCall2(_builders.top().get(), funcType, result, nullptr, 0, "");
+		}
+	} else if (info->narrowedTo->nodeType() == AltaCore::DET::NodeType::Variable) {
+		auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(info->narrowedTo);
+		auto varType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(var)->destroyReferences());
+
+		if (!result) {
+			if (_definedVariables[var->id]) {
+				throw std::runtime_error("This should be impossible");
+			}
+
+			bool ok = false;
+
+			if (var->isLiteral) {
+				ok = true;
+			} else if (auto ns = AltaCore::Util::getEnum(var->parentScope.lock()).lock()) {
+				ok = true;
+			}
+
+			if (!ok) {
+				throw std::runtime_error("This should also be impossible");
+			}
+
+			auto mangled = mangleName(var);
+			_definedVariables[var->id] = LLVMAddGlobal(_llmod.get(), varType, mangled.c_str());
+			result = _definedVariables[var->id];
 		}
 	}
 
@@ -1901,7 +1978,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileStringLiteralNode(std::shared_ptr<AltaCore::AST::StringLiteralNode> node, std::shared_ptr<AltaCore::DH::StringLiteralNode> info) {
-	co_return LLVMConstStringInContext(_llcontext.get(), node->value.c_str(), node->value.size(), false);
+	co_return LLVMBuildGlobalStringPtr(_builders.top().get(), node->value.c_str(), "");
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDeclarationNode(std::shared_ptr<AltaCore::AST::FunctionDeclarationNode> node, std::shared_ptr<AltaCore::DH::FunctionDeclarationNode> info) {
@@ -2198,9 +2275,33 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileCharacterLiteralNode(std:
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::shared_ptr<AltaCore::AST::SubscriptExpression> node, std::shared_ptr<AltaCore::DH::SubscriptExpression> info) {
-	// TODO
-	std::cout << "TODO: SubscriptExpression" << std::endl;
-	co_return NULL;
+	LLVMValueRef result = NULL;
+
+	if (info->enumeration) {
+		throw std::runtime_error("Support enumeration lookups");
+	} else {
+		auto target = co_await compileNode(node->target, info->target);
+		auto subscript = co_await compileNode(node->index, info->index);
+
+		if (info->operatorMethod) {
+			subscript = co_await cast(subscript, info->indexType, info->operatorMethod->parameterVariables.front()->type, true, additionalCopyInfo(node->index, info->index), false, &node->index->position);
+
+			auto funcType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(info->operatorMethod));
+
+			if (!_definedFunctions[info->operatorMethod->id]) {
+				auto mangled = mangleName(info->operatorMethod);
+				_definedFunctions[info->operatorMethod->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), funcType);
+			}
+
+			result = LLVMBuildCall2(_builders.top().get(), funcType, _definedFunctions[info->operatorMethod->id], &subscript, 1, "");
+		} else {
+			target = co_await loadRef(target, info->targetType);
+			subscript = co_await loadRef(subscript, info->indexType);
+			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->targetType->destroyReferences()), target, &subscript, 1, "");
+		}
+	}
+
+	co_return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSuperClassFetch(std::shared_ptr<AltaCore::AST::SuperClassFetch> node, std::shared_ptr<AltaCore::DH::SuperClassFetch> info) {
@@ -2298,8 +2399,98 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileForLoopStatement(std::sha
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(std::shared_ptr<AltaCore::AST::RangedForLoopStatement> node, std::shared_ptr<AltaCore::DH::RangedForLoopStatement> info) {
-	// TODO
-	std::cout << "TODO: RangedForLoopStatement" << std::endl;
+	auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+
+	if (node->end) {
+		auto condBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto bodyBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto endBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+
+		_stacks.emplace(*this);
+
+		auto llstart = co_await compileNode(node->start, info->start);
+		auto castedStart = co_await cast(llstart, AltaCore::DET::Type::getUnderlyingType(info->start.get()), info->counterType->type, true, additionalCopyInfo(node->start, info->start), false, &node->start->position);
+		auto startVar = co_await tmpify(castedStart, info->counterType->type, true);
+		_definedVariables[info->counter->id] = startVar;
+
+		LLVMBuildBr(_builders.top().get(), condBlock);
+
+		_stacks.emplace(*this);
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), condBlock);
+
+		auto llend = co_await compileNode(node->end, info->end);
+		auto castedEnd = co_await cast(llend, AltaCore::DET::Type::getUnderlyingType(info->end.get()), info->counterType->type, true, additionalCopyInfo(node->end, info->end), false, &node->end->position);
+		auto endVal = co_await loadRef(castedEnd, info->counterType->type);
+
+		auto startVal = co_await loadRef(startVar, info->counterType->type->reference());
+
+		LLVMValueRef cmp = NULL;
+
+		if (info->counterType->type->isFloatingPoint()) {
+			LLVMRealPredicate pred;
+
+			if (node->decrement) {
+				if (node->inclusive) {
+					pred = LLVMRealUGE;
+				} else {
+					pred = LLVMRealUGT;
+				}
+			} else {
+				if (node->inclusive) {
+					pred = LLVMRealULE;
+				} else {
+					pred = LLVMRealULT;
+				}
+			}
+
+			cmp = LLVMBuildFCmp(_builders.top().get(), pred, startVal, endVal, "");
+		} else {
+			LLVMIntPredicate pred;
+			bool isSigned = info->counterType->type->isSigned();
+
+			if (node->decrement) {
+				if (node->inclusive) {
+					pred = isSigned ? LLVMIntSGE : LLVMIntUGE;
+				} else {
+					pred = isSigned ? LLVMIntSGT : LLVMIntUGT;
+				}
+			} else {
+				if (node->inclusive) {
+					pred = isSigned ? LLVMIntSLE : LLVMIntULE;
+				} else {
+					pred = isSigned ? LLVMIntSLT : LLVMIntULT;
+				}
+			}
+
+			cmp = LLVMBuildICmp(_builders.top().get(), pred, startVal, endVal, "");
+		}
+
+		LLVMBuildCondBr(_builders.top().get(), cmp, bodyBlock, endBlock);
+
+		// build the end block now so we can cleanup the scope without having to use `startBranch` and `endBranch`
+		LLVMPositionBuilderAtEnd(_builders.top().get(), endBlock);
+		co_await _stacks.top().cleanup();
+		LLVMBuildBr(_builders.top().get(), doneBlock);
+
+		// now build the body
+		LLVMPositionBuilderAtEnd(_builders.top().get(), bodyBlock);
+		co_await compileNode(node->body, info->body);
+		co_await _stacks.top().cleanup();
+		LLVMBuildBr(_builders.top().get(), condBlock);
+
+		_stacks.pop();
+
+		// now build the done block
+		LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+		co_await _stacks.top().cleanup();
+
+		_stacks.pop();
+	} else {
+		throw std::runtime_error("TODO: support generator-based for-loops");
+	}
+
 	co_return NULL;
 };
 
@@ -2358,6 +2549,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileTryCatchBlock(std::shared
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileThrowStatement(std::shared_ptr<AltaCore::AST::ThrowStatement> node, std::shared_ptr<AltaCore::DH::ThrowStatement> info) {
 	// TODO
 	std::cout << "TODO: ThrowStatement" << std::endl;
+	LLVMBuildUnreachable(_builders.top().get());
 	co_return NULL;
 };
 
@@ -2396,8 +2588,31 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode(std::shared_ptr<AltaCore::AST::EnumerationDefinitionNode> node, std::shared_ptr<AltaCore::DH::EnumerationDefinitionNode> info) {
-	// TODO
-	std::cout << "TODO: EnumerationDefinitionNode" << std::endl;
+	auto lltype = co_await translateType(info->memberType);
+
+	for (size_t i = 0; i < node->members.size(); ++i) {
+		const auto& [key, value] = node->members[i];
+		const auto& valueInfo = info->memberDetails[key];
+		const auto& memberVar = info->memberVariables[key];
+
+		if (!_definedVariables[memberVar->id]) {
+			auto mangled = mangleName(memberVar);
+			_definedVariables[memberVar->id] = LLVMAddGlobal(_llmod.get(), lltype, mangled.c_str());
+		}
+
+		if (!info->memberType->isNative) {
+			throw std::runtime_error("Support non-native enums");
+		}
+
+		auto llval = co_await compileNode(value, valueInfo);
+
+		if (!LLVMIsConstant(llval)) {
+			throw std::runtime_error("Support non-constant enum values");
+		}
+
+		LLVMSetInitializer(_definedVariables[memberVar->id], llval);
+	}
+
 	co_return NULL;
 };
 
