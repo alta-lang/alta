@@ -8,6 +8,7 @@
 #include <string.h>
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Analysis.h>
+#include <altall/mangle.hpp>
 
 bool AltaLL::init() {
 	// nothing for now
@@ -67,6 +68,19 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 		altaCompiler.compile(curr);
 
 		rootStack.pop();
+	}
+
+	auto mappingMD = LLVMGetOrInsertNamedMetadata(llmod.get(), "alta.mapping", sizeof("alta.mapping") - 1);
+
+	for (const auto& [mangled, fullName]: mangledToFullMapping) {
+		auto mangledStr = LLVMMDStringInContext2(llcontext.get(), mangled.c_str(), mangled.size());
+		auto fullNameStr = LLVMMDStringInContext2(llcontext.get(), fullName.c_str(), fullName.size());
+		std::array<LLVMMetadataRef, 2> refs {
+			mangledStr,
+			fullNameStr,
+		};
+		auto node = LLVMMDNodeInContext2(llcontext.get(), refs.data(), refs.size());
+		LLVMAddNamedMetadataOperand(llmod.get(), "alta.mapping", LLVMMetadataAsValue(llcontext.get(), node));
 	}
 
 	// for debugging

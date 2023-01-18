@@ -5,6 +5,8 @@
 #include <altacore.hpp>
 
 namespace AltaLL {
+	extern ALTACORE_MAP<std::string, std::string> mangledToFullMapping;
+
 	std::string cTypeNameify(std::shared_ptr<AltaCore::DET::Type> type, bool mangled = true);
 	std::string mangleType(std::shared_ptr<AltaCore::DET::Type> type);
 	std::shared_ptr<AltaCore::DET::ScopeItem> followAlias(std::shared_ptr<AltaCore::DET::ScopeItem> maybeAlias);

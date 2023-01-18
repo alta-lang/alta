@@ -249,7 +249,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 		auto& component = path[i];
 		if (component.type == CCT::Destination) {
 			if (component.special == SCT::OptionalPresent) {
-				result = LLVMBuildExtractValue(_builders.top().get(), expr, 0, "");
+				if (!result) {
+					throw std::runtime_error("This should be impossible (cast:optional_present)");
+				}
+				result = co_await loadRef(result, currentType);
+				result = LLVMBuildExtractValue(_builders.top().get(), result, 0, "");
 				currentType = std::make_shared<DET::Type>(DET::NativeType::Bool);
 				copy = false;
 			} else if (component.special == SCT::EmptyOptional) {
@@ -401,7 +405,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			auto tmp = LLVMBuildInsertValue(_builders.top().get(), LLVMGetUndef(llactual), LLVMConstInt(members[0], memberIndex, false), 0, "");
 			result = LLVMBuildInsertValue(_builders.top().get(), tmp, result, 1, "");
 
-			LLVMBuildStore(_builders.top().get(), result, allocated);
+			LLVMBuildStore(_builders.top().get(), result, casted);
 
 			result = LLVMBuildLoad2(_builders.top().get(), lltarget, allocated, "");
 
@@ -457,8 +461,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 				copy = false;
 			}
 
-			auto funcType = DET::Type::getUnderlyingType(component.method);
-			auto lltype = co_await translateType(funcType);
+			auto retType = co_await translateType(component.method->parentClassType->destroyReferences());
+			std::array<LLVMTypeRef, 1> params {
+				co_await translateType(component.method->parameterVariables[0]->type),
+			};
+
+			auto lltype = LLVMFunctionType(retType, params.data(), params.size(), false);
 
 			if (!_definedFunctions[component.method->id]) {
 				auto mangled = mangleName(component.method);
@@ -480,8 +488,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 				result = co_await tmpify(result, currentType, false);
 			}
 
-			auto funcType = DET::Type::getUnderlyingType(component.method);
-			auto lltype = co_await translateType(funcType);
+			auto retType = co_await translateType(component.method->returnType);
+			std::array<LLVMTypeRef, 1> params {
+				co_await translateType(component.method->parentClassType),
+			};
+
+			auto lltype = LLVMFunctionType(retType, params.data(), params.size(), false);
 
 			if (!_definedFunctions[component.method->id]) {
 				auto mangled = mangleName(component.method);
@@ -520,7 +532,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			auto badCastBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
 
 			// now start creating the switch
-			auto val = LLVMBuildExtractValue(_builders.top().get(), result, 0, "");
+			if (!result) {
+				throw std::runtime_error("This should be impossible (cast:multicast)");
+			}
+			auto val = LLVMBuildExtractValue(_builders.top().get(), co_await loadRef(result, currentType), 0, "");
 			auto tmpified = co_await tmpify(result, currentType, false);
 			auto switchInstr = LLVMBuildSwitch(_builders.top().get(), val, badCastBlock, currentType->unionOf.size());
 
@@ -555,6 +570,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 					auto casted = co_await cast(member, unionMember, component.target, false, std::make_pair(false, true), false, position);
 					phiBlocks.push_back(LLVMGetInsertBlock(_builders.top().get()));
 					phiVals.push_back(casted);
+
+					LLVMBuildBr(_builders.top().get(), doneBlock);
 				}
 			}
 
@@ -752,7 +769,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType) {
 	for (size_t i = 0; i < exprType->referenceLevel(); ++i) {
-		expr = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType->dereference()), expr, "");
+		exprType = exprType->dereference();
+		expr = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType), expr, "");
 	}
 	co_return expr;
 };
@@ -1002,18 +1020,24 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::tmpify(LLVMValueRef expr, std::s
 		throw std::runtime_error("TODO: tmpify in generators");
 	}
 
-	auto adjustedType = type->deconstify();
-	auto lltype = co_await translateType(adjustedType);
+	auto result = expr;
 
-	auto var = LLVMBuildAlloca(_builders.top().get(), lltype, "");
+	if (type->referenceLevel() == 0) {
+		auto adjustedType = type->deconstify();
+		auto lltype = co_await translateType(adjustedType);
 
-	if (withStack && canPush(type) && !_stacks.empty()) {
-		_stacks.top().pushItem(var, adjustedType);
+		auto var = LLVMBuildAlloca(_builders.top().get(), lltype, "");
+
+		if (withStack && canPush(type) && !_stacks.empty()) {
+			_stacks.top().pushItem(var, adjustedType);
+		}
+
+		LLVMBuildStore(_builders.top().get(), result, var);
+
+		result = var;
 	}
 
-	LLVMBuildStore(_builders.top().get(), expr, var);
-
-	co_return var;
+	co_return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::tmpify(std::shared_ptr<AltaCore::AST::ExpressionNode> expr, std::shared_ptr<AltaCore::DH::ExpressionNode> info) {
@@ -1074,7 +1098,7 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::processArgs(std::vector<ALTA
 					std::array<LLVMValueRef, 1> gepIndices {
 						LLVMConstInt(i64Type, i, false),
 					};
-					auto gep = LLVMBuildGEP2(_builders.top().get(), LLVMPointerType(lltype, 0), result, gepIndices.data(), gepIndices.size(), "");
+					auto gep = LLVMBuildGEP2(_builders.top().get(), lltype, result, gepIndices.data(), gepIndices.size(), "");
 					LLVMBuildStore(_builders.top().get(), arrayItems[i], gep);
 				}
 
@@ -1588,7 +1612,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 		if (info->readAccessor->isVirtual()) {
 			throw std::runtime_error("TODO: support virtual read accessors");
 		} else {
-			std::array<LLVMTypeRef, 1> paramTypes { co_await translateType(info->readAccessor->parameterVariables[0]->type) };
+			std::array<LLVMTypeRef, 1> paramTypes { co_await translateType(info->readAccessor->parentClassType) };
 			auto funcType = LLVMFunctionType(co_await translateType(info->readAccessor->returnType), paramTypes.data(), paramTypes.size(), false);
 
 			if (!_definedFunctions[info->readAccessor->id]) {
@@ -2297,7 +2321,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::
 		} else {
 			target = co_await loadRef(target, info->targetType);
 			subscript = co_await loadRef(subscript, info->indexType);
-			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->targetType->destroyReferences()), target, &subscript, 1, "");
+			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->targetType->destroyReferences()->follow()), target, &subscript, 1, "");
 		}
 	}
 

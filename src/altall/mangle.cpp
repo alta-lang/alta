@@ -1,6 +1,8 @@
 #include <altall/mangle.hpp>
 #include <picosha2.h>
 
+ALTACORE_MAP<std::string, std::string> AltaLL::mangledToFullMapping;
+
 std::string AltaLL::cTypeNameify(std::shared_ptr<AltaCore::DET::Type> type, bool mangled) {
 	using NT = AltaCore::DET::NativeType;
 	if (type->isOptional) {
@@ -147,9 +149,9 @@ std::string AltaLL::mangleName(std::shared_ptr<AltaCore::DET::Module> mod, bool 
 		normalVersionString += '+' + std::string(version.metadata);
 	}
 	auto result = escapeName(mod->name) + "_5_" + versionString;
-#if 0
-	friendlyNames[result] = mod->name + '@' + normalVersionString;
-#endif
+
+	mangledToFullMapping[result] = mod->toString();
+
 	return result;
 };
 
@@ -165,9 +167,9 @@ std::string AltaLL::mangleName(std::shared_ptr<AltaCore::DET::Scope> scope, bool
 	} else if (auto ns = scope->parentNamespace.lock()) {
 		mangled = mangleName(ns, true) + "_0_" + mangled;
 	}
-#if 0
-	friendlyNames[mangled] = "<scope#" + std::to_string(scope->relativeID) + ">";
-#endif
+
+	mangledToFullMapping[mangled] = scope->toString();
+
 	return mangled;
 };
 
@@ -273,9 +275,7 @@ std::string AltaLL::mangleName(std::shared_ptr<AltaCore::DET::ScopeItem> item, b
 		mangled = "Alta_" + picosha2::hash256_hex_string(mangled);
 	}
 
-#if 0
-	friendlyNames[mangled] = item->name;
-#endif
+	mangledToFullMapping[mangled] = item->toString();
 
 #if 0
 	{
