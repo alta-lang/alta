@@ -16,3 +16,4 @@ CMakeFiles
 /target
 .ccls-cache
 /compile_commands.json
+.gdb_history

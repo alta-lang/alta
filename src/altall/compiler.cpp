@@ -141,7 +141,26 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::sh
 
 			result = LLVMFunctionType(retType, params.data(), params.size(), isVararg);
 		} else {
-			throw std::runtime_error("TODO: handle non-raw function types");
+			// XXX: when i first added lambdas to Alta, they had retain-release semantics on copying/destruction
+			//      (i.e. when copying a lambda, you would instead just get the same lambda with an increased reference count).
+			//      we still have that and that's what we implement here, but perhaps we should have proper copy semantics for lambdas,
+			//      with the option to use refcounting semantics via some attribute on the lambda.
+
+			//auto asPlain = type->copy();
+			//asPlain->isRawFunction = true;
+			//auto llplain = co_await translateType(asPlain);
+
+			auto voidPointer = LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0);
+
+			std::array<LLVMTypeRef, 2> members {
+				// function pointer
+				voidPointer,
+
+				// lambda state pointer
+				voidPointer,
+			};
+
+			result = LLVMStructType(members.data(), members.size(), false);
 		}
 	} else if (type->isUnion()) {
 		std::array<LLVMTypeRef, 2> members;
@@ -260,7 +279,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 				std::array<LLVMValueRef, 2> vals;
 				vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
 				vals[1] = LLVMGetUndef(co_await translateType(currentType));
-				result = LLVMConstStructInContext(_llcontext.get(), vals.data(), vals.size(), false);
+				result = LLVMConstNamedStruct(co_await translateType(dest), vals.data(), vals.size());
 				currentType = dest;
 				copy = false;
 			} else if (component.special == SCT::WrapFunction) {
@@ -729,28 +748,29 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 			result = LLVMBuildPointerCast(_builders.top().get(), result, LLVMPointerType(_definedTypes["_Alta_basic_class"], 0), "");
 
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 			std::array<LLVMValueRef, 3> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // the first entry in the "array"
-				LLVMConstInt(gepIndexType, 0, false), // _Alta_basic_class::instance_info
-				LLVMConstInt(gepIndexType, 0, false), // _Alta_instance_info::class_info
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_class::instance_info
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_instance_info::class_info
 			};
 
 			auto classInfoPtr = LLVMPointerType(_definedTypes["_Alta_class_info"], 0);
 			auto classInfoPtrPtr = LLVMPointerType(classInfoPtr, 0);
 
-			auto dtor = LLVMBuildGEP2(_builders.top().get(), classInfoPtrPtr, result, gepIndices.data(), gepIndices.size(), "");
+			auto dtor = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_basic_class"], result, gepIndices.data(), gepIndices.size(), "");
 			dtor = LLVMBuildLoad2(_builders.top().get(), classInfoPtr, dtor, "");
 
 			std::array<LLVMValueRef, 2> gepIndices2 {
 				LLVMConstInt(gepIndexType, 0, false), // the first entry in the "array"
-				LLVMConstInt(gepIndexType, 1, false), // _Alta_class_info::destructor
+				LLVMConstInt(gepStructIndexType, 1, false), // _Alta_class_info::destructor
 			};
 
 			auto dtorType = _definedTypes["_Alta_class_destructor"];
 			auto dtorPtr = LLVMPointerType(dtorType, 0);
 			auto dtorPtrPtr = LLVMPointerType(dtorPtr, 0);
 
-			dtor = LLVMBuildGEP2(_builders.top().get(), dtorPtrPtr, dtor, gepIndices2.data(), gepIndices2.size(), "");
+			dtor = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_class_info"], dtor, gepIndices2.data(), gepIndices2.size(), "");
 			dtor = LLVMBuildLoad2(_builders.top().get(), dtorPtr, dtor, "");
 
 			std::array<LLVMValueRef, 1> args {
@@ -784,6 +804,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRealInstance(LLVMValueRef exp
 		exprType->klass
 	) {
 		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 		auto lltype = co_await translateType(exprType);
 		auto lltypeRef = co_await translateType(exprType->destroyReferences()->reference());
 
@@ -793,19 +814,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRealInstance(LLVMValueRef exp
 
 		std::array<LLVMValueRef, 3> accessGEP {
 			LLVMConstInt(gepIndexType, 0, false), // first element in "array"
-			LLVMConstInt(gepIndexType, 0, false), // instance_info member within class structure
-			LLVMConstInt(gepIndexType, 0, false), // class_info pointer within instance info
+			LLVMConstInt(gepStructIndexType, 0, false), // instance_info member within class structure
+			LLVMConstInt(gepStructIndexType, 0, false), // class_info pointer within instance info
 		};
 		auto classInfoPtrType = LLVMPointerType(_definedTypes["_Alta_class_info"], 0);
-		auto tmp = LLVMBuildGEP2(_builders.top().get(), LLVMPointerType(classInfoPtrType, 0), result, accessGEP.data(), accessGEP.size(), "");
+		auto tmp = LLVMBuildGEP2(_builders.top().get(), co_await defineClassType(exprType->klass), result, accessGEP.data(), accessGEP.size(), "");
 		auto classInfoPointer = LLVMBuildLoad2(_builders.top().get(), classInfoPtrType, tmp, "");
 
 		std::array<LLVMValueRef, 2> offsetGEP {
 			LLVMConstInt(gepIndexType, 0, false), // first element in "array"
-			LLVMConstInt(gepIndexType, 3, false), // offset_from_real member within class_info
+			LLVMConstInt(gepStructIndexType, 3, false), // offset_from_real member within class_info
 		};
 		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
-		auto offsetFromRealPointer = LLVMBuildGEP2(_builders.top().get(), LLVMPointerType(i64Type, 0), classInfoPointer, offsetGEP.data(), offsetGEP.size(), "");
+		auto offsetFromRealPointer = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_class_info"], classInfoPointer, offsetGEP.data(), offsetGEP.size(), "");
 		auto offsetFromReal = LLVMBuildLoad2(_builders.top().get(), i64Type, offsetFromRealPointer, "");
 
 		auto classPointerAsInt = LLVMBuildPtrToInt(_builders.top().get(), result, i64Type, "");
@@ -829,6 +850,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRootInstance(LLVMValueRef exp
 		exprType->klass
 	) {
 		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
 		if (exprType->indirectionLevel() == 0) {
 			result = co_await tmpify(result, exprType, false);
@@ -836,19 +858,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRootInstance(LLVMValueRef exp
 
 		std::array<LLVMValueRef, 3> accessGEP {
 			LLVMConstInt(gepIndexType, 0, false), // first element in "array"
-			LLVMConstInt(gepIndexType, 0, false), // instance_info member within class structure
-			LLVMConstInt(gepIndexType, 0, false), // class_info pointer within instance info
+			LLVMConstInt(gepStructIndexType, 0, false), // instance_info member within class structure
+			LLVMConstInt(gepStructIndexType, 0, false), // class_info pointer within instance info
 		};
 		auto classInfoPtrType = LLVMPointerType(_definedTypes["_Alta_class_info"], 0);
-		auto tmp = LLVMBuildGEP2(_builders.top().get(), LLVMPointerType(classInfoPtrType, 0), result, accessGEP.data(), accessGEP.size(), "");
+		auto tmp = LLVMBuildGEP2(_builders.top().get(), co_await defineClassType(exprType->klass), result, accessGEP.data(), accessGEP.size(), "");
 		auto classInfoPointer = LLVMBuildLoad2(_builders.top().get(), classInfoPtrType, tmp, "");
 
 		std::array<LLVMValueRef, 2> offsetGEP {
 			LLVMConstInt(gepIndexType, 0, false), // first element in "array"
-			LLVMConstInt(gepIndexType, 4, false), // offset_from_base member within class_info
+			LLVMConstInt(gepStructIndexType, 4, false), // offset_from_base member within class_info
 		};
 		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
-		auto offsetFromBasePointer = LLVMBuildGEP2(_builders.top().get(), LLVMPointerType(i64Type, 0), classInfoPointer, offsetGEP.data(), offsetGEP.size(), "");
+		auto offsetFromBasePointer = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_class_info"], classInfoPointer, offsetGEP.data(), offsetGEP.size(), "");
 		auto offsetFromBase = LLVMBuildLoad2(_builders.top().get(), i64Type, offsetFromBasePointer, "");
 
 		auto classPointerAsInt = LLVMBuildPtrToInt(_builders.top().get(), result, i64Type, "");
@@ -881,6 +903,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doParentRetrieval(LLVMValueRef e
 		std::stack<size_t> idxs;
 
 		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
 		parentAccessors.push_back(exprType->klass);
 		gepIndices.push_back(LLVMConstInt(gepIndexType, 0, false));
@@ -893,7 +916,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doParentRetrieval(LLVMValueRef e
 			for (size_t i = idxs.top(); i < parents.size(); i++) {
 				auto& parent = parents[i];
 				parentAccessors.push_back(parent);
-				gepIndices.push_back(LLVMConstInt(gepIndexType, i, false));
+				gepIndices.push_back(LLVMConstInt(gepStructIndexType, i, false));
 				if (parent->id == targetType->klass->id) {
 					done = true;
 					break;
@@ -922,7 +945,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doParentRetrieval(LLVMValueRef e
 
 		auto refTargetType = targetType->indirectionLevel() > 0 ? targetType : targetType->reference();
 		auto lltype = co_await translateType(refTargetType);
-		result = LLVMBuildGEP2(_builders.top().get(), lltype, result, gepIndices.data(), gepIndices.size(), "");
+		result = LLVMBuildGEP2(_builders.top().get(), co_await defineClassType(exprType->klass), result, gepIndices.data(), gepIndices.size(), "");
 		result = co_await getRealInstance(result, refTargetType);
 
 		if (targetType->indirectionLevel() == 0) {
@@ -1500,19 +1523,20 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 		throw std::runtime_error("This accessor needs to be narrowed");
 	}
 
-	auto handleParentAccessors = [&](const std::vector<std::pair<std::shared_ptr<AltaCore::DET::Class>, size_t>>& parents, std::shared_ptr<AltaCore::DET::Class> varClass, LLVMValueRef result) -> LLCoroutine {
+	auto handleParentAccessors = [&](const std::vector<std::pair<std::shared_ptr<AltaCore::DET::Class>, size_t>>& parents, std::shared_ptr<AltaCore::DET::Class> varClass, std::shared_ptr<AltaCore::DET::Class> sourceClass, LLVMValueRef result) -> LLCoroutine {
 		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 		std::vector<LLVMValueRef> gepIndices {
 			LLVMConstInt(gepIndexType, 0, false), // first index is for the "array" of instances we start with
 		};
 
 		for (const auto& [parent, index]: parents) {
-			gepIndices.push_back(LLVMConstInt(gepIndexType, index, false));
+			gepIndices.push_back(LLVMConstInt(gepStructIndexType, index, false));
 		}
 
 		auto parentType = std::make_shared<AltaCore::DET::Type>(varClass)->reference();
 
-		result = LLVMBuildGEP2(_builders.top().get(), LLVMPointerType(co_await defineClassType(varClass), 0), result, gepIndices.data(), gepIndices.size(), "");
+		result = LLVMBuildGEP2(_builders.top().get(), co_await defineClassType(sourceClass), result, gepIndices.data(), gepIndices.size(), "");
 		result = co_await getRealInstance(result, parentType);
 
 		co_return result;
@@ -1534,7 +1558,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 		}
 
 		if (info->parentClassAccessors.find(info->narrowedToIndex) != info->parentClassAccessors.end()) {
-			result = co_await handleParentAccessors(info->parentClassAccessors[info->narrowedToIndex], varClass, result);
+			result = co_await handleParentAccessors(info->parentClassAccessors[info->narrowedToIndex], varClass, info->targetType->klass, result);
 		}
 
 		if (info->targetType->bitfield) {
@@ -1563,12 +1587,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			}
 
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 			std::array<LLVMValueRef, 2> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false),     // access the first "array" item
-				LLVMConstInt(gepIndexType, index, false), // access the member
+				LLVMConstInt(gepStructIndexType, index, false), // access the member
 			};
 
-			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(AltaCore::DET::Type::getUnderlyingType(info->narrowedTo)), result, gepIndices.data(), gepIndices.size(), "");
+			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->targetType->destroyIndirection()), result, gepIndices.data(), gepIndices.size(), "");
 		}
 	} else if (info->readAccessor) {
 		auto tmpVar = LLVMBuildAlloca(_builders.top().get(), co_await translateType(info->readAccessor->returnType), "");
@@ -1598,7 +1623,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			}
 
 			if (info->parentClassAccessors.find(info->readAccessorIndex) != info->parentClassAccessors.end()) {
-				result = co_await handleParentAccessors(info->parentClassAccessors[info->readAccessorIndex], accessorClass, result);
+				result = co_await handleParentAccessors(info->parentClassAccessors[info->readAccessorIndex], accessorClass, selfType->klass, result);
 			}
 
 			if (info->readAccessor->isVirtual()) {
@@ -1656,6 +1681,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 		}
 
 		throw std::runtime_error("Invalid fetch: must be narrowed");
+	}
+
+	if (info->narrowedTo->nodeType() == AltaCore::DET::NodeType::Variable && info->narrowedTo->name == "this") {
+		auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(info->narrowedTo);
+		if (!var->parentScope.expired() && !var->parentScope.lock()->parentClass.expired()) {
+			auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+			co_return LLVMGetParam(llfunc, 0);
+		}
 	}
 
 	auto result = _definedVariables[info->narrowedTo->id] ? _definedVariables[info->narrowedTo->id] : _definedFunctions[info->narrowedTo->id];
@@ -1759,7 +1792,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 		std::array<LLVMValueRef, 2> vals;
 		vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
 		vals[1] = LLVMGetUndef(co_await translateType(rhsTargetType));
-		rhs = LLVMConstStructInContext(_llcontext.get(), vals.data(), vals.size(), false);
+		rhs = LLVMConstNamedStruct(co_await translateType(info->targetType), vals.data(), vals.size());
 	}
 
 	if (canDestroyVar) {
@@ -2156,9 +2189,246 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std
 	co_return result;
 };
 
-AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::shared_ptr<AltaCore::AST::ClassDefinitionNode> node, std::shared_ptr<AltaCore::DH::ClassDefinitionNode> info) {
-	// TODO
-	std::cout << "TODO: ClassDefinitionNode" << std::endl;
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::shared_ptr<AltaCore::AST::ClassDefinitionNode> node, std::shared_ptr<AltaCore::DH::ClassDefinitionNode> _info) {
+	bool isGeneric = node->generics.size() > 0;
+	size_t iterationCount = isGeneric ? node->generics.size() : 1;
+
+	for (size_t i = 0; i < iterationCount; ++i) {
+		const auto& info = isGeneric ? _info->genericInstantiations[i] : _info;
+
+		if (info->klass->isCaptureClass()) {
+			throw std::runtime_error("TODO: support capture classes");
+		}
+
+		auto llclassType = co_await defineClassType(info->klass);
+
+		std::array<LLVMTypeRef, 2> initParams {
+			co_await translateType(info->initializerMethod->parentClassType),
+			LLVMInt1TypeInContext(_llcontext.get()),
+		};
+		auto initFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), initParams.data(), initParams.size(), false);
+
+		if (!_definedFunctions[info->initializerMethod->id]) {
+			auto mangled = mangleName(info->initializerMethod);
+			_definedFunctions[info->initializerMethod->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), initFuncType);
+		}
+
+		auto initFunc = _definedFunctions[info->initializerMethod->id];
+
+		LLVMSetLinkage(initFunc, LLVMInternalLinkage);
+
+		_builders.push(llwrap(LLVMCreateBuilderInContext(_llcontext.get())));
+		_stacks.emplace(*this);
+
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "");
+		LLVMPositionBuilderAtEnd(_builders.top().get(), entryBlock);
+
+		auto llself = LLVMGetParam(initFunc, 0);
+		auto llisRoot = LLVMGetParam(initFunc, 1);
+
+		auto initInfosBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "");
+		auto initMembersBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "");
+
+		LLVMBuildCondBr(_builders.top().get(), llisRoot, initInfosBlock, initMembersBlock);
+
+		// build the init-infos block (only executed when this is the root class for an instance)
+		LLVMPositionBuilderAtEnd(_builders.top().get(), initInfosBlock);
+
+		struct InfoStackEntry {
+			std::shared_ptr<AltaCore::DET::Class> klass;
+			// the child class (of this class) that contains this particular instance of the class
+			std::shared_ptr<AltaCore::DET::Class> child;
+			size_t index = 0;
+			// a.k.a. offset_from_base
+			size_t offsetFromRoot = 0;
+			size_t offsetFromOwner = 0;
+			LLVMTypeRef classType = NULL;
+		};
+
+		struct InfoMapEntry {
+			// a.k.a. offset_from_base for the real instance
+			size_t offsetFromRootForReal = 0;
+			// a.k.a. offset_from_base for the last instance of this class that we encountered
+			size_t lastOffsetFromRoot = 0;
+			LLVMValueRef lastGlobalClassInfoVar = NULL;
+			std::array<LLVMValueRef, 7> lastMembers;
+		};
+
+		std::deque<InfoStackEntry> infoStack;
+		ALTACORE_MAP<std::string, InfoMapEntry> infoMap;
+
+		infoStack.push_back({
+			.klass = info->klass,
+			.child = nullptr,
+			.index = 0,
+			.offsetFromRoot = 0,
+			.offsetFromOwner = 0,
+			.classType = llclassType,
+		});
+
+		while (infoStack.size() > 0) {
+			auto& stackEntry = infoStack.back();
+
+			if (stackEntry.index < stackEntry.klass->parents.size()) {
+				const auto& parent = stackEntry.klass->parents[stackEntry.index];
+				auto offsetFromOwner = LLVMOffsetOfElement(_targetData.get(), stackEntry.classType, stackEntry.index + 1);
+				infoStack.push_back({
+					.klass = parent,
+					.child = stackEntry.klass,
+					.index = 0,
+					.offsetFromRoot = stackEntry.offsetFromRoot + offsetFromOwner,
+					.offsetFromOwner = offsetFromOwner,
+					.classType = co_await defineClassType(parent),
+				});
+				++stackEntry.index;
+				continue;
+			}
+
+			auto mangled = mangleName(stackEntry.klass);
+			auto mangledChild = stackEntry.child ? mangleName(stackEntry.child) : "";
+			auto infoVar = LLVMAddGlobal(_llmod.get(), _definedTypes["_Alta_class_info"], "");
+			auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
+			auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+			auto dtorType = LLVMPointerType(_definedTypes["_Alta_class_destructor"], 0);
+
+			LLVMValueRef dtor = NULL;
+
+			if (info->klass->destructor) {
+				auto classRefType = co_await translateType(info->klass->destructor->parentClassType);
+				auto funcType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), &classRefType, 1, false);
+
+				if (!_definedFunctions[info->klass->destructor->id]) {
+					auto mangled = mangleName(info->klass->destructor);
+					_definedFunctions[info->klass->destructor->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), funcType);
+				}
+			}
+
+			/*
+			struct _Alta_class_info {
+				const char* type_name;
+				void (*destructor)(void*);
+				const char* child_name;
+				uint64_t offset_from_real;
+				uint64_t offset_from_base;
+				uint64_t offset_from_owner;
+				uint64_t offset_to_next;
+			};
+			*/
+			std::array<LLVMValueRef, 7> members {
+				LLVMBuildGlobalStringPtr(_builders.top().get(), mangled.c_str(), ""),
+				info->klass->destructor ? _definedFunctions[info->klass->destructor->id] : LLVMConstNull(dtorType),
+				stackEntry.child ? LLVMBuildGlobalStringPtr(_builders.top().get(), mangledChild.c_str(), "") : LLVMConstNull(strType),
+				nullptr, // filled in later
+				LLVMConstInt(i64Type, stackEntry.offsetFromRoot, false),
+				LLVMConstInt(i64Type, stackEntry.offsetFromOwner, false),
+				LLVMConstInt(i64Type, 0, false), // updated later
+			};
+
+			LLVMSetLinkage(infoVar, LLVMInternalLinkage);
+
+			if (infoMap.find(mangled) == infoMap.end()) {
+				members[3] = LLVMConstInt(i64Type, 0, false);
+
+				infoMap[mangled] = {
+					.offsetFromRootForReal = stackEntry.offsetFromRoot,
+					.lastOffsetFromRoot = stackEntry.offsetFromRoot,
+					.lastGlobalClassInfoVar = infoVar,
+					.lastMembers = members,
+				};
+			} else {
+				auto& mapEntry = infoMap[mangled];
+				auto offsetToNextUpdated = stackEntry.offsetFromRoot - mapEntry.lastOffsetFromRoot;
+				auto offsetFromReal = stackEntry.offsetFromRoot - mapEntry.offsetFromRootForReal;
+
+				members[3] = LLVMConstInt(i64Type, offsetFromReal, false);
+
+				// update the `offset_to_next` member of the last instance
+				mapEntry.lastMembers[6] = LLVMConstInt(i64Type, offsetToNextUpdated, false);
+				LLVMSetInitializer(infoVar, LLVMConstNamedStruct(_definedTypes["_Alta_class_info"], mapEntry.lastMembers.data(), mapEntry.lastMembers.size()));
+
+				mapEntry.lastOffsetFromRoot = stackEntry.offsetFromRoot;
+				mapEntry.lastGlobalClassInfoVar = infoVar;
+				mapEntry.lastMembers = members;
+			}
+
+			LLVMSetInitializer(infoVar, LLVMConstNamedStruct(_definedTypes["_Alta_class_info"], members.data(), members.size()));
+
+			auto gepIndexType = i64Type;
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+			std::vector<LLVMValueRef> gepIndices {
+				LLVMConstInt(gepIndexType, 0, false),
+			};
+
+			for (size_t i = 0; i < infoStack.size() - 1; ++i) {
+				// we should subtract 1 from the index in the entry to get the index for the current branch, but we have to add 1 back
+				// because the first member of every class is the instance info structure
+				gepIndices.push_back(LLVMConstInt(gepStructIndexType, infoStack[i].index /* - 1 + 1 */, false));
+			}
+
+			// we want a pointer to the instance info structure
+			gepIndices.push_back(LLVMConstInt(gepStructIndexType, 0, false));
+			// but we actually want a pointer to the class info pointer within the instance info structure
+			gepIndices.push_back(LLVMConstInt(gepStructIndexType, 0, false));
+
+			auto gep = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), "");
+			LLVMBuildStore(_builders.top().get(), infoVar, gep);
+
+			infoStack.pop_back();
+		}
+
+		LLVMBuildBr(_builders.top().get(), initMembersBlock);
+
+		// now build the member initialization block
+		LLVMPositionBuilderAtEnd(_builders.top().get(), initMembersBlock);
+
+		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+		size_t varIndex = 1 + info->klass->parents.size();
+
+		for (size_t j = 0; j < node->statements.size(); ++j) {
+			if (auto memberDef = std::dynamic_pointer_cast<AltaCore::AST::ClassMemberDefinitionStatement>(node->statements[j])) {
+				auto memberDefInfo = std::dynamic_pointer_cast<AltaCore::DH::ClassMemberDefinitionStatement>(info->statements[j]);
+
+				std::array<LLVMValueRef, 2> gepIndices {
+					LLVMConstInt(gepIndexType, 0, false), // the first element of the "array"
+					LLVMConstInt(gepStructIndexType, varIndex, false), // the member index within the class structure
+				};
+
+				++varIndex;
+
+				auto gep = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), "");
+
+				if (memberDef->varDef->initializationExpression) {
+					auto expr = co_await compileNode(memberDef->varDef->initializationExpression, memberDefInfo->varDef->initializationExpression);
+					auto casted = co_await cast(expr, AltaCore::DET::Type::getUnderlyingType(memberDefInfo->varDef->initializationExpression.get()), memberDefInfo->varDef->variable->type, true, additionalCopyInfo(memberDef->varDef->initializationExpression, memberDefInfo->varDef->initializationExpression), false, &memberDef->varDef->initializationExpression->position);
+					LLVMBuildStore(_builders.top().get(), casted, gep);
+				} else if (memberDefInfo->varDef->type->type->klass && memberDefInfo->varDef->type->type->indirectionLevel() == 0 && memberDefInfo->varDef->type->type->klass->defaultConstructor) {
+					auto func = memberDefInfo->varDef->type->type->klass->defaultConstructor;
+					auto funcType = LLVMFunctionType(co_await defineClassType(memberDefInfo->varDef->type->type->klass), nullptr, 0, false);
+
+					if (!_definedFunctions[func->id]) {
+						auto mangled = mangleName(func);
+						_definedFunctions[func->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), funcType);
+					}
+
+					LLVMBuildStore(_builders.top().get(), LLVMBuildCall2(_builders.top().get(), funcType, _definedFunctions[func->id], nullptr, 0, ""), gep);
+				} else if (memberDefInfo->varDef->type->type->referenceLevel() > 0 || memberDefInfo->varDef->type->type->klass) {
+					throw std::runtime_error("this should have been handled by AltaCore");
+				} else {
+					LLVMBuildStore(_builders.top().get(), LLVMConstNull(co_await translateType(memberDefInfo->varDef->type->type)), gep);
+				}
+			}
+		}
+
+		co_await _stacks.top().cleanup();
+
+		LLVMBuildRetVoid(_builders.top().get());
+
+		_stacks.pop();
+		_builders.pop();
+	}
+
 	co_return NULL;
 };
 
@@ -2261,11 +2531,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDereferenceExpression(std
 	} else if (type->isOptional) {
 		if (type->referenceLevel() > 0) {
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 			std::array<LLVMValueRef, 2> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // get the first "array" element
-				LLVMConstInt(gepIndexType, 1, false), // get the contained type from the optional
+				LLVMConstInt(gepStructIndexType, 1, false), // get the contained type from the optional
 			};
-			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(type->optionalTarget), result, gepIndices.data(), gepIndices.size(), "");
+			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(type), result, gepIndices.data(), gepIndices.size(), "");
 		} else {
 			result = LLVMBuildExtractValue(_builders.top().get(), result, 1, "");
 		}
@@ -2675,9 +2946,10 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			uint64_t offset_from_real;
 			uint64_t offset_from_base;
 			uint64_t offset_from_owner;
+			uint64_t offset_to_next;
 		};
 		*/
-		std::array<LLVMTypeRef, 6> members;
+		std::array<LLVMTypeRef, 7> members;
 		auto stringType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
 		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
 		members[0] = stringType;
@@ -2686,6 +2958,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		members[3] = i64Type;
 		members[4] = i64Type;
 		members[5] = i64Type;
+		members[6] = i64Type;
 		_definedTypes["_Alta_class_info"] = LLVMStructType(members.data(), members.size(), false);
 	}
 
