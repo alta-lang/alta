@@ -25,19 +25,6 @@ namespace AltaLL {
 
 	class Compiler {
 	private:
-		struct ScopeStack;
-
-		LLContext _llcontext;
-		LLModule _llmod;
-		LLTargetMachine _targetMachine;
-		LLTargetData _targetData;
-		std::stack<LLBuilder> _builders;
-		ALTACORE_MAP<std::string, LLVMTypeRef> _definedTypes;
-		bool _inGenerator = false;
-		ALTACORE_MAP<std::string, LLVMValueRef> _definedFunctions;
-		std::stack<ScopeStack> _stacks;
-		ALTACORE_MAP<std::string, LLVMValueRef> _definedVariables;
-
 		// adapted from and based on https://itnext.io/c-20-practical-coroutines-79202872ebba
 		template<typename Result>
 		struct Coroutine {
@@ -190,6 +177,17 @@ namespace AltaLL {
 			Coroutine<void> endBranch(LLVMBasicBlockRef mergeBlock, std::vector<LLVMBasicBlockRef> mergingBlocks);
 			Coroutine<void> cleanup();
 		};
+
+		LLContext _llcontext;
+		LLModule _llmod;
+		LLTargetMachine _targetMachine;
+		LLTargetData _targetData;
+		std::stack<LLBuilder> _builders;
+		ALTACORE_MAP<std::string, LLVMTypeRef> _definedTypes;
+		bool _inGenerator = false;
+		ALTACORE_MAP<std::string, LLVMValueRef> _definedFunctions;
+		std::stack<ScopeStack> _stacks;
+		ALTACORE_MAP<std::string, LLVMValueRef> _definedVariables;
 
 		Coroutine<LLVMTypeRef> translateType(std::shared_ptr<AltaCore::DET::Type> type);
 
