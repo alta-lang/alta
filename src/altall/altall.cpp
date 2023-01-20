@@ -29,6 +29,8 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	auto outputPathStr = binaryOutputPath.absolutify().toString();
 	auto outputBitcodePathStr = outputPathStr + ".bc";
 
+	LLVMContextSetOpaquePointers(llcontext.get(), true);
+
 	std::stack<std::pair<std::shared_ptr<AltaCore::AST::RootNode>, size_t>> rootStack;
 	std::unordered_set<std::string> processedRoots;
 

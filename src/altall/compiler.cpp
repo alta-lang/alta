@@ -2403,29 +2403,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 			infoStack.pop_back();
 		}
 
-		// now, call parent initializers
-		std::unordered_set<std::string> processedParents;
+		LLVMBuildBr(_builders.top().get(), initMembersBlock);
 
-		std::function<void(std::shared_ptr<AltaCore::DET::Class>)> insertProcessedParent = [&](std::shared_ptr<AltaCore::DET::Class> parent) {
-			processedParents.insert(parent->id);
+		// now build the member initialization block
+		LLVMPositionBuilderAtEnd(_builders.top().get(), initMembersBlock);
 
-			for (const auto& grandparent: parent->parents) {
-				insertProcessedParent(grandparent);
-			}
-		};
-
+		// call parent initializers
 		for (size_t i = 0; i < info->klass->parents.size(); ++i) {
 			const auto& parent = info->klass->parents[i];
 
-			if (processedParents.find(parent->id) != processedParents.end()) {
-				continue;
-			}
-
-			insertProcessedParent(parent);
-
 			auto llboolType = LLVMInt1TypeInContext(_llcontext.get());
+			auto llparentClassType = co_await defineClassType(parent);
 			std::array<LLVMTypeRef, 3> parentInitParams {
-				LLVMPointerType(co_await defineClassType(parent), 0),
+				LLVMPointerType(llparentClassType, 0),
 				llboolType,
 				llboolType,
 			};
@@ -2445,19 +2435,34 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 				LLVMConstInt(gepStructIndexType, 1 + i, false), // the parent
 			};
 
+			auto llparent = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), "");
+
+			// get a pointer to the class info pointer
+			std::array<LLVMValueRef, 3> gepIndices2 {
+				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // the instance info structure
+				LLVMConstInt(gepStructIndexType, 0, false), // the class info pointer
+			};
+			auto classInfoPtrPtr = LLVMBuildGEP2(_builders.top().get(), llparentClassType, llparent, gepIndices2.data(), gepIndices2.size(), "");
+			auto classInfoPtr = LLVMBuildLoad2(_builders.top().get(), LLVMPointerType(_definedTypes["_Alta_class_info"], 0), classInfoPtrPtr, "");
+
+			std::array<LLVMValueRef, 2> gepIndices3 {
+				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+				LLVMConstInt(gepStructIndexType, 3, false), // _Alta_class_info::offset_from_real
+			};
+			auto offsetFromRealPtr = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_class_info"], classInfoPtr, gepIndices3.data(), gepIndices3.size(), "");
+			auto offsetFromReal = LLVMBuildLoad2(_builders.top().get(), LLVMInt64TypeInContext(_llcontext.get()), offsetFromRealPtr, "");
+
+			auto cmp = LLVMBuildICmp(_builders.top().get(), LLVMIntEQ, offsetFromReal, LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), 0, false), "");
+
 			std::array<LLVMValueRef, 3> parentInitArgs {
-				LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), ""),
+				llparent,
 				LLVMConstInt(llboolType, 0, false),
-				llshouldInitMembers,
+				LLVMBuildAnd(_builders.top().get(), llshouldInitMembers, cmp, ""),
 			};
 
 			LLVMBuildCall2(_builders.top().get(), parentInitFuncType, parentInitFunc, parentInitArgs.data(), parentInitArgs.size(), "");
 		}
-
-		LLVMBuildBr(_builders.top().get(), initMembersBlock);
-
-		// now build the member initialization block
-		LLVMPositionBuilderAtEnd(_builders.top().get(), initMembersBlock);
 
 		LLVMBuildCondBr(_builders.top().get(), llshouldInitMembers, doMemberInitBlock, exitBlock);
 
@@ -2968,6 +2973,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpress
 		auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
 		auto llself = LLVMGetParam(llfunc, 0);
 
+		args.insert(args.begin(), llself);
+
 		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
@@ -2989,6 +2996,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpress
 		};
 
 		auto llclassType = co_await defineClassType(thisClass);
+		auto llparentClassType = co_await defineClassType(parentClass);
 
 		auto llparent = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), "");
 
@@ -3015,14 +3023,36 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpress
 			_definedFunctions["_internal_" + info->constructor->id] = LLVMAddFunction(_llmod.get(), mangled.c_str(), ctorFuncType);
 		}
 
-		// FIXME: this doesn't properly handle the case of initializing parents when diamond inheritance is present
-
 		auto doCtorBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
 		auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
 
 		// FIXME: this breaks short-circuiting expectations because we still evaluate the arguments even when we don't execute the call
 
-		// TODO
+		// get a pointer to the class info pointer
+		std::array<LLVMValueRef, 3> gepIndices2 {
+			LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+			LLVMConstInt(gepStructIndexType, 0, false), // the instance info structure
+			LLVMConstInt(gepStructIndexType, 0, false), // the class info pointer
+		};
+		auto classInfoPtrPtr = LLVMBuildGEP2(_builders.top().get(), llparentClassType, llparent, gepIndices2.data(), gepIndices2.size(), "");
+		auto classInfoPtr = LLVMBuildLoad2(_builders.top().get(), LLVMPointerType(_definedTypes["_Alta_class_info"], 0), classInfoPtrPtr, "");
+
+		std::array<LLVMValueRef, 2> gepIndices3 {
+			LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+			LLVMConstInt(gepStructIndexType, 3, false), // _Alta_class_info::offset_from_real
+		};
+		auto offsetFromRealPtr = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_class_info"], classInfoPtr, gepIndices3.data(), gepIndices3.size(), "");
+		auto offsetFromReal = LLVMBuildLoad2(_builders.top().get(), LLVMInt64TypeInContext(_llcontext.get()), offsetFromRealPtr, "");
+
+		auto cmp = LLVMBuildICmp(_builders.top().get(), LLVMIntEQ, offsetFromReal, LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), 0, false), "");
+
+		LLVMBuildCondBr(_builders.top().get(), cmp, doCtorBlock, doneBlock);
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), doCtorBlock);
+		LLVMBuildCall2(_builders.top().get(), ctorFuncType, _definedFunctions["_internal_" + info->constructor->id], args.data(), args.size(), "");
+		LLVMBuildBr(_builders.top().get(), doneBlock);
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
 	} else if (info->klass->isStructure) {
 		auto lltype = co_await defineClassType(info->klass);
 
