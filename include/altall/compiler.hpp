@@ -153,6 +153,26 @@ namespace AltaLL {
 		using LLCoroutine = Coroutine<LLVMValueRef>;
 
 		struct ScopeStack {
+			enum class Type {
+				/**
+				 * Scope stacks created to represent the root scope of a function.
+				 * Typically have backing AltaCore scopes.
+				 */
+				Function,
+
+				/**
+				 * Scope stacks created to keep track of temporary variables created as a side-effect of compilation subnodes (like expressions, for example).
+				 * Typically don't have backing AltaCore scopes.
+				 */
+				Temporary,
+
+				/**
+				 * Any other type of scope stack.
+				 * Typically have backing AltaCore scopes.
+				 */
+				Other,
+			};
+
 			struct ScopeItem {
 				LLVMBasicBlockRef sourceBlock = nullptr;
 				LLVMValueRef source = nullptr;
@@ -162,9 +182,11 @@ namespace AltaLL {
 			std::vector<ScopeItem> items;
 			std::stack<size_t> sizesDuringBranching;
 			Compiler& compiler;
+			Type type;
 
-			ScopeStack(Compiler& _compiler):
-				compiler(_compiler)
+			ScopeStack(Compiler& _compiler, Type _type):
+				compiler(_compiler),
+				type(_type)
 				{};
 
 			void pushItem(LLVMValueRef memory, std::shared_ptr<AltaCore::DET::Type> type);
@@ -186,8 +208,20 @@ namespace AltaLL {
 		ALTACORE_MAP<std::string, LLVMTypeRef> _definedTypes;
 		bool _inGenerator = false;
 		ALTACORE_MAP<std::string, LLVMValueRef> _definedFunctions;
-		std::stack<ScopeStack> _stacks;
+		std::deque<ScopeStack> _stacks;
 		ALTACORE_MAP<std::string, LLVMValueRef> _definedVariables;
+
+		inline ScopeStack& currentStack() {
+			return _stacks.back();
+		};
+
+		inline void pushStack(ScopeStack::Type type) {
+			_stacks.emplace_back(*this, type);
+		};
+
+		inline void popStack() {
+			_stacks.pop_back();
+		};
 
 		Coroutine<LLVMTypeRef> translateType(std::shared_ptr<AltaCore::DET::Type> type);
 
@@ -279,7 +313,7 @@ namespace AltaLL {
 		LLCoroutine doCopyCtorInternal(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, CopyInfo additionalCopyInfo, bool* didCopy);
 		LLCoroutine doCopyCtor(LLVMValueRef compiled, std::shared_ptr<AltaCore::AST::ExpressionNode> expr, std::shared_ptr<AltaCore::DH::ExpressionNode> info, bool* didCopy = nullptr);
 		LLCoroutine doCopyCtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, CopyInfo additionalCopyInfo, bool* didCopy = nullptr);
-		LLCoroutine doDtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didDtor = nullptr);
+		LLCoroutine doDtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didDtor = nullptr, bool force = false);
 
 		LLCoroutine loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
 
@@ -296,9 +330,9 @@ namespace AltaLL {
 
 		Coroutine<LLVMTypeRef> defineClassType(std::shared_ptr<AltaCore::DET::Class> klass);
 
-		inline bool canDestroy(std::shared_ptr<AltaCore::DET::Type> exprType) const {
+		inline bool canDestroy(std::shared_ptr<AltaCore::DET::Type> exprType, bool force = false) const {
 			return (
-				exprType->indirectionLevel() < 1 &&
+				(force || exprType->indirectionLevel() < 1) &&
 				(
 					(
 						!exprType->isNative &&
@@ -358,8 +392,6 @@ namespace AltaLL {
 		LLCoroutine compileConditionalStatement(std::shared_ptr<AltaCore::AST::ConditionalStatement> node, std::shared_ptr<AltaCore::DH::ConditionalStatement> info);
 		LLCoroutine compileConditionalExpression(std::shared_ptr<AltaCore::AST::ConditionalExpression> node, std::shared_ptr<AltaCore::DH::ConditionalExpression> info);
 		LLCoroutine compileClassDefinitionNode(std::shared_ptr<AltaCore::AST::ClassDefinitionNode> node, std::shared_ptr<AltaCore::DH::ClassDefinitionNode> info);
-		LLCoroutine compileClassStatementNode(std::shared_ptr<AltaCore::AST::ClassStatementNode> node, std::shared_ptr<AltaCore::DH::ClassStatementNode> info);
-		LLCoroutine compileClassMemberDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassMemberDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassMemberDefinitionStatement> info);
 		LLCoroutine compileClassMethodDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassMethodDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassMethodDefinitionStatement> info);
 		LLCoroutine compileClassSpecialMethodDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassSpecialMethodDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassSpecialMethodDefinitionStatement> info);
 		LLCoroutine compileClassInstantiationExpression(std::shared_ptr<AltaCore::AST::ClassInstantiationExpression> node, std::shared_ptr<AltaCore::DH::ClassInstantiationExpression> info);
