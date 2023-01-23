@@ -98,7 +98,7 @@ export class File {
   }
 
   public function read(count: Size): String {
-    let str = new String(count)
+    let str = new String(length: count)
     while count > INT_MAX {
       if !stdio.fgets(str, INT_MAX, this.handle) {
         throw new ReadFailure

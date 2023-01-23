@@ -3079,7 +3079,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::
 
 			auto [llfuncType, llfunc] = co_await declareFunction(info->operatorMethod);
 
-			result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, &subscript, 1, "");
+			std::array<LLVMValueRef, 2> args {
+				target,
+				subscript,
+			};
+
+			result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), "");
 		} else {
 			target = co_await loadRef(target, info->targetType);
 			subscript = co_await loadRef(subscript, info->indexType);
@@ -3428,7 +3433,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBitfieldDefinitionNode(st
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::shared_ptr<AltaCore::AST::LambdaExpression> node, std::shared_ptr<AltaCore::DH::LambdaExpression> info) {
 	// TODO
 	std::cerr << "TODO: LambdaExpression" << std::endl;
-	co_return NULL;
+
+	auto lllambdaType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(info.get()));
+	co_return LLVMConstNull(lllambdaType);
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(std::shared_ptr<AltaCore::AST::SpecialFetchExpression> node, std::shared_ptr<AltaCore::DH::SpecialFetchExpression> info) {

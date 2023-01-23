@@ -12,6 +12,9 @@ std::string AltaLL::cTypeNameify(std::shared_ptr<AltaCore::DET::Type> type, bool
 			return "_Alta_basic_function";
 		}
 		std::string result = "_Alta_func_ptr_" + mangleType(type->returnType);
+		if (type->isMethod) {
+			result += "_" + mangleType(std::make_shared<AltaCore::DET::Type>(type->methodParent)->reference());
+		}
 		for (auto& [name, param, isVariable, id]: type->parameters) {
 			result += '_';
 			auto target = isVariable ? param->point() : param;
