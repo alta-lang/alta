@@ -1349,7 +1349,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 		_builders.pop();
 
 		if (info->optionalVariantFunctions.size() > 0) {
-			throw std::runtime_error("TODO: handle functions with optionals/defaults");
+			std::cerr << "TODO: handle functions with optionals/defaults" << std::endl;
 		}
 	}
 
