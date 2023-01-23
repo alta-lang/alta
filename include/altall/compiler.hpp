@@ -223,7 +223,7 @@ namespace AltaLL {
 			_stacks.pop_back();
 		};
 
-		Coroutine<LLVMTypeRef> translateType(std::shared_ptr<AltaCore::DET::Type> type);
+		Coroutine<LLVMTypeRef> translateType(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions = true);
 
 		/**
 		 * whether it requires copying
@@ -329,6 +329,7 @@ namespace AltaLL {
 		Coroutine<void> processArgs(std::vector<ALTACORE_VARIANT<std::pair<std::shared_ptr<AltaCore::AST::ExpressionNode>, std::shared_ptr<AltaCore::DH::ExpressionNode>>, std::vector<std::pair<std::shared_ptr<AltaCore::AST::ExpressionNode>, std::shared_ptr<AltaCore::DH::ExpressionNode>>>>> adjustedArguments, std::vector<std::tuple<std::string, std::shared_ptr<AltaCore::DET::Type>, bool, std::string>> parameters, AltaCore::Errors::Position* position, std::vector<LLVMValueRef>& outputArgs);
 
 		Coroutine<LLVMTypeRef> defineClassType(std::shared_ptr<AltaCore::DET::Class> klass);
+		Coroutine<std::pair<LLVMTypeRef, LLVMValueRef>> declareFunction(std::shared_ptr<AltaCore::DET::Function> function, LLVMTypeRef llfunctionType = nullptr);
 
 		inline bool canDestroy(std::shared_ptr<AltaCore::DET::Type> exprType, bool force = false) const {
 			return (
