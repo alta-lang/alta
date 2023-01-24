@@ -184,10 +184,27 @@ namespace AltaLL {
 			Compiler& compiler;
 			Type type;
 
+			ScopeStack(ScopeStack&& other):
+				items(std::move(other.items)),
+				sizesDuringBranching(std::move(other.sizesDuringBranching)),
+				compiler(other.compiler),
+				type(std::move(other.type))
+				{};
+
 			ScopeStack(Compiler& _compiler, Type _type):
 				compiler(_compiler),
 				type(_type)
 				{};
+
+			ScopeStack& operator=(ScopeStack&& other) {
+				items = std::move(other.items);
+				sizesDuringBranching = std::move(other.sizesDuringBranching);
+				if (&compiler != &other.compiler) {
+					throw std::runtime_error("this should be impossible");
+				}
+				type = std::move(other.type);
+				return *this;
+			};
 
 			void pushItem(LLVMValueRef memory, std::shared_ptr<AltaCore::DET::Type> type);
 			void pushItem(LLVMValueRef memory, std::shared_ptr<AltaCore::DET::Type> type, LLVMBasicBlockRef sourceBlock);
@@ -210,6 +227,9 @@ namespace AltaLL {
 		ALTACORE_MAP<std::string, LLVMValueRef> _definedFunctions;
 		std::deque<ScopeStack> _stacks;
 		ALTACORE_MAP<std::string, LLVMValueRef> _definedVariables;
+		LLVMValueRef _initFunction = nullptr;
+		ALTACORE_OPTIONAL<ScopeStack> _initFunctionScopeStack = ALTACORE_NULLOPT;
+		LLBuilder _initFunctionBuilder;
 
 		inline ScopeStack& currentStack() {
 			return _stacks.back();
@@ -331,6 +351,9 @@ namespace AltaLL {
 		Coroutine<LLVMTypeRef> defineClassType(std::shared_ptr<AltaCore::DET::Class> klass);
 		Coroutine<std::pair<LLVMTypeRef, LLVMValueRef>> declareFunction(std::shared_ptr<AltaCore::DET::Function> function, LLVMTypeRef llfunctionType = nullptr);
 
+		LLVMValueRef enterInitFunction();
+		void exitInitFunction();
+
 		inline bool canDestroy(std::shared_ptr<AltaCore::DET::Type> exprType, bool force = false) const {
 			return (
 				(force || exprType->indirectionLevel() < 1) &&
@@ -436,6 +459,7 @@ namespace AltaLL {
 			{};
 
 		void compile(std::shared_ptr<AltaCore::AST::RootNode> root);
+		void finalize();
 	};
 };
 

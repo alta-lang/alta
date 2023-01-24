@@ -403,11 +403,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 				copy = false;
 			}
 
-			auto lltype = co_await translateType(component.target);
+			currentType = std::make_shared<DET::Type>(true, currentType);
+			auto lltype = co_await translateType(currentType);
 			auto tmp = LLVMBuildInsertValue(_builders.top().get(), LLVMGetUndef(lltype), LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 1, false), 0, "");
 			result = LLVMBuildInsertValue(_builders.top().get(), tmp, result, 1, "");
 
-			currentType = std::make_shared<DET::Type>(true, currentType);
 			copy = false;
 			additionalCopyInfo = std::make_pair(false, true);
 		} else if (component.type == CCT::Unwrap) {
@@ -733,6 +733,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 		} else if (exprType->isOptional) {
 			throw std::runtime_error("TODO: support optionals");
 		} else {
+			// TODO: check if the class info pointer is null; if it is, skip destruction.
+
 			result = co_await getRootInstance(result, exprType);
 			result = LLVMBuildPointerCast(_builders.top().get(), result, LLVMPointerType(_definedTypes["_Alta_basic_class"], 0), "");
 
@@ -1173,6 +1175,67 @@ AltaLL::Compiler::Coroutine<std::pair<LLVMTypeRef, LLVMValueRef>> AltaLL::Compil
 	co_return std::make_pair(llfuncType, llfunc);
 };
 
+LLVMValueRef AltaLL::Compiler::enterInitFunction() {
+	if (!_initFunction) {
+		auto opaquePtr = LLVMPointerTypeInContext(_llcontext.get(), 0);
+		auto i32Type = LLVMInt32TypeInContext(_llcontext.get());
+
+		if (!_definedTypes["@llvm.global_ctors.entry"]) {
+			std::array<LLVMTypeRef, 3> members {
+				i32Type,
+				opaquePtr,
+				opaquePtr,
+			};
+			_definedTypes["@llvm.global_ctors.entry"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+		}
+
+		if (!_definedTypes["@llvm.global_ctor"]) {
+			_definedTypes["@llvm.global_ctor"] = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+		}
+
+		_initFunction = LLVMAddFunction(_llmod.get(), "_Alta_module_constructor", _definedTypes["@llvm.global_ctor"]);
+		_definedFunctions["_Alta_module_constructor"] = _initFunction;
+
+		auto globalCtors = LLVMAddGlobal(_llmod.get(), opaquePtr, "llvm.global_ctors");
+		LLVMSetLinkage(globalCtors, LLVMAppendingLinkage);
+
+		std::array<LLVMValueRef, 3> globalCtorsEntry {
+			LLVMConstInt(i32Type, 65535, false),
+			_initFunction,
+			LLVMConstNull(opaquePtr),
+		};
+
+		std::array<LLVMValueRef, 1> globalCtorsEntries {
+			LLVMConstNamedStruct(_definedTypes["@llvm.global_ctors.entry"], globalCtorsEntry.data(), globalCtorsEntry.size()),
+		};
+
+		LLVMSetInitializer(globalCtors, LLVMConstArray(_definedTypes["@llvm.global_ctors.entry"], globalCtorsEntries.data(), globalCtorsEntries.size()));
+	}
+
+	if (!_initFunctionBuilder) {
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), _initFunction, "");
+		_initFunctionBuilder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(_initFunctionBuilder.get(), entryBlock);
+	}
+
+	_builders.push(_initFunctionBuilder);
+
+	if (_initFunctionScopeStack) {
+		_stacks.push_back(std::move(*_initFunctionScopeStack));
+		_initFunctionScopeStack = ALTACORE_NULLOPT;
+	} else {
+		pushStack(ScopeStack::Type::Function);
+	}
+
+	return _initFunction;
+};
+
+void AltaLL::Compiler::exitInitFunction() {
+	_builders.pop();
+	_initFunctionScopeStack = std::move(_stacks.back());
+	_stacks.pop_back();
+};
+
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::returnNull() {
 	co_return NULL;
 };
@@ -1263,10 +1326,21 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileNode(std::shared_ptr<Alta
  */
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileExpressionStatement(std::shared_ptr<AltaCore::AST::ExpressionStatement> node, std::shared_ptr<AltaCore::DH::ExpressionStatement> info) {
+	LLVMValueRef modInitFunc = NULL;
+
+	if (_builders.size() == 0) {
+		modInitFunc = enterInitFunction();
+	}
+
 	pushStack(ScopeStack::Type::Temporary);
 	co_await compileNode(node->expression, info->expression);
 	co_await currentStack().cleanup();
 	popStack();
+
+	if (modInitFunc) {
+		exitInitFunction();
+	}
+
 	co_return NULL;
 };
 
@@ -1278,7 +1352,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBlockNode(std::shared_ptr
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(std::shared_ptr<AltaCore::AST::FunctionDefinitionNode> node, std::shared_ptr<AltaCore::DH::FunctionDefinitionNode> mainInfo) {
-	bool isGeneric = mainInfo->genericInstantiations.size() > 0;
+	bool isGeneric = mainInfo->function->genericParameterCount > 0;
 	size_t iterationCount = isGeneric ? mainInfo->genericInstantiations.size() : 1;
 
 	for (size_t i = 0; i < iterationCount; ++i) {
@@ -1963,7 +2037,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 			args.push_back(result);
 		}
 	} else if (!info->targetType->isRawFunction) {
-		throw std::runtime_error("TODO: non-raw functions");
+		result = co_await loadRef(result, info->targetType);
 	}
 
 	if (info->isSpecialScheduleMethod) {
@@ -1983,7 +2057,70 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 			result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), "");
 		}
 	} else if (!info->targetType->isRawFunction) {
-		throw std::runtime_error("TODO: non-raw functions");
+		auto targetType = info->targetType->destroyReferences();
+		auto target = result;
+		auto basicFunctionType = co_await translateType(targetType);
+
+		auto targetTypeAsRaw = targetType->copy();
+		targetTypeAsRaw->isRawFunction = true;
+		auto rawFunctionType = co_await translateType(targetTypeAsRaw, false);
+
+		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+		auto opaquePtr = LLVMPointerTypeInContext(_llcontext.get(), 0);
+
+		std::vector<LLVMTypeRef> params(LLVMCountParamTypes(rawFunctionType) + 1);
+		params.push_back(opaquePtr);
+		LLVMGetParamTypes(rawFunctionType, &params.data()[1]);
+
+		auto lambdaFunctionType = LLVMFunctionType(LLVMGetReturnType(rawFunctionType), params.data(), params.size(), false);
+
+		bool isVoid = *targetTypeAsRaw->returnType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
+
+		std::array<LLVMValueRef, 2> lambdaStateGEPIndices {
+			LLVMConstInt(gepIndexType, 0, false), // get the first element in the "array"
+			LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_function::lambda_state
+		};
+
+		auto lambdaStateGEP = LLVMBuildGEP2(_builders.top().get(), basicFunctionType, target, lambdaStateGEPIndices.data(), lambdaStateGEPIndices.size(), "");
+		auto lambdaState = LLVMBuildLoad2(_builders.top().get(), opaquePtr, lambdaStateGEP, "");
+
+		args.insert(args.begin(), lambdaState);
+
+		std::array<LLVMValueRef, 2> functionPointerGEPIndices {
+			LLVMConstInt(gepIndexType, 0, false), // get the first element in the "array"
+			LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_function::function_pointer
+		};
+
+		auto functionPointerGEP = LLVMBuildGEP2(_builders.top().get(), basicFunctionType, target, functionPointerGEPIndices.data(), functionPointerGEPIndices.size(), "");
+		auto functionPointer = LLVMBuildLoad2(_builders.top().get(), opaquePtr, functionPointerGEP, "");
+
+		auto lambdaStateIsNotNull = LLVMBuildIsNotNull(_builders.top().get(), lambdaState, "");
+
+		auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+		auto doLambdaBlock = LLVMAppendBasicBlock(llfunc, "");
+		auto doRawBlock = LLVMAppendBasicBlock(llfunc, "");
+		auto doneBlock = LLVMAppendBasicBlock(llfunc, "");
+
+		LLVMBuildCondBr(_builders.top().get(), lambdaStateIsNotNull, doLambdaBlock, doRawBlock);
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), doLambdaBlock);
+		auto lambdaResult = LLVMBuildCall2(_builders.top().get(), lambdaFunctionType, functionPointer, args.data(), args.size(), "");
+		LLVMBuildBr(_builders.top().get(), doneBlock);
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), doRawBlock);
+		auto rawResult = LLVMBuildCall2(_builders.top().get(), rawFunctionType, functionPointer, &args.data()[1], args.size() - 1, "");
+		LLVMBuildBr(_builders.top().get(), doneBlock);
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+
+		if (isVoid) {
+			result = NULL;
+		} else {
+			result = LLVMBuildPhi(_builders.top().get(), LLVMGetReturnType(rawFunctionType), "");
+			LLVMAddIncoming(result, &lambdaResult, &doLambdaBlock, 1);
+			LLVMAddIncoming(result, &rawResult, &doRawBlock, 1);
+		}
 	} else {
 		auto funcType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(info->target.get())->destroyIndirection(), false);
 
@@ -2145,8 +2282,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::shared_ptr<AltaCore::AST::ClassDefinitionNode> node, std::shared_ptr<AltaCore::DH::ClassDefinitionNode> _info) {
-	bool isGeneric = node->generics.size() > 0;
-	size_t iterationCount = isGeneric ? node->generics.size() : 1;
+	bool isGeneric = _info->klass->genericParameterCount > 0;
+	size_t iterationCount = isGeneric ? _info->genericInstantiations.size() : 1;
 
 	for (size_t i = 0; i < iterationCount; ++i) {
 		const auto& info = isGeneric ? _info->genericInstantiations[i] : _info;
@@ -3439,9 +3576,21 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(std::shared_ptr<AltaCore::AST::SpecialFetchExpression> node, std::shared_ptr<AltaCore::DH::SpecialFetchExpression> info) {
-	// TODO
-	std::cerr << "TODO: SpecialFetchExpression" << std::endl;
-	co_return NULL;
+	if (invalidValueExpressionTable.find(info->id) != invalidValueExpressionTable.end()) {
+		co_return LLVMConstNull(co_await translateType(invalidValueExpressionTable[info->id]));
+	} else if (info->items.size() == 1 && info->items.front()->id == AltaCore::Util::getModule(info->inputScope.get()).lock()->internal.schedulerVariable->id) {
+		throw std::runtime_error("TODO: scheduler fetch");
+	} else if (info->items.size() == 1 && info->items.front()->name == "$coroutine") {
+		throw std::runtime_error("TODO: coroutine fetch");
+	} else {
+		auto result = _definedVariables[info->items.front()->id];
+
+		if (!result) {
+			throw std::runtime_error("special fetch variable not defined");
+		}
+
+		co_return result;
+	}
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassOperatorDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassOperatorDefinitionStatement> info) {
@@ -3453,6 +3602,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode(std::shared_ptr<AltaCore::AST::EnumerationDefinitionNode> node, std::shared_ptr<AltaCore::DH::EnumerationDefinitionNode> info) {
 	auto lltype = co_await translateType(info->memberType);
 
+	if (!info->memberType->isNative) {
+		throw std::runtime_error("Support non-native enums");
+	}
+
+	auto prevVal = LLVMConstInt(lltype, 0, false);
+
 	for (size_t i = 0; i < node->members.size(); ++i) {
 		const auto& [key, value] = node->members[i];
 		const auto& valueInfo = info->memberDetails[key];
@@ -3463,17 +3618,15 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode
 			_definedVariables[memberVar->id] = LLVMAddGlobal(_llmod.get(), lltype, mangled.c_str());
 		}
 
-		if (!info->memberType->isNative) {
-			throw std::runtime_error("Support non-native enums");
-		}
-
-		auto llval = co_await compileNode(value, valueInfo);
+		auto llval = value ? co_await compileNode(value, valueInfo) : LLVMConstAdd(prevVal, LLVMConstInt(lltype, 1, false));
 
 		if (!LLVMIsConstant(llval)) {
 			throw std::runtime_error("Support non-constant enum values");
 		}
 
 		LLVMSetInitializer(_definedVariables[memberVar->id], llval);
+
+		prevVal = _definedVariables[memberVar->id];
 	}
 
 	co_return NULL;
@@ -3555,5 +3708,17 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 	for (size_t i = 0; i < root->statements.size(); ++i) {
 		auto co = compileNode(root->statements[i], root->info->statements[i]);
 		co.coroutine.resume();
+	}
+};
+
+void AltaLL::Compiler::finalize() {
+	if (_initFunction) {
+		auto tmp = _initFunctionScopeStack->cleanup();
+		tmp.coroutine.resume();
+
+		LLVMBuildRetVoid(_initFunctionBuilder.get());
+
+		_initFunctionBuilder = nullptr;
+		_initFunctionScopeStack = ALTACORE_NULLOPT;
 	}
 };

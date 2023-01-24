@@ -59,18 +59,28 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 			processedRoots.insert(curr->id);
 		}
 
-		if (idx < curr->info->dependencyASTs.size()) {
+		bool shouldContinue = false;
+
+		while (idx < curr->info->dependencyASTs.size()) {
 			if (processedRoots.find(curr->info->dependencyASTs[idx]->id) == processedRoots.end()) {
 				auto depIdx = idx++;
 				rootStack.push(std::make_pair(curr->info->dependencyASTs[depIdx], 0));
-				continue;
+				shouldContinue = true;
+				break;
 			}
+			++idx;
+		}
+
+		if (shouldContinue) {
+			continue;
 		}
 
 		altaCompiler.compile(curr);
 
 		rootStack.pop();
 	}
+
+	altaCompiler.finalize();
 
 	auto mappingMD = LLVMGetOrInsertNamedMetadata(llmod.get(), "alta.mapping", sizeof("alta.mapping") - 1);
 
