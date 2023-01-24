@@ -28,6 +28,7 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	LLVMTargetRef rawTarget = NULL;
 	auto outputPathStr = binaryOutputPath.absolutify().toString();
 	auto outputBitcodePathStr = outputPathStr + ".bc";
+	auto outputDisassemblyPathStr = outputPathStr + ".ll";
 
 	LLVMContextSetOpaquePointers(llcontext.get(), true);
 
@@ -97,6 +98,7 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 
 	// for debugging
 	LLVMDumpModule(llmod.get());
+	LLVMPrintModuleToFile(llmod.get(), outputDisassemblyPathStr.c_str(), NULL);
 
 	// make sure our module is good
 	LLVMVerifyModule(llmod.get(), LLVMAbortProcessAction, NULL);

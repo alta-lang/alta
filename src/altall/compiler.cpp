@@ -154,26 +154,7 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::sh
 				result = LLVMPointerType(result, 0);
 			}
 		} else {
-			// XXX: when i first added lambdas to Alta, they had retain-release semantics on copying/destruction
-			//      (i.e. when copying a lambda, you would instead just get the same lambda with an increased reference count).
-			//      we still have that and that's what we implement here, but perhaps we should have proper copy semantics for lambdas,
-			//      with the option to use refcounting semantics via some attribute on the lambda.
-
-			//auto asPlain = type->copy();
-			//asPlain->isRawFunction = true;
-			//auto llplain = co_await translateType(asPlain);
-
-			auto voidPointer = LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0);
-
-			std::array<LLVMTypeRef, 2> members {
-				// function pointer
-				voidPointer,
-
-				// lambda state pointer
-				voidPointer,
-			};
-
-			result = LLVMStructType(members.data(), members.size(), false);
+			result = _definedTypes["_Alta_basic_function"];
 		}
 	} else if (type->isUnion()) {
 		std::array<LLVMTypeRef, 2> members;
@@ -613,7 +594,35 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 
 	if (exprType->isNative) {
 		if (exprType->isFunction && !exprType->isRawFunction) {
-			throw std::runtime_error("TODO: support non-raw functions");
+			// for now, lambdas always have retain-release semantics, so we just have to increment the reference count within the lambda state (if we have a lambda).
+
+			result = co_await loadRef(result, exprType);
+
+			auto lambdaState = LLVMBuildExtractValue(_builders.top().get(), result, 1, "");
+			auto lambdaStateIsNotNull = LLVMBuildIsNotNull(_builders.top().get(), lambdaState, "");
+
+			auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+			auto doIncRefBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+			auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+
+			LLVMBuildCondBr(_builders.top().get(), lambdaStateIsNotNull, doIncRefBlock, doneBlock);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), doIncRefBlock);
+
+			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+			auto refCountType = LLVMInt64TypeInContext(_llcontext.get());
+
+			std::array<LLVMValueRef, 2> gepIndices {
+				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_lambda_state::reference_count
+			};
+
+			auto refCountPtr = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_basic_lambda_state"], lambdaState, gepIndices.data(), gepIndices.size(), "");
+			LLVMBuildAtomicRMW(_builders.top().get(), LLVMAtomicRMWBinOpAdd, refCountPtr, LLVMConstInt(refCountType, 1, false), LLVMAtomicOrderingRelease, false);
+			LLVMBuildBr(_builders.top().get(), doneBlock);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
 		}
 	} else {
 		if (additionalCopyInfo.second && exprType->indirectionLevel() < 1) {
@@ -726,20 +735,59 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 	}
 
 	if (canDestroy(exprType, force)) {
+		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
 		if (!exprType->isRawFunction) {
 			throw std::runtime_error("TODO: support non-raw function pointers");
 		} else if (exprType->isUnion()) {
 			throw std::runtime_error("TODO: support unions");
 		} else if (exprType->isOptional) {
-			throw std::runtime_error("TODO: support optionals");
+			auto loaded = co_await loadRef(result, exprType);
+			LLVMValueRef contained = NULL;
+			auto containedType = exprType->optionalTarget;
+
+			auto present = LLVMBuildExtractValue(_builders.top().get(), loaded, 0, "");
+
+			if (exprType->referenceLevel() > 0) {
+				std::array<LLVMValueRef, 2> gepIndices {
+					LLVMConstInt(gepIndexType, 0, false), // the first entry in the "array"
+					LLVMConstInt(gepStructIndexType, 1, false), // the contained value
+				};
+
+				contained = LLVMBuildGEP2(_builders.top().get(), co_await translateType(exprType->destroyReferences()), result, gepIndices.data(), gepIndices.size(), "");
+				containedType = containedType->reference();
+			} else {
+				contained = LLVMBuildExtractValue(_builders.top().get(), result, 1, "");
+			}
+
+			auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+			auto doDtorBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+			auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+
+			currentStack().beginBranch();
+
+			auto originBlock = LLVMGetInsertBlock(_builders.top().get());
+			LLVMBuildCondBr(_builders.top().get(), present, doDtorBlock, doneBlock);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), doDtorBlock);
+			co_await doDtor(contained, containedType, nullptr, false);
+			auto exitDtorBlock = LLVMGetInsertBlock(_builders.top().get());
+			LLVMBuildBr(_builders.top().get(), doneBlock);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+			currentStack().endBranch(doneBlock, {
+				originBlock,
+				exitDtorBlock,
+			});
+
+			result = NULL;
 		} else {
 			// TODO: check if the class info pointer is null; if it is, skip destruction.
 
 			result = co_await getRootInstance(result, exprType);
 			result = LLVMBuildPointerCast(_builders.top().get(), result, LLVMPointerType(_definedTypes["_Alta_basic_class"], 0), "");
 
-			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
-			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 			std::array<LLVMValueRef, 3> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // the first entry in the "array"
 				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_class::instance_info
@@ -1484,8 +1532,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 	auto mangled = mangleName(info->variable);
 	LLVMValueRef memory = NULL;
 
-	// TODO: initialize global objects
-
 	if (!_definedVariables[info->variable->id]) {
 		if (inModuleRoot) {
 			memory = LLVMAddGlobal(_llmod.get(), lltype, mangled.c_str());
@@ -1507,13 +1553,15 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 		auto exprType = AltaCore::DET::Type::getUnderlyingType(info->initializationExpression.get());
 
 		if (inModuleRoot) {
-			// TODO: check if the expression is a constant
-			if (info->variable->type->isNative && info->variable->type->indirectionLevel() == 0 && !info->variable->type->isFunction) {
-				auto compiled = co_await compileNode(node->initializationExpression, info->initializationExpression);
-				auto casted = co_await cast(compiled, exprType, info->variable->type, true, additionalCopyInfo(node->initializationExpression, info->initializationExpression), false, &node->initializationExpression->position);
+			pushStack(ScopeStack::Type::Temporary);
+			auto compiled = co_await compileNode(node->initializationExpression, info->initializationExpression);
+			auto casted = co_await cast(compiled, exprType, info->variable->type, true, additionalCopyInfo(node->initializationExpression, info->initializationExpression), false, &node->initializationExpression->position);
+			popStack();
+			if (LLVMIsConstant(casted)) {
 				LLVMSetInitializer(memory, casted);
 			} else {
-				std::cerr << "TODO: non-native global initializers" << std::endl;
+				LLVMSetInitializer(memory, LLVMGetUndef(lltype));
+				LLVMBuildStore(_builders.top().get(), casted, memory);
 			}
 		} else {
 			pushStack(ScopeStack::Type::Temporary);
@@ -1587,6 +1635,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			}
 
 			co_return result;
+		} else if (auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(info->narrowedTo)) {
+			auto [llfuncType, llfunc] = co_await declareFunction(func);
+			co_return llfunc;
 		} else {
 			auto parentFunc = AltaCore::Util::getFunction(info->inputScope).lock();
 
@@ -2260,13 +2311,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std
 
 	LLVMPositionBuilderAtEnd(_builders.top().get(), trueBlock);
 	auto primaryResult = co_await compileNode(node->primaryResult, info->primaryResult);
-	primaryResult = co_await cast(primaryResult, primaryType, primaryType, true, additionalCopyInfo(node->primaryResult, info->primaryResult), false, &node->primaryResult->position);
+	primaryResult = co_await cast(primaryResult, primaryType, info->commonType, true, additionalCopyInfo(node->primaryResult, info->primaryResult), false, &node->primaryResult->position);
 	auto finalTrueBlock = LLVMGetInsertBlock(_builders.top().get());
 	LLVMBuildBr(_builders.top().get(), doneBlock);
 
 	LLVMPositionBuilderAtEnd(_builders.top().get(), falseBlock);
 	auto secondaryResult = co_await compileNode(node->secondaryResult, info->secondaryResult);
-	secondaryResult = co_await cast(secondaryResult, secondaryType, primaryType, true, additionalCopyInfo(node->secondaryResult, info->secondaryResult), false, &node->secondaryResult->position);
+	secondaryResult = co_await cast(secondaryResult, secondaryType, info->commonType, true, additionalCopyInfo(node->secondaryResult, info->secondaryResult), false, &node->secondaryResult->position);
 	auto finalFalseBlock = LLVMGetInsertBlock(_builders.top().get());
 	LLVMBuildBr(_builders.top().get(), doneBlock);
 
@@ -2274,7 +2325,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std
 
 	currentStack().endBranch(doneBlock, { finalTrueBlock, finalFalseBlock });
 
-	result = LLVMBuildPhi(_builders.top().get(), co_await translateType(primaryType), "");
+	result = LLVMBuildPhi(_builders.top().get(), co_await translateType(info->commonType), "");
 	LLVMAddIncoming(result, &primaryResult, &finalTrueBlock, 1);
 	LLVMAddIncoming(result, &secondaryResult, &finalFalseBlock, 1);
 
@@ -3703,6 +3754,50 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		std::array<LLVMTypeRef, 1> members;
 		members[0] = _definedTypes["_Alta_instance_info"];
 		_definedTypes["_Alta_basic_class"] = LLVMStructType(members.data(), members.size(), false);
+	}
+
+	if (!_definedTypes["_Alta_basic_function"]) {
+		/*
+		struct _Alta_basic_function {
+			void* function_pointer;
+			void* lambda_state;
+		};
+		*/
+
+		// XXX: when i first added lambdas to Alta, they had retain-release semantics on copying/destruction
+		//      (i.e. when copying a lambda, you would instead just get the same lambda with an increased reference count).
+		//      we still have that and that's what we implement here, but perhaps we should have proper copy semantics for lambdas,
+		//      with the option to use refcounting semantics via some attribute on the lambda.
+
+		//auto asPlain = type->copy();
+		//asPlain->isRawFunction = true;
+		//auto llplain = co_await translateType(asPlain);
+
+		auto voidPointer = LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0);
+
+		std::array<LLVMTypeRef, 2> members {
+			// function pointer
+			voidPointer,
+
+			// lambda state pointer
+			voidPointer,
+		};
+
+		_definedTypes["_Alta_basic_function"] = LLVMStructType(members.data(), members.size(), false);
+	}
+
+	if (!_definedTypes["_Alta_basic_lambda_state"]) {
+		/*
+		struct _Alta_basic_lambda_state {
+			uint64_t reference_count;
+		};
+		*/
+
+		std::array<LLVMTypeRef, 1> members {
+			LLVMInt64TypeInContext(_llcontext.get()),
+		};
+
+		_definedTypes["_Alta_basic_lambda_state"] = LLVMStructType(members.data(), members.size(), false);
 	}
 
 	for (size_t i = 0; i < root->statements.size(); ++i) {

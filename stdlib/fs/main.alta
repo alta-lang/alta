@@ -199,10 +199,12 @@ function internalCurrentWorkingDirectory(): String {
 	let requiredBufferLength = GetCurrentDirectory(0, nullptr)
 	let buf = allocate<byte>(requiredBufferLength)
 	GetCurrentDirectory(requiredBufferLength, buf)
-	let str = new String(buf)
+	# FIXME: we shouldn't need to explicitly name the constructor parameter here
+	let str = new String(data: buf)
 ##else
 	let buf = allocate<byte>(MAXPATHLEN)
-	let str = getcwd(buf, MAXPATHLEN) ? new String(buf) : new String
+	# FIXME: we shouldn't need to explicitly name the constructor parameter here
+	let str = getcwd(buf, MAXPATHLEN) ? new String(data: buf) : new String
 ##end if
 
 	free<byte>(buf)
