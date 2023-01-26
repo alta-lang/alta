@@ -9,6 +9,7 @@
 #include <llvm-c/BitWriter.h>
 #include <llvm-c/Analysis.h>
 #include <altall/mangle.hpp>
+#include <iostream>
 
 bool AltaLL::init() {
 	// nothing for now
@@ -29,6 +30,7 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	auto outputPathStr = binaryOutputPath.absolutify().toString();
 	auto outputBitcodePathStr = outputPathStr + ".bc";
 	auto outputDisassemblyPathStr = outputPathStr + ".ll";
+	auto outputObjectPathStr = outputPathStr + ".o";
 
 	LLVMContextSetOpaquePointers(llcontext.get(), true);
 
@@ -42,7 +44,7 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 		throw std::runtime_error("Failed to get target");
 	}
 
-	auto targetMachine = llwrap(LLVMCreateTargetMachine(rawTarget, defaultTriple.c_str(), hostCPU.c_str(), hostCPUFeatures.c_str(), LLVMCodeGenLevelDefault, LLVMRelocDefault, LLVMCodeModelDefault));
+	auto targetMachine = llwrap(LLVMCreateTargetMachine(rawTarget, defaultTriple.c_str(), hostCPU.c_str(), hostCPUFeatures.c_str(), LLVMCodeGenLevelDefault, LLVMRelocPIC, LLVMCodeModelDefault));
 	auto targetData = llwrap(LLVMCreateTargetDataLayout(targetMachine.get()));
 
 	LLVMSetModuleDataLayout(llmod.get(), targetData.get());
@@ -101,6 +103,16 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	LLVMPrintModuleToFile(llmod.get(), outputDisassemblyPathStr.c_str(), NULL);
 
 	// make sure our module is good
+	for (LLVMValueRef func = LLVMGetFirstFunction(llmod.get()); func != NULL; func = LLVMGetNextFunction(func)) {
+		if (LLVMVerifyFunction(func, LLVMPrintMessageAction)) {
+			size_t nameLength = 0;
+			auto name = LLVMGetValueName2(func, &nameLength);
+			std::string_view view(name, nameLength);
+			std::cerr << "Invalid function: " << view << std::endl;
+			abort();
+		}
+	}
+
 	LLVMVerifyModule(llmod.get(), LLVMAbortProcessAction, NULL);
 
 	// the bitcode is not strictly necessary; ignore it if we fail
@@ -108,7 +120,7 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 
 	// on some platforms, the LLVM headers are wrong and specify the filename argument to LLVMTargetMachineEmitToFile as `char*` instead of `const char*`.
 	// just in case, let's duplicate the string data.
-	auto dupstr = strdup(outputPathStr.c_str());
+	auto dupstr = strdup(outputObjectPathStr.c_str());
 
 	if (LLVMTargetMachineEmitToFile(targetMachine.get(), llmod.get(), dupstr, LLVMObjectFile, NULL)) {
 		throw std::runtime_error("Failed to emit object file");

@@ -278,7 +278,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			} else if (component.special == SCT::EmptyOptional) {
 				std::array<LLVMValueRef, 2> vals;
 				vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
-				vals[1] = LLVMGetUndef(co_await translateType(currentType));
+				vals[1] = LLVMGetUndef(co_await translateType(dest->optionalTarget));
 				result = LLVMConstNamedStruct(co_await translateType(dest), vals.data(), vals.size());
 				currentType = dest;
 				copy = false;
@@ -302,12 +302,16 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			auto lltarget = co_await translateType(component.target);
 			bool currentIsFP = currentType->nativeTypeName == DET::NativeType::Float || currentType->nativeTypeName == DET::NativeType::Double;
 			bool targetIsFP = component.target->nativeTypeName == DET::NativeType::Float || component.target->nativeTypeName == DET::NativeType::Double;
+			bool currentIsPointer = currentType->pointerLevel() > 0 || (currentType->isFunction && currentType->isRawFunction);
+			bool targetIsPointer = component.target->pointerLevel() > 0 || (component.target->isFunction && component.target->isRawFunction);
+			bool currentIsIntegral = currentType->isNative && !currentType->isFunction;
+			bool targetIsIntegral = component.target->isNative && !component.target->isFunction;
 
-			if (currentType->pointerLevel() > 0 && component.target->isNative) {
+			if (currentIsPointer && targetIsIntegral) {
 				result = LLVMBuildPtrToInt(_builders.top().get(), result, lltarget, "");
-			} else if (currentType->isNative && component.target->pointerLevel() > 0) {
+			} else if (currentIsIntegral && targetIsPointer) {
 				result = LLVMBuildIntToPtr(_builders.top().get(), result, lltarget, "");
-			} else if (currentType->pointerLevel() > 0 && component.target->pointerLevel() > 0) {
+			} else if (currentIsPointer && targetIsPointer) {
 				result = LLVMBuildBitCast(_builders.top().get(), result, lltarget, "");
 			} else if (currentIsFP && targetIsFP) {
 				result = LLVMBuildFPCast(_builders.top().get(), result, lltarget, "");
@@ -512,7 +516,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 				copy = false;
 			}
 
-			auto funcType_Alta_bad_cast = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+			auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+			std::array<LLVMTypeRef, 2> params {
+				strType,
+				strType,
+			};
+			auto funcType_Alta_bad_cast = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), params.data(), params.size(), false);
 
 			if (!_definedFunctions["_Alta_bad_cast"]) {
 				_definedFunctions["_Alta_bad_cast"] = LLVMAddFunction(_llmod.get(), "_Alta_bad_cast", funcType_Alta_bad_cast);
@@ -538,7 +547,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 
 			// now move the builder to the bad cast block and build it
 			LLVMPositionBuilderAtEnd(_builders.top().get(), badCastBlock);
-			LLVMBuildCall2(_builders.top().get(), funcType_Alta_bad_cast, func_Alta_bad_cast, nullptr, 0, "");
+			auto currStr = currentType->toString();
+			auto destStr = component.target->toString();
+			std::array<LLVMValueRef, 2> args {
+				LLVMBuildGlobalStringPtr(_builders.top().get(), currStr.c_str(), ""),
+				LLVMBuildGlobalStringPtr(_builders.top().get(), destStr.c_str(), ""),
+			};
+			LLVMBuildCall2(_builders.top().get(), funcType_Alta_bad_cast, func_Alta_bad_cast, args.data(), args.size(), "");
 			LLVMBuildUnreachable(_builders.top().get());
 
 			// now create the block we go to after we're done here
@@ -1213,11 +1228,13 @@ AltaLL::Compiler::Coroutine<std::pair<LLVMTypeRef, LLVMValueRef>> AltaLL::Compil
 	}
 	llfuncType = co_await translateType(altaFuncType, false);
 
-	llfunc = _definedFunctions[function->id];
+	auto funcID = function->isLiteral ? function->name : function->id;
+
+	llfunc = _definedFunctions[funcID];
 	if (!llfunc) {
 		auto mangled = mangleName(function);
 		llfunc = LLVMAddFunction(_llmod.get(), mangled.c_str(), llfuncType);
-		_definedFunctions[function->id] = llfunc;
+		_definedFunctions[funcID] = llfunc;
 	}
 
 	co_return std::make_pair(llfuncType, llfunc);
@@ -1244,7 +1261,7 @@ LLVMValueRef AltaLL::Compiler::enterInitFunction() {
 		_initFunction = LLVMAddFunction(_llmod.get(), "_Alta_module_constructor", _definedTypes["@llvm.global_ctor"]);
 		_definedFunctions["_Alta_module_constructor"] = _initFunction;
 
-		auto globalCtors = LLVMAddGlobal(_llmod.get(), opaquePtr, "llvm.global_ctors");
+		auto globalCtors = LLVMAddGlobal(_llmod.get(), LLVMArrayType(_definedTypes["@llvm.global_ctors.entry"], 1), "llvm.global_ctors");
 		LLVMSetLinkage(globalCtors, LLVMAppendingLinkage);
 
 		std::array<LLVMValueRef, 3> globalCtorsEntry {
@@ -1410,6 +1427,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 		if (info->function->isGenerator || info->function->isAsync) {
 			std::cerr << "TODO: generator functions" << std::endl;
+			continue;
 		}
 
 		auto mangled = mangleName(info->function);
@@ -1480,6 +1498,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::shared_ptr<AltaCore::AST::ReturnDirectiveNode> node, std::shared_ptr<AltaCore::DH::ReturnDirectiveNode> info) {
 	LLVMValueRef expr = NULL;
+	auto exprType = node->expression ? AltaCore::DET::Type::getUnderlyingType(info->expression.get()) : nullptr;
 
 	if (node->expression) {
 		auto functionReturnType = info->parentFunction ? (info->parentFunction->isGenerator ? info->parentFunction->generatorReturnType : (info->parentFunction->isAsync ? info->parentFunction->coroutineReturnType : info->parentFunction->returnType)) : nullptr;
@@ -1492,7 +1511,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 		if (functionReturnType && functionReturnType->referenceLevel() > 0) {
 			// if we're returning a reference, there's no need to copy anything
 		} else {
-			auto exprType = AltaCore::DET::Type::getUnderlyingType(info->expression.get());
 			expr = co_await cast(expr, exprType, functionReturnType, true, additionalCopyInfo(node->expression, info->expression), false, &node->expression->position);
 		}
 	}
@@ -1512,7 +1530,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 			throw std::runtime_error("Invalid return value");
 		}
 
-		LLVMBuildRet(_builders.top().get(), expr);
+		if (*exprType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
+			LLVMBuildRetVoid(_builders.top().get());
+		} else {
+			LLVMBuildRet(_builders.top().get(), expr);
+		}
 	} else {
 		LLVMBuildRetVoid(_builders.top().get());
 	}
@@ -1572,8 +1594,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 			popStack();
 		}
 	} else if (!inModuleRoot && info->variable->type->klass && info->variable->type->indirectionLevel() == 0) {
-		auto [llfuncType, llfunc] = co_await declareFunction(info->variable->type->klass->defaultConstructor);
-		auto init = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, nullptr, 0, "");
+		LLVMValueRef init = NULL;
+		if (info->variable->type->klass->isBitfield || info->variable->type->klass->isStructure) {
+			init = LLVMConstNull(co_await translateType(info->variable->type));
+		} else {
+			auto [llfuncType, llfunc] = co_await declareFunction(info->variable->type->klass->defaultConstructor);
+			init = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, nullptr, 0, "");
+		}
 		LLVMBuildStore(_builders.top().get(), init, memory);
 	} else {
 		auto null = LLVMConstNull(lltype);
@@ -1901,7 +1928,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 	} else if (isNullopt) {
 		std::array<LLVMValueRef, 2> vals;
 		vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
-		vals[1] = LLVMGetUndef(co_await translateType(rhsTargetType));
+		vals[1] = LLVMGetUndef(co_await translateType(info->targetType->optionalTarget));
 		rhs = LLVMConstNamedStruct(co_await translateType(info->targetType), vals.data(), vals.size());
 	}
 
@@ -1965,6 +1992,43 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 	} else {
 		lhs = co_await cast(lhs, info->leftType, info->commonOperandType->destroyReferences(), false, additionalCopyInfo(node->left, info->left), false, &node->left->position);
 		rhs = co_await cast(rhs, info->rightType, info->commonOperandType->destroyReferences(), false, additionalCopyInfo(node->right, info->right), false, &node->right->position);
+
+		bool arithmetic = false;
+		bool pointerArithmetic = false;
+		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
+		auto opaquePtr = LLVMPointerTypeInContext(_llcontext.get(), 0);
+
+		switch (node->type) {
+			case AltaCore::Shared::OperatorType::Addition:
+			case AltaCore::Shared::OperatorType::Subtraction:
+			case AltaCore::Shared::OperatorType::Multiplication:
+			case AltaCore::Shared::OperatorType::Division:
+			case AltaCore::Shared::OperatorType::Modulo:
+			case AltaCore::Shared::OperatorType::LeftShift:
+			case AltaCore::Shared::OperatorType::RightShift:
+			case AltaCore::Shared::OperatorType::BitwiseAnd:
+			case AltaCore::Shared::OperatorType::BitwiseOr:
+			case AltaCore::Shared::OperatorType::BitwiseXor:
+				arithmetic = true;
+				break;
+
+			case AltaCore::Shared::OperatorType::LogicalAnd:
+			case AltaCore::Shared::OperatorType::LogicalOr:
+			case AltaCore::Shared::OperatorType::EqualTo:
+			case AltaCore::Shared::OperatorType::NotEqualTo:
+			case AltaCore::Shared::OperatorType::GreaterThan:
+			case AltaCore::Shared::OperatorType::LessThan:
+			case AltaCore::Shared::OperatorType::GreaterThanOrEqualTo:
+			case AltaCore::Shared::OperatorType::LessThanOrEqualTo:
+				arithmetic = false;
+				break;
+		}
+
+		if (arithmetic && info->commonOperandType->pointerLevel() > 0) {
+			pointerArithmetic = true;
+			lhs = LLVMBuildPtrToInt(_builders.top().get(), lhs, i64Type, "");
+			rhs = LLVMBuildPtrToInt(_builders.top().get(), rhs, i64Type, "");
+		}
 
 		switch (node->type) {
 			case AltaCore::Shared::OperatorType::Addition: {
@@ -2042,6 +2106,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 				}
 			} break;
 		}
+
+		if (pointerArithmetic) {
+			result = LLVMBuildIntToPtr(_builders.top().get(), result, opaquePtr, "");
+		}
 	}
 
 	co_return result;
@@ -2116,35 +2184,21 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 		targetTypeAsRaw->isRawFunction = true;
 		auto rawFunctionType = co_await translateType(targetTypeAsRaw, false);
 
-		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
-		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 		auto opaquePtr = LLVMPointerTypeInContext(_llcontext.get(), 0);
 
 		std::vector<LLVMTypeRef> params(LLVMCountParamTypes(rawFunctionType) + 1);
-		params.push_back(opaquePtr);
+		params[0] = opaquePtr;
 		LLVMGetParamTypes(rawFunctionType, &params.data()[1]);
 
 		auto lambdaFunctionType = LLVMFunctionType(LLVMGetReturnType(rawFunctionType), params.data(), params.size(), false);
 
 		bool isVoid = *targetTypeAsRaw->returnType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
 
-		std::array<LLVMValueRef, 2> lambdaStateGEPIndices {
-			LLVMConstInt(gepIndexType, 0, false), // get the first element in the "array"
-			LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_function::lambda_state
-		};
-
-		auto lambdaStateGEP = LLVMBuildGEP2(_builders.top().get(), basicFunctionType, target, lambdaStateGEPIndices.data(), lambdaStateGEPIndices.size(), "");
-		auto lambdaState = LLVMBuildLoad2(_builders.top().get(), opaquePtr, lambdaStateGEP, "");
+		auto lambdaState = LLVMBuildExtractValue(_builders.top().get(), target, 1, "");
 
 		args.insert(args.begin(), lambdaState);
 
-		std::array<LLVMValueRef, 2> functionPointerGEPIndices {
-			LLVMConstInt(gepIndexType, 0, false), // get the first element in the "array"
-			LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_function::function_pointer
-		};
-
-		auto functionPointerGEP = LLVMBuildGEP2(_builders.top().get(), basicFunctionType, target, functionPointerGEPIndices.data(), functionPointerGEPIndices.size(), "");
-		auto functionPointer = LLVMBuildLoad2(_builders.top().get(), opaquePtr, functionPointerGEP, "");
+		auto functionPointer = LLVMBuildExtractValue(_builders.top().get(), target, 0, "");
 
 		auto lambdaStateIsNotNull = LLVMBuildIsNotNull(_builders.top().get(), lambdaState, "");
 
@@ -2605,10 +2659,17 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 					auto casted = co_await cast(expr, AltaCore::DET::Type::getUnderlyingType(memberDefInfo->varDef->initializationExpression.get()), memberDefInfo->varDef->variable->type, true, additionalCopyInfo(memberDef->varDef->initializationExpression, memberDefInfo->varDef->initializationExpression), false, &memberDef->varDef->initializationExpression->position);
 					LLVMBuildStore(_builders.top().get(), casted, gep);
 				} else if (memberDefInfo->varDef->type->type->klass && memberDefInfo->varDef->type->type->indirectionLevel() == 0 && memberDefInfo->varDef->type->type->klass->defaultConstructor) {
-					auto func = memberDefInfo->varDef->type->type->klass->defaultConstructor;
-					auto [llfuncType, llfunc] = co_await declareFunction(func);
+					LLVMValueRef init = NULL;
 
-					LLVMBuildStore(_builders.top().get(), LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, nullptr, 0, ""), gep);
+					if (memberDefInfo->varDef->type->type->klass->isBitfield || memberDefInfo->varDef->type->type->klass->isStructure) {
+						init = LLVMConstNull(co_await translateType(memberDefInfo->varDef->type->type));
+					} else {
+						auto func = memberDefInfo->varDef->type->type->klass->defaultConstructor;
+						auto [llfuncType, llfunc] = co_await declareFunction(func);
+						init = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, nullptr, 0, "");
+					}
+
+					LLVMBuildStore(_builders.top().get(), init, gep);
 				} else if (memberDefInfo->varDef->type->type->referenceLevel() > 0 || memberDefInfo->varDef->type->type->klass) {
 					throw std::runtime_error("this should have been handled by AltaCore");
 				} else {
@@ -3179,7 +3240,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpress
 		auto llret = co_await translateType(retType);
 
 		for (const auto& param: info->constructor->parameterVariables) {
-			llparams.push_back(co_await translateType(param->type));
+			auto lltype = co_await translateType(param->type);
+			if (param->isVariable) {
+				llparams.push_back(LLVMInt64TypeInContext(_llcontext.get()));
+				llparams.push_back(LLVMPointerType(lltype, 0));
+			} else {
+				llparams.push_back(lltype);
+			}
 		}
 
 		auto funcType = LLVMFunctionType(llret, llparams.data(), llparams.size(), false);
@@ -3211,7 +3278,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDereferenceExpression(std
 
 	if (type->pointerLevel() > 0) {
 		result = co_await loadRef(result, type);
-		result = LLVMBuildLoad2(_builders.top().get(), co_await translateType(type->destroyReferences()->follow()), result, "");
+		// we return a reference to the pointed value, so we would only need to perform a pointer cast.
+		// however, now that LLVM uses opaque pointers, we don't even need to do that; just pass the pointer on through.
+		//result = LLVMBuildLoad2(_builders.top().get(), co_await translateType(type->destroyReferences()->follow()), result, "");
 	} else if (type->isOptional) {
 		if (type->referenceLevel() > 0) {
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
@@ -3220,7 +3289,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDereferenceExpression(std
 				LLVMConstInt(gepIndexType, 0, false), // get the first "array" element
 				LLVMConstInt(gepStructIndexType, 1, false), // get the contained type from the optional
 			};
-			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(type), result, gepIndices.data(), gepIndices.size(), "");
+			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(type->destroyReferences()), result, gepIndices.data(), gepIndices.size(), "");
 		} else {
 			result = LLVMBuildExtractValue(_builders.top().get(), result, 1, "");
 		}
@@ -3645,8 +3714,45 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(st
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassOperatorDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassOperatorDefinitionStatement> info) {
-	// TODO
-	std::cerr << "TODO: ClassOperatorDefinitionStatement" << std::endl;
+	auto [llfuncType, llfunc] = co_await declareFunction(info->method);
+
+	auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+	auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+	LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+	_builders.push(builder);
+	pushStack(ScopeStack::Type::Function);
+
+	if (info->method->parameterVariables.size() > 0) {
+		const auto& var = info->method->parameterVariables.front();
+		auto llparam = LLVMGetParam(llfunc, 1);
+
+		if (var->type->indirectionLevel() == 0) {
+			llparam = co_await tmpify(llparam, var->type, false);
+			currentStack().pushItem(llparam, var->type);
+		}
+
+		_definedVariables[var->id] = llparam;
+	}
+
+	co_await compileNode(node->block, info->block);
+
+	if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(_builders.top().get()))) {
+		auto functionReturnType = info->method->isGenerator ? info->method->generatorReturnType : (info->method->isAsync ? info->method->coroutineReturnType : info->method->returnType);
+
+		if (functionReturnType && *functionReturnType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
+			// insert an implicit return
+			co_await currentStack().cleanup();
+
+			LLVMBuildRetVoid(_builders.top().get());
+		} else {
+			LLVMBuildUnreachable(_builders.top().get());
+		}
+	}
+
+	popStack();
+	_builders.pop();
+
 	co_return NULL;
 };
 
@@ -3677,7 +3783,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode
 
 		LLVMSetInitializer(_definedVariables[memberVar->id], llval);
 
-		prevVal = _definedVariables[memberVar->id];
+		prevVal = llval;
 	}
 
 	co_return NULL;

@@ -227,29 +227,30 @@ declare literal export function copysignf(x: float, y: float): float
 declare literal export function copysign(x: double, y: double): double
 declare literal export function copysignl(x: long double, y: long double): long double
 
-declare literal export function fpclassify(n: any): int
-
-declare literal export function isfinite(n: any): bool
-
-declare literal export function isinf(n: any): bool
-
-declare literal export function isnan(n: any): bool
-
-declare literal export function isnormal(n: any): bool
-
-declare literal export function signbit(n: any): int
-
-declare literal export function isgreater(x: any, y: any): bool
-
-declare literal export function isgreaterequal(x: any, y: any): bool
-
-declare literal export function isless(x: any, y: any): bool
-
-declare literal export function islessequal(x: any, y: any): bool
-
-declare literal export function islessgreater(x: any, y: any): bool
-
-declare literal export function isunordered(x: any, y: any): bool
+# TODO
+#declare literal export function fpclassify(n: any): int
+#
+#declare literal export function isfinite(n: any): bool
+#
+#declare literal export function isinf(n: any): bool
+#
+#declare literal export function isnan(n: any): bool
+#
+#declare literal export function isnormal(n: any): bool
+#
+#declare literal export function signbit(n: any): int
+#
+#declare literal export function isgreater(x: any, y: any): bool
+#
+#declare literal export function isgreaterequal(x: any, y: any): bool
+#
+#declare literal export function isless(x: any, y: any): bool
+#
+#declare literal export function islessequal(x: any, y: any): bool
+#
+#declare literal export function islessgreater(x: any, y: any): bool
+#
+#declare literal export function isunordered(x: any, y: any): bool
 
 # TODO
 #export var HUGE_VALF: const float = __builtin_huge_valf()
