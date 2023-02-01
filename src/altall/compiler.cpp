@@ -1488,8 +1488,41 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 		popStack();
 		_builders.pop();
 
-		if (info->optionalVariantFunctions.size() > 0) {
-			std::cerr << "TODO: handle functions with optionals/defaults" << std::endl;
+		for (const auto& [variant, optionalValueProvided]: info->optionalVariantFunctions) {
+			std::vector<LLVMTypeRef> llparams;
+
+			if (info->function->isMethod) {
+				llparams.push_back(co_await translateType(info->function->parentClassType));
+			}
+
+			size_t optionalIndex = 0;
+			size_t variantIndex = 0;
+			for (size_t i = 0; i < info->parameters.size(); ++i) {
+				const auto& param = node->parameters[i];
+				const auto& paramInfo = info->parameters[i];
+				auto thisOptionalIndex = optionalIndex;
+
+				++optionalIndex;
+
+				if (paramInfo->defaultValue && !optionalValueProvided[thisOptionalIndex]) {
+					continue;
+				}
+
+				const auto& var = variant->parameterVariables[variantIndex];
+				auto type = paramInfo->type->type;
+				auto lltype = co_await translateType(type);
+
+				if (param->isVariable) {
+					llparams.push_back(LLVMInt64TypeInContext(_llcontext.get()));
+					llparams.push_back(LLVMPointerType(lltype, 0));
+				} else {
+					llparams.push_back(lltype);
+				}
+
+				++variantIndex;
+			}
+
+			// TODO: working here
 		}
 	}
 
