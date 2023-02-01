@@ -1219,14 +1219,17 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::defineClassType(std::
 };
 
 AltaLL::Compiler::Coroutine<std::pair<LLVMTypeRef, LLVMValueRef>> AltaLL::Compiler::declareFunction(std::shared_ptr<AltaCore::DET::Function> function, LLVMTypeRef llfunctionType) {
-	LLVMTypeRef llfuncType = NULL;
+	LLVMTypeRef llfuncType = llfunctionType;
 	LLVMValueRef llfunc = NULL;
 	auto altaFuncType = AltaCore::DET::Type::getUnderlyingType(function);
 
 	if (function->isConstructor) {
 		altaFuncType->returnType = function->parentClassType->destroyReferences();
 	}
-	llfuncType = co_await translateType(altaFuncType, false);
+
+	if (!llfuncType) {
+		llfuncType = co_await translateType(altaFuncType, false);
+	}
 
 	auto funcID = function->isLiteral ? function->name : function->id;
 
@@ -1423,7 +1426,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 	for (size_t i = 0; i < iterationCount; ++i) {
 		auto info = isGeneric ? mainInfo->genericInstantiations[i] : mainInfo;
 
-		auto retType = co_await translateType(info->returnType->type);
+		auto retType = co_await translateType(info->function->returnType);
 
 		if (info->function->isGenerator || info->function->isAsync) {
 			std::cerr << "TODO: generator functions" << std::endl;
@@ -1522,7 +1525,49 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				++variantIndex;
 			}
 
-			// TODO: working here
+			auto optionalFuncType = LLVMFunctionType(retType, llparams.data(), llparams.size(), false);
+			auto [llfuncType, llfunc] = co_await declareFunction(variant, optionalFuncType);
+
+			auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+			auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+			_builders.push(builder);
+			pushStack(ScopeStack::Type::Function);
+
+			std::vector<LLVMValueRef> args;
+
+			if (info->function->isMethod) {
+				args.push_back(LLVMGetParam(llfunc, 0));
+			}
+
+			optionalIndex = 0;
+			variantIndex = 0;
+
+			for (size_t i = 0; i < info->parameters.size(); ++i) {
+				const auto& paramInfo = info->parameters[i];
+				auto thisOptionalIndex = optionalIndex;
+
+				++optionalIndex;
+
+				if (paramInfo->defaultValue && !optionalValueProvided[thisOptionalIndex]) {
+					auto compiled = co_await compileNode(node->parameters[i]->defaultValue, paramInfo->defaultValue);
+					auto casted = co_await cast(compiled, AltaCore::DET::Type::getUnderlyingType(paramInfo->defaultValue.get()), paramInfo->type->type, false, additionalCopyInfo(node->parameters[i]->defaultValue, paramInfo->defaultValue), false, &node->parameters[i]->defaultValue->position);
+					args.push_back(casted);
+				} else {
+					args.push_back(LLVMGetParam(llfunc, variantIndex + (info->function->isMethod ? 1 : 0)));
+					++variantIndex;
+				}
+			}
+
+			auto call = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), "");
+
+			currentStack().cleanup();
+
+			LLVMBuildRet(_builders.top().get(), call);
+
+			popStack();
+			_builders.pop();
 		}
 	}
 
