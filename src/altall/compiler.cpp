@@ -1435,6 +1435,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 		auto mangled = mangleName(info->function);
 		auto [llfuncType, llfunc] = co_await declareFunction(info->function);
+		auto origLLFuncType = llfuncType;
+		auto origLLFunc = llfunc;
 
 		LLVMSetLinkage(llfunc, mangled == "main" ? LLVMExternalLinkage : LLVMInternalLinkage);
 
@@ -1475,9 +1477,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 		co_await compileNode(node->body, info->body);
 
-		if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(_builders.top().get()))) {
-			auto functionReturnType = info->function->isGenerator ? info->function->generatorReturnType : (info->function->isAsync ? info->function->coroutineReturnType : info->function->returnType);
+		auto functionReturnType = info->function->isGenerator ? info->function->generatorReturnType : (info->function->isAsync ? info->function->coroutineReturnType : info->function->returnType);
 
+		if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(_builders.top().get()))) {
 			if (functionReturnType && *functionReturnType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
 				// insert an implicit return
 				co_await currentStack().cleanup();
@@ -1503,11 +1505,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			for (size_t i = 0; i < info->parameters.size(); ++i) {
 				const auto& param = node->parameters[i];
 				const auto& paramInfo = info->parameters[i];
-				auto thisOptionalIndex = optionalIndex;
 
-				++optionalIndex;
-
-				if (paramInfo->defaultValue && !optionalValueProvided[thisOptionalIndex]) {
+				if (paramInfo->defaultValue && !optionalValueProvided[optionalIndex++]) {
 					continue;
 				}
 
@@ -1546,11 +1545,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			for (size_t i = 0; i < info->parameters.size(); ++i) {
 				const auto& paramInfo = info->parameters[i];
-				auto thisOptionalIndex = optionalIndex;
 
-				++optionalIndex;
-
-				if (paramInfo->defaultValue && !optionalValueProvided[thisOptionalIndex]) {
+				if (paramInfo->defaultValue && !optionalValueProvided[optionalIndex++]) {
 					auto compiled = co_await compileNode(node->parameters[i]->defaultValue, paramInfo->defaultValue);
 					auto casted = co_await cast(compiled, AltaCore::DET::Type::getUnderlyingType(paramInfo->defaultValue.get()), paramInfo->type->type, false, additionalCopyInfo(node->parameters[i]->defaultValue, paramInfo->defaultValue), false, &node->parameters[i]->defaultValue->position);
 					args.push_back(casted);
@@ -1560,11 +1556,15 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				}
 			}
 
-			auto call = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), "");
+			auto call = LLVMBuildCall2(_builders.top().get(), origLLFuncType, origLLFunc, args.data(), args.size(), "");
 
 			currentStack().cleanup();
 
-			LLVMBuildRet(_builders.top().get(), call);
+			if (*functionReturnType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
+				LLVMBuildRetVoid(_builders.top().get());
+			} else {
+				LLVMBuildRet(_builders.top().get(), call);
+			}
 
 			popStack();
 			_builders.pop();
