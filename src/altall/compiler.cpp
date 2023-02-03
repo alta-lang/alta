@@ -1304,6 +1304,94 @@ void AltaLL::Compiler::exitInitFunction() {
 	_stacks.pop_back();
 };
 
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, std::function<LLCoroutine(LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType)> callback) {
+	LLVMValueRef retVal = NULL;
+
+	auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
+	auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+	std::array<LLVMTypeRef, 2> params {
+		strType,
+		i64Type,
+	};
+	auto funcType_Alta_bad_enum = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), params.data(), params.size(), false);
+
+	if (!_definedFunctions["_Alta_bad_enum"]) {
+		_definedFunctions["_Alta_bad_enum"] = LLVMAddFunction(_llmod.get(), "_Alta_bad_enum", funcType_Alta_bad_enum);
+	}
+
+	auto func_Alta_bad_enum = _definedFunctions["_Alta_bad_enum"];
+	auto parentFunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+	std::vector<LLVMBasicBlockRef> phiBlocks;
+	std::vector<LLVMValueRef> phiVals;
+
+	currentStack().beginBranch();
+
+	// first, add the default (bad enum) block
+	auto badEnumBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
+
+	// now start creating the switch
+	auto val = LLVMBuildExtractValue(_builders.top().get(), co_await loadRef(expr, type), 0, "");
+	auto tmpified = co_await tmpify(expr, type, false);
+	auto switchInstr = LLVMBuildSwitch(_builders.top().get(), val, badEnumBlock, type->unionOf.size());
+
+	// now move the builder to the bad cast block and build it
+	LLVMPositionBuilderAtEnd(_builders.top().get(), badEnumBlock);
+	auto exprStr = type->toString();
+	std::array<LLVMValueRef, 2> args {
+		LLVMBuildGlobalStringPtr(_builders.top().get(), exprStr.c_str(), ""),
+		LLVMBuildIntCast2(_builders.top().get(), val, i64Type, false, ""),
+	};
+	LLVMBuildCall2(_builders.top().get(), funcType_Alta_bad_enum, func_Alta_bad_enum, args.data(), args.size(), "");
+	LLVMBuildUnreachable(_builders.top().get());
+
+	// now create the block we go to after we're done here
+	auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
+
+	auto idxType = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(type->unionOf.size() - 1));
+	auto gepIndexType = i64Type;
+	auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+	for (size_t i = 0; i < type->unionOf.size(); ++i) {
+		auto& unionMember = type->unionOf[i];
+		auto thisBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
+		LLVMAddCase(switchInstr, LLVMConstInt(idxType, i, false), thisBlock);
+		LLVMPositionBuilderAtEnd(_builders.top().get(), thisBlock);
+
+		std::array<LLVMTypeRef, 2> members;
+		members[0] = idxType;
+		members[1] = co_await translateType(unionMember);
+		auto llactual = LLVMStructType(members.data(), members.size(), false);
+
+		auto castedUnion = LLVMBuildBitCast(_builders.top().get(), tmpified, LLVMPointerType(llactual, 0), "");
+		std::array<LLVMValueRef, 2> gepIndices {
+			LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+			LLVMConstInt(gepStructIndexType, 1, false), // the union member
+		};
+		auto memberRef = LLVMBuildGEP2(_builders.top().get(), llactual, castedUnion, gepIndices.data(), gepIndices.size(), "");
+
+		auto currVal = co_await callback(memberRef, unionMember);
+
+		auto loadedUnion = LLVMBuildLoad2(_builders.top().get(), llactual, castedUnion, "");
+		auto member = LLVMBuildExtractValue(_builders.top().get(), loadedUnion, 1, "");
+
+		auto casted = co_await cast(member, unionMember, component.target, false, std::make_pair(false, true), false, position);
+		phiBlocks.push_back(LLVMGetInsertBlock(_builders.top().get()));
+		phiVals.push_back(casted);
+
+		LLVMBuildBr(_builders.top().get(), doneBlock);
+	}
+
+	// now finish building the "done" block
+	LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+
+	currentStack().endBranch(doneBlock, phiBlocks);
+
+	result = LLVMBuildPhi(_builders.top().get(), co_await translateType(component.target), "");
+	LLVMAddIncoming(result, phiVals.data(), phiBlocks.data(), phiVals.size());
+
+	co_return retVal;
+};
+
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::returnNull() {
 	co_return NULL;
 };
