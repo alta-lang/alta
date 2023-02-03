@@ -354,7 +354,7 @@ namespace AltaLL {
 		LLVMValueRef enterInitFunction();
 		void exitInitFunction();
 
-		LLCoroutine forEachUnionMember(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, std::function<LLCoroutine(LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType)> callback);
+		LLCoroutine forEachUnionMember(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, LLVMTypeRef returnValueType, std::function<LLCoroutine(LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType, size_t memberIndex)> callback);
 
 		inline bool canDestroy(std::shared_ptr<AltaCore::DET::Type> exprType, bool force = false) const {
 			return (

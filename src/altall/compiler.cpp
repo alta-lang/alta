@@ -278,7 +278,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			} else if (component.special == SCT::EmptyOptional) {
 				std::array<LLVMValueRef, 2> vals;
 				vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
-				vals[1] = LLVMGetUndef(co_await translateType(dest->optionalTarget));
+				vals[1] = LLVMGetPoison(co_await translateType(dest->optionalTarget));
 				result = LLVMConstNamedStruct(co_await translateType(dest), vals.data(), vals.size());
 				currentType = dest;
 				copy = false;
@@ -528,22 +528,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			}
 
 			auto func_Alta_bad_cast = _definedFunctions["_Alta_bad_cast"];
-			auto parentFunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
-			std::vector<LLVMBasicBlockRef> phiBlocks;
-			std::vector<LLVMValueRef> phiVals;
-
-			currentStack().beginBranch();
+			auto entryBlock = LLVMGetInsertBlock(_builders.top().get());
+			auto parentFunc = LLVMGetBasicBlockParent(entryBlock);
 
 			// first, add the default (bad cast) block
 			auto badCastBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
-
-			// now start creating the switch
-			if (!result) {
-				throw std::runtime_error("This should be impossible (cast:multicast)");
-			}
-			auto val = LLVMBuildExtractValue(_builders.top().get(), co_await loadRef(result, currentType), 0, "");
-			auto tmpified = co_await tmpify(result, currentType, false);
-			auto switchInstr = LLVMBuildSwitch(_builders.top().get(), val, badCastBlock, currentType->unionOf.size());
 
 			// now move the builder to the bad cast block and build it
 			LLVMPositionBuilderAtEnd(_builders.top().get(), badCastBlock);
@@ -556,44 +545,23 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			LLVMBuildCall2(_builders.top().get(), funcType_Alta_bad_cast, func_Alta_bad_cast, args.data(), args.size(), "");
 			LLVMBuildUnreachable(_builders.top().get());
 
-			// now create the block we go to after we're done here
-			auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
+			LLVMPositionBuilderAtEnd(_builders.top().get(), entryBlock);
 
-			auto idxType = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(currentType->unionOf.size() - 1));
-
-			for (size_t i = 0; i < currentType->unionOf.size(); ++i) {
-				if (component.multicasts[i].second.size() == 0) {
-					LLVMAddCase(switchInstr, LLVMConstInt(idxType, i, false), badCastBlock);
-				} else {
-					auto& unionMember = currentType->unionOf[i];
-					auto thisBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
-					LLVMAddCase(switchInstr, LLVMConstInt(idxType, i, false), thisBlock);
-					LLVMPositionBuilderAtEnd(_builders.top().get(), thisBlock);
-
-					std::array<LLVMTypeRef, 2> members;
-					members[0] = idxType;
-					members[1] = co_await translateType(unionMember);
-					auto llactual = LLVMStructType(members.data(), members.size(), false);
-
-					auto castedUnion = LLVMBuildBitCast(_builders.top().get(), tmpified, LLVMPointerType(llactual, 0), "");
-					auto loadedUnion = LLVMBuildLoad2(_builders.top().get(), llactual, castedUnion, "");
-					auto member = LLVMBuildExtractValue(_builders.top().get(), loadedUnion, 1, "");
-
-					auto casted = co_await cast(member, unionMember, component.target, false, std::make_pair(false, true), false, position);
-					phiBlocks.push_back(LLVMGetInsertBlock(_builders.top().get()));
-					phiVals.push_back(casted);
-
-					LLVMBuildBr(_builders.top().get(), doneBlock);
-				}
+			if (!result) {
+				throw std::runtime_error("This should be impossible (cast:multicast)");
 			}
+			result = co_await forEachUnionMember(result, currentType, co_await translateType(component.target), [&](LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType, size_t memberIndex) -> LLCoroutine {
+				if (component.multicasts[i].second.size() == 0) {
+					LLVMBuildBr(_builders.top().get(), badCastBlock);
+					co_return NULL;
+				} else {
+					auto llmemberType = co_await translateType(memberType);
+					auto member = LLVMBuildLoad2(_builders.top().get(), llmemberType, memberRef, "");
 
-			// now finish building the "done" block
-			LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
-
-			currentStack().endBranch(doneBlock, phiBlocks);
-
-			result = LLVMBuildPhi(_builders.top().get(), co_await translateType(component.target), "");
-			LLVMAddIncoming(result, phiVals.data(), phiBlocks.data(), phiVals.size());
+					auto casted = co_await cast(member, memberType, component.target, false, std::make_pair(false, true), false, position);
+					co_return casted;
+				}
+			});
 
 			currentType = component.target;
 			copy = false;
@@ -647,31 +615,81 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 
 		LLVMValueRef copyFunc = NULL;
 		LLVMTypeRef copyFuncType = NULL;
+		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
 		if (exprType->isUnion()) {
-			auto llunionType = co_await translateType(exprType);
-			std::array<LLVMTypeRef, 1> params { LLVMPointerType(llunionType, 0) };
-			copyFuncType = LLVMFunctionType(llunionType, params.data(), params.size(), false);
+			auto llunionType = co_await translateType(exprType->destroyReferences());
 
-			if (!_definedFunctions["_Alta_copy_" + mangleType(exprType)]) {
-				auto name = "_Alta_copy_" + mangleType(exprType);
-				auto func = LLVMAddFunction(_llmod.get(), name.c_str(), copyFuncType);
-				_definedFunctions["_Alta_copy_" + mangleType(exprType)] = func;
-			}
+			auto idxType = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(exprType->unionOf.size() - 1));
 
-			copyFunc = _definedFunctions["_Alta_copy_" + mangleType(exprType)];
+			result = co_await forEachUnionMember(result, exprType, llunionType, [&](LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType, size_t memberIndex) -> LLCoroutine {
+				auto copied = co_await doCopyCtor(memberRef, memberType->reference(), std::make_pair(true, true), nullptr);
+				auto tmp = LLVMBuildAlloca(_builders.top().get(), llunionType, "");
+
+				std::array<LLVMTypeRef, 2> members;
+				members[0] = idxType;
+				members[1] = co_await translateType(memberType);
+				auto llactual = LLVMStructType(members.data(), members.size(), false);
+
+				auto llactualPtr = LLVMBuildPointerCast(_builders.top().get(), tmp, LLVMPointerType(llactual, 0), "");
+
+				std::array<LLVMValueRef, 2> gepIndices {
+					LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+					LLVMConstInt(gepStructIndexType, 1, false), // the member within the union
+				};
+				auto memberTmpPtr = LLVMBuildGEP2(_builders.top().get(), llactual, llactualPtr, gepIndices.data(), gepIndices.size(), "");
+
+				LLVMBuildStore(_builders.top().get(), copied, memberTmpPtr);
+
+				co_return LLVMBuildLoad2(_builders.top().get(), members[1], memberTmpPtr, "");
+			});
 		} else if (exprType->isOptional) {
-			auto lloptionalType = co_await translateType(exprType);
-			std::array<LLVMTypeRef, 1> params { LLVMPointerType(lloptionalType, 0) };
-			copyFuncType = LLVMFunctionType(lloptionalType, params.data(), params.size(), false);
+			auto lloptionalType = co_await translateType(exprType->destroyReferences());
 
-			if (!_definedFunctions["_Alta_copy_" + mangleType(exprType)]) {
-				auto name = "_Alta_copy_" + mangleType(exprType);
-				auto func = LLVMAddFunction(_llmod.get(), name.c_str(), copyFuncType);
-				_definedFunctions["_Alta_copy_" + mangleType(exprType)] = func;
+			auto entryBlock = LLVMGetInsertBlock(_builders.top().get());
+			auto parentFunc = LLVMGetBasicBlockParent(entryBlock);
+			auto presentBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
+			auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, "");
+
+			auto isPresent = LLVMBuildExtractValue(_builders.top().get(), co_await loadRef(result, exprType), 0, "");
+
+			currentStack().beginBranch();
+
+			LLVMBuildCondBr(_builders.top().get(), isPresent, presentBlock, doneBlock);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), presentBlock);
+			std::array<LLVMValueRef, 2> gepIndices {
+				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+				LLVMConstInt(gepStructIndexType, 1, false), // the value within the optional
+			};
+			auto valRef = LLVMBuildGEP2(_builders.top().get(), lloptionalType, result, gepIndices.data(), gepIndices.size(), "");
+			if (exprType->optionalTarget->referenceLevel() > 0) {
+				valRef = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType->optionalTarget), valRef, "");
 			}
+			auto copied = co_await doCopyCtor(valRef, exprType->optionalTarget->reference(), std::make_pair(true, true), nullptr);
+			std::array<LLVMValueRef, 2> members {
+				LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 1, false),
+				LLVMGetPoison(co_await translateType(exprType->optionalTarget)),
+			};
+			auto wrapped = LLVMBuildInsertValue(_builders.top().get(), LLVMConstNamedStruct(lloptionalType, members.data(), members.size()), copied, 1, "");
 
-			copyFunc = _definedFunctions["_Alta_copy_" + mangleType(exprType)];
+			LLVMBuildBr(_builders.top().get(), doneBlock);
+			auto exitBlock = LLVMGetInsertBlock(_builders.top().get());
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+
+			currentStack().endBranch(doneBlock, { entryBlock, exitBlock });
+
+			std::array<LLVMValueRef, 2> nullMembers {
+				LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false),
+				LLVMGetPoison(co_await translateType(exprType->optionalTarget)),
+			};
+			auto constNull = LLVMConstNamedStruct(lloptionalType, nullMembers.data(), nullMembers.size());
+
+			result = LLVMBuildPhi(_builders.top().get(), lloptionalType, "");
+			LLVMAddIncoming(result, &wrapped, &exitBlock, 1);
+			LLVMAddIncoming(result, &constNull, &entryBlock, 1);
 		} else if (
 			// make sure we have a copy constructor,
 			// otherwise, there's no point in continuing
@@ -1304,7 +1322,7 @@ void AltaLL::Compiler::exitInitFunction() {
 	_stacks.pop_back();
 };
 
-AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, std::function<LLCoroutine(LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType)> callback) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, LLVMTypeRef returnValueType, std::function<LLCoroutine(LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType, size_t memberIndex)> callback) {
 	LLVMValueRef retVal = NULL;
 
 	auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
@@ -1334,7 +1352,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef 
 	auto tmpified = co_await tmpify(expr, type, false);
 	auto switchInstr = LLVMBuildSwitch(_builders.top().get(), val, badEnumBlock, type->unionOf.size());
 
-	// now move the builder to the bad cast block and build it
+	// now move the builder to the bad enum block and build it
 	LLVMPositionBuilderAtEnd(_builders.top().get(), badEnumBlock);
 	auto exprStr = type->toString();
 	std::array<LLVMValueRef, 2> args {
@@ -1363,20 +1381,23 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef 
 		auto llactual = LLVMStructType(members.data(), members.size(), false);
 
 		auto castedUnion = LLVMBuildBitCast(_builders.top().get(), tmpified, LLVMPointerType(llactual, 0), "");
+
 		std::array<LLVMValueRef, 2> gepIndices {
 			LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
 			LLVMConstInt(gepStructIndexType, 1, false), // the union member
 		};
 		auto memberRef = LLVMBuildGEP2(_builders.top().get(), llactual, castedUnion, gepIndices.data(), gepIndices.size(), "");
 
-		auto currVal = co_await callback(memberRef, unionMember);
+		auto currVal = co_await callback(memberRef, unionMember, i);
 
-		auto loadedUnion = LLVMBuildLoad2(_builders.top().get(), llactual, castedUnion, "");
-		auto member = LLVMBuildExtractValue(_builders.top().get(), loadedUnion, 1, "");
-
-		auto casted = co_await cast(member, unionMember, component.target, false, std::make_pair(false, true), false, position);
-		phiBlocks.push_back(LLVMGetInsertBlock(_builders.top().get()));
-		phiVals.push_back(casted);
+		if (returnValueType) {
+			phiBlocks.push_back(LLVMGetInsertBlock(_builders.top().get()));
+			if (currVal) {
+				phiVals.push_back(currVal);
+			} else {
+				phiVals.push_back(LLVMGetPoison(returnValueType));
+			}
+		}
 
 		LLVMBuildBr(_builders.top().get(), doneBlock);
 	}
@@ -1386,8 +1407,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef 
 
 	currentStack().endBranch(doneBlock, phiBlocks);
 
-	result = LLVMBuildPhi(_builders.top().get(), co_await translateType(component.target), "");
-	LLVMAddIncoming(result, phiVals.data(), phiBlocks.data(), phiVals.size());
+	retVal = LLVMBuildPhi(_builders.top().get(), returnValueType, "");
+	LLVMAddIncoming(retVal, phiVals.data(), phiBlocks.data(), phiVals.size());
 
 	co_return retVal;
 };
@@ -1552,7 +1573,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				++llparamIndex;
 			}
 
-			if (var->type->indirectionLevel() == 0) {
+			if (var->type->referenceLevel() == 0) {
 				llparam = co_await tmpify(llparam, var->type, false);
 				currentStack().pushItem(llparam, var->type);
 			}
@@ -2094,7 +2115,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 	} else if (isNullopt) {
 		std::array<LLVMValueRef, 2> vals;
 		vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
-		vals[1] = LLVMGetUndef(co_await translateType(info->targetType->optionalTarget));
+		vals[1] = LLVMGetPoison(co_await translateType(info->targetType->optionalTarget));
 		rhs = LLVMConstNamedStruct(co_await translateType(info->targetType), vals.data(), vals.size());
 	}
 
@@ -2981,7 +3002,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				++llparamIndex;
 			}
 
-			if (var->type->indirectionLevel() == 0) {
+			if (var->type->referenceLevel() == 0) {
 				llparam = co_await tmpify(llparam, var->type, false);
 				currentStack().pushItem(llparam, var->type);
 			}
@@ -2995,7 +3016,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		auto llparam = LLVMGetParam(llfunc, 1);
 		const auto& var = info->method->parameterVariables[0];
 
-		if (var->type->indirectionLevel() == 0) {
+		if (var->type->referenceLevel() == 0) {
 			llparam = co_await tmpify(llparam, var->type, false);
 			currentStack().pushItem(llparam, var->type);
 		}
@@ -3893,7 +3914,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 		const auto& var = info->method->parameterVariables.front();
 		auto llparam = LLVMGetParam(llfunc, 1);
 
-		if (var->type->indirectionLevel() == 0) {
+		if (var->type->referenceLevel() == 0) {
 			llparam = co_await tmpify(llparam, var->type, false);
 			currentStack().pushItem(llparam, var->type);
 		}
@@ -4087,5 +4108,77 @@ void AltaLL::Compiler::finalize() {
 
 		_initFunctionBuilder = nullptr;
 		_initFunctionScopeStack = ALTACORE_NULLOPT;
+	}
+
+	if (_definedFunctions["_Alta_bad_enum"]) {
+		auto llfunc = _definedFunctions["_Alta_bad_enum"];
+
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+		_builders.push(builder);
+
+		auto enumName = LLVMGetParam(llfunc, 0);
+		auto enumIndex = LLVMGetParam(llfunc, 1);
+
+		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+		if (!_definedFunctions["abort"]) {
+			_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
+		}
+
+		LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
+		LLVMBuildUnreachable(_builders.top().get());
+
+		_builders.pop();
+	}
+
+	if (_definedFunctions["_Alta_bad_cast"]) {
+		auto llfunc = _definedFunctions["_Alta_bad_cast"];
+
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+		_builders.push(builder);
+
+		auto enumName = LLVMGetParam(llfunc, 0);
+		auto enumIndex = LLVMGetParam(llfunc, 1);
+
+		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+		if (!_definedFunctions["abort"]) {
+			_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
+		}
+
+		LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
+		LLVMBuildUnreachable(_builders.top().get());
+
+		_builders.pop();
+	}
+
+	if (_definedFunctions["_Alta_get_child"]) {
+		auto llfunc = _definedFunctions["_Alta_get_child"];
+
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+		_builders.push(builder);
+
+		// TODO
+		// for now, just abort
+
+		auto enumName = LLVMGetParam(llfunc, 0);
+		auto enumIndex = LLVMGetParam(llfunc, 1);
+
+		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+		if (!_definedFunctions["abort"]) {
+			_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
+		}
+
+		LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
+		LLVMBuildUnreachable(_builders.top().get());
+
+		_builders.pop();
 	}
 };
