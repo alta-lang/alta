@@ -230,17 +230,28 @@ namespace AltaLL {
 		LLVMValueRef _initFunction = nullptr;
 		ALTACORE_OPTIONAL<ScopeStack> _initFunctionScopeStack = ALTACORE_NULLOPT;
 		LLBuilder _initFunctionBuilder;
+		std::stack<size_t> temporaryIndices;
 
 		inline ScopeStack& currentStack() {
 			return _stacks.back();
 		};
 
 		inline void pushStack(ScopeStack::Type type) {
+			if (type == ScopeStack::Type::Function) {
+				temporaryIndices.push(0);
+			}
 			_stacks.emplace_back(*this, type);
 		};
 
 		inline void popStack() {
+			if (_stacks.back().type == ScopeStack::Type::Function) {
+				temporaryIndices.pop();
+			}
 			_stacks.pop_back();
+		};
+
+		inline size_t nextTemp() {
+			return temporaryIndices.top()++;
 		};
 
 		Coroutine<LLVMTypeRef> translateType(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions = true);
@@ -358,7 +369,7 @@ namespace AltaLL {
 
 		inline bool canDestroy(std::shared_ptr<AltaCore::DET::Type> exprType, bool force = false) const {
 			return (
-				(force || exprType->indirectionLevel() < 1) &&
+				((force && exprType->pointerLevel() < 1) || exprType->indirectionLevel() < 1) &&
 				(
 					(
 						!exprType->isNative &&
