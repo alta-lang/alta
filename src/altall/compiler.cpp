@@ -2446,6 +2446,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(std::shared_ptr<AltaCore::AST::FunctionCallExpression> node, std::shared_ptr<AltaCore::DH::FunctionCallExpression> info) {
 	LLVMValueRef result = NULL;
+	auto tmpIdx = nextTemp();
+	auto tmpIdxStr = std::to_string(tmpIdx);
+
+	bool isVoid = *AltaCore::DET::Type::getUnderlyingType(info.get()) == AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
 
 	if (info->isMethodCall) {
 		result = co_await tmpify(info->methodClassTarget, info->methodClassTargetInfo);
@@ -2502,7 +2506,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 		} else {
 			auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(accInfo->narrowedTo);
 			auto [llfuncType, llfunc] = co_await declareFunction(func);
-			result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), "");
+			result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), isVoid ? "" : ("@method_call_" + tmpIdxStr).c_str());
 		}
 	} else if (!info->targetType->isRawFunction) {
 		auto targetType = info->targetType->destroyReferences();
@@ -2523,27 +2527,27 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 
 		bool isVoid = *targetTypeAsRaw->returnType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
 
-		auto lambdaState = LLVMBuildExtractValue(_builders.top().get(), target, 1, "");
+		auto lambdaState = LLVMBuildExtractValue(_builders.top().get(), target, 1, ("@lambda_state_" + tmpIdxStr).c_str());
 
 		args.insert(args.begin(), lambdaState);
 
-		auto functionPointer = LLVMBuildExtractValue(_builders.top().get(), target, 0, "");
+		auto functionPointer = LLVMBuildExtractValue(_builders.top().get(), target, 0, ("@func_ptr_" + tmpIdxStr).c_str());
 
-		auto lambdaStateIsNotNull = LLVMBuildIsNotNull(_builders.top().get(), lambdaState, "");
+		auto lambdaStateIsNotNull = LLVMBuildIsNotNull(_builders.top().get(), lambdaState, ("@lambda_state_not_null_" + tmpIdxStr).c_str());
 
 		auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
-		auto doLambdaBlock = LLVMAppendBasicBlock(llfunc, "");
-		auto doRawBlock = LLVMAppendBasicBlock(llfunc, "");
-		auto doneBlock = LLVMAppendBasicBlock(llfunc, "");
+		auto doLambdaBlock = LLVMAppendBasicBlock(llfunc, ("@invoke_lambda_" + tmpIdxStr).c_str());
+		auto doRawBlock = LLVMAppendBasicBlock(llfunc, ("@invoke_raw_" + tmpIdxStr).c_str());
+		auto doneBlock = LLVMAppendBasicBlock(llfunc, ("@invoke_done_" + tmpIdxStr).c_str());
 
 		LLVMBuildCondBr(_builders.top().get(), lambdaStateIsNotNull, doLambdaBlock, doRawBlock);
 
 		LLVMPositionBuilderAtEnd(_builders.top().get(), doLambdaBlock);
-		auto lambdaResult = LLVMBuildCall2(_builders.top().get(), lambdaFunctionType, functionPointer, args.data(), args.size(), "");
+		auto lambdaResult = LLVMBuildCall2(_builders.top().get(), lambdaFunctionType, functionPointer, args.data(), args.size(), isVoid ? "" : ("@lambda_call_" + tmpIdxStr).c_str());
 		LLVMBuildBr(_builders.top().get(), doneBlock);
 
 		LLVMPositionBuilderAtEnd(_builders.top().get(), doRawBlock);
-		auto rawResult = LLVMBuildCall2(_builders.top().get(), rawFunctionType, functionPointer, &args.data()[1], args.size() - 1, "");
+		auto rawResult = LLVMBuildCall2(_builders.top().get(), rawFunctionType, functionPointer, &args.data()[1], args.size() - 1, isVoid ? "" : ("@raw_call_" + tmpIdxStr).c_str());
 		LLVMBuildBr(_builders.top().get(), doneBlock);
 
 		LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
@@ -2551,7 +2555,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 		if (isVoid) {
 			result = NULL;
 		} else {
-			result = LLVMBuildPhi(_builders.top().get(), LLVMGetReturnType(rawFunctionType), "");
+			result = LLVMBuildPhi(_builders.top().get(), LLVMGetReturnType(rawFunctionType), ("@fat_func_phi_" + tmpIdxStr).c_str());
 			LLVMAddIncoming(result, &lambdaResult, &doLambdaBlock, 1);
 			LLVMAddIncoming(result, &rawResult, &doRawBlock, 1);
 		}
@@ -2561,7 +2565,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 		if (!result) {
 			throw std::runtime_error("Call target is null?");
 		}
-		result = LLVMBuildCall2(_builders.top().get(), funcType, result, args.data(), args.size(), "");
+		result = LLVMBuildCall2(_builders.top().get(), funcType, result, args.data(), args.size(), isVoid ? "" : ("@call_" + tmpIdxStr).c_str());
 	}
 
 	co_return result;
@@ -2753,17 +2757,17 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 		_builders.push(llwrap(LLVMCreateBuilderInContext(_llcontext.get())));
 		pushStack(ScopeStack::Type::Function);
 
-		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "");
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "@entry");
 		LLVMPositionBuilderAtEnd(_builders.top().get(), entryBlock);
 
 		auto llself = LLVMGetParam(initFunc, 0);
 		auto llisRoot = LLVMGetParam(initFunc, 1);
 		auto llshouldInitMembers = LLVMGetParam(initFunc, 2);
 
-		auto initInfosBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "");
-		auto initMembersBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "");
-		auto doMemberInitBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "");
-		auto exitBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "");
+		auto initInfosBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "@init_infos");
+		auto initMembersBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "@init_members");
+		auto doMemberInitBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "@do_member_init");
+		auto exitBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "@exit");
 
 		LLVMBuildCondBr(_builders.top().get(), llisRoot, initInfosBlock, initMembersBlock);
 
@@ -3125,12 +3129,16 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 	LLVMSetLinkage(llfunc, LLVMInternalLinkage);
 
-	auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+	auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
 	auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 	LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
 	_builders.push(builder);
 	pushStack(ScopeStack::Type::Function);
+
+	if (isCtor || isTo || isDtor) {
+		LLVMSetValueName(LLVMGetParam(llfunc, 0), "@this");
+	}
 
 	if (isCtor) {
 		size_t llparamIndex = 1;
@@ -3144,10 +3152,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 			LLVMValueRef llparamLen = NULL;
 
+			LLVMSetValueName(llparam, ((param->isVariable ? "@len_" : "") + param->name).c_str());
+
 			if (param->isVariable) {
 				llparamLen = llparam;
 				llparam = LLVMGetParam(llfunc, llparamIndex);
 				++llparamIndex;
+
+				LLVMSetValueName(llparam, param->name.c_str());
 			}
 
 			if (var->type->referenceLevel() == 0) {
@@ -3243,8 +3255,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				LLVMConstInt(gepStructIndexType, 1 + info->klass->parents.size() + i, false), // the member
 			};
 
-			auto selfMember = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), "");
-			auto sourceMember = LLVMBuildGEP2(_builders.top().get(), llclassType, llsource, gepIndices.data(), gepIndices.size(), "");
+			auto selfMember = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), ("@this_" + member->name).c_str());
+			auto sourceMember = LLVMBuildGEP2(_builders.top().get(), llclassType, llsource, gepIndices.data(), gepIndices.size(), ("@that_" + member->name).c_str());
 
 			if (member->type->indirectionLevel() > 0) {
 				LLVMBuildStore(_builders.top().get(), LLVMBuildLoad2(_builders.top().get(), co_await translateType(member->type), sourceMember, ""), selfMember);
@@ -3273,7 +3285,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				LLVMConstInt(gepStructIndexType, 1 + info->klass->parents.size() + i, false), // the member
 			};
 
-			auto llmember = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), "");
+			auto llmember = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), ("@this_" + member->name).c_str());
 
 			if (member->type->indirectionLevel() == 0) {
 				co_await doDtor(llmember, member->type);
@@ -3312,7 +3324,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				LLVMConstInt(gepStructIndexType, 1 + i, false), // the parent
 			};
 
-			auto llparent = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), "");
+			auto llparent = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), ("@this@parent_" + mangleName(parent)).c_str());
 
 			std::array<LLVMValueRef, 1> dtorArgs {
 				llparent,
@@ -3353,7 +3365,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		auto llfuncReturnsInstance = llfunc2;
 		auto llfuncTypeReturnsInstance = llfuncType2;
 
-		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc2, "");
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc2, "@entry");
 		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
@@ -3367,7 +3379,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 			llboolType,
 		};
 
-		auto instance = LLVMBuildAlloca(_builders.top().get(), llclassType, "");
+		auto instance = LLVMBuildAlloca(_builders.top().get(), llclassType, "@this");
 		auto initFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), initFuncParams.data(), initFuncParams.size(), false);
 		auto initFunc = _definedFunctions["_init_" + info->klass->id];
 
@@ -3404,13 +3416,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 		llfunc2 = _definedFunctions[methodID2];
 
-		entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc2, "");
+		entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc2, "@entry");
 		builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
 		_builders.push(builder);
 
-		instance = LLVMBuildMalloc(_builders.top().get(), llclassType, "");
+		instance = LLVMBuildMalloc(_builders.top().get(), llclassType, "@this");
 
 		args.clear();
 		args.push_back(instance);
@@ -3431,7 +3443,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		if (info->isCastConstructor) {
 			auto [castFuncType, castFunc] = co_await declareFunction(info->correspondingMethod);
 
-			auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), castFunc, "");
+			auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), castFunc, "@entry");
 			auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
