@@ -177,6 +177,8 @@ namespace AltaLL {
 				LLVMBasicBlockRef sourceBlock = nullptr;
 				LLVMValueRef source = nullptr;
 				std::shared_ptr<AltaCore::DET::Type> type = nullptr;
+				LLVMValueRef count = nullptr;
+				LLVMTypeRef countType = nullptr;
 			};
 
 			std::vector<ScopeItem> items;
@@ -208,6 +210,8 @@ namespace AltaLL {
 
 			void pushItem(LLVMValueRef memory, std::shared_ptr<AltaCore::DET::Type> type);
 			void pushItem(LLVMValueRef memory, std::shared_ptr<AltaCore::DET::Type> type, LLVMBasicBlockRef sourceBlock);
+			void pushRuntimeArray(LLVMValueRef array, LLVMValueRef count, std::shared_ptr<AltaCore::DET::Type> elementType, LLVMTypeRef countType, LLVMBasicBlockRef sourceBlock);
+			void pushRuntimeArray(LLVMValueRef array, LLVMValueRef count, std::shared_ptr<AltaCore::DET::Type> elementType, LLVMTypeRef countType);
 
 			void beginBranch() {
 				sizesDuringBranching.push(items.size());

@@ -53,17 +53,30 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::endBranch(LLVMBa
 		auto tmpIdxStr = std::to_string(tmpIdx);
 
 		auto merged = LLVMBuildPhi(compiler._builders.top().get(), lltype, ("@stack_branch_phi_" + tmpIdxStr + "_item_" + std::to_string(i)).c_str());
+		LLVMValueRef countMerged = nullptr;
+		LLVMValueRef countNullVal = item.countType ? LLVMConstNull(item.countType) : nullptr;
+
+		if (item.count) {
+			countMerged = LLVMBuildPhi(compiler._builders.top().get(), lltype, ("@stack_branch_phi_" + tmpIdxStr + "_count_" + std::to_string(i)).c_str());
+		}
 
 		for (size_t j = 0; j < mergingBlocks.size(); ++j) {
 			if (mergingBlocks[j] == item.sourceBlock) {
 				LLVMAddIncoming(merged, &item.source, &mergingBlocks[j], 1);
+				if (item.count) {
+					LLVMAddIncoming(countMerged, &item.count, &mergingBlocks[j], 1);
+				}
 			} else {
 				LLVMAddIncoming(merged, &nullVal, &mergingBlocks[j], 1);
+				if (item.count) {
+					LLVMAddIncoming(countMerged, &countNullVal, &mergingBlocks[j], 1);
+				}
 			}
 		}
 
 		item.sourceBlock = mergeBlock;
 		item.source = merged;
+		item.count = countMerged;
 	}
 
 	co_return;
@@ -86,10 +99,10 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::cleanup() {
 			continue;
 		}
 
-		if (LLVMIsAPHINode(item.source)) {
-			auto tmpIdx = compiler.nextTemp();
-			auto tmpIdxStr = std::to_string(tmpIdx);
+		auto tmpIdx = compiler.nextTemp();
+		auto tmpIdxStr = std::to_string(tmpIdx);
 
+		if (LLVMIsAPHINode(item.source)) {
 			// we need to check if it's non-null
 			auto isNotNull = LLVMBuildIsNotNull(compiler._builders.top().get(), item.source, ("@stack_cleanup_is_not_null_" + tmpIdxStr).c_str());
 			auto notNullBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), llfunc, ("@stack_cleanup_not_null_" + tmpIdxStr).c_str());
@@ -101,11 +114,50 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::cleanup() {
 			LLVMPositionBuilderAtEnd(compiler._builders.top().get(), notNullBlock);
 		}
 
-		co_await compiler.doDtor(item.source, item.type, nullptr, false);
+		if (item.count) {
+			if (!doneBlock) {
+				doneBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), llfunc, ("@stack_cleanup_done_" + tmpIdxStr).c_str());
+			}
+
+			auto counter = LLVMBuildAlloca(compiler._builders.top().get(), item.countType, ("@stack_cleanup_" + tmpIdxStr + "_counter").c_str());
+			LLVMBuildStore(compiler._builders.top().get(), LLVMConstInt(item.countType, 0, false), counter);
+
+			auto condBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), llfunc, ("@stack_cleanup_" + tmpIdxStr + "_cond").c_str());
+			auto bodyBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), llfunc, ("@stack_cleanup_" + tmpIdxStr + "_body").c_str());
+
+			LLVMBuildBr(compiler._builders.top().get(), condBlock);
+
+			LLVMPositionBuilderAtEnd(compiler._builders.top().get(), condBlock);
+
+			auto counterVal = LLVMBuildLoad2(compiler._builders.top().get(), item.countType, counter, ("@stack_cleanup_" + tmpIdxStr + "_counter_val").c_str());
+			auto shouldDoIter = LLVMBuildICmp(compiler._builders.top().get(), LLVMIntULT, counterVal, item.count, ("@stack_cleanup_" + tmpIdxStr + "_should_do_iter").c_str());
+
+			LLVMBuildCondBr(compiler._builders.top().get(), shouldDoIter, bodyBlock, doneBlock);
+
+			LLVMPositionBuilderAtEnd(compiler._builders.top().get(), bodyBlock);
+
+			std::array<LLVMValueRef, 1> gepIndices {
+				counterVal,
+			};
+			auto elmRef = LLVMBuildGEP2(compiler._builders.top().get(), co_await compiler.translateType(item.type), item.source, gepIndices.data(), gepIndices.size(), ("@stack_cleanup_" + tmpIdxStr + "_elm_ref").c_str());
+
+			co_await compiler.doDtor(elmRef, item.type, nullptr, false);
+
+			auto inc = LLVMBuildAdd(compiler._builders.top().get(), counterVal, LLVMConstInt(item.countType, 1, false), ("@stack_cleanup_" + tmpIdxStr + "_counter_inc").c_str());
+			LLVMBuildStore(compiler._builders.top().get(), inc, counter);
+
+			LLVMBuildBr(compiler._builders.top().get(), condBlock);
+		} else {
+			co_await compiler.doDtor(item.source, item.type, nullptr, false);
+		}
 
 		if (LLVMIsAPHINode(item.source)) {
-			LLVMBuildBr(compiler._builders.top().get(), doneBlock);
+			if (!item.count) {
+				LLVMBuildBr(compiler._builders.top().get(), doneBlock);
+			}
+		}
 
+		if (doneBlock) {
 			LLVMPositionBuilderAtEnd(compiler._builders.top().get(), doneBlock);
 		}
 	}
@@ -118,7 +170,15 @@ void AltaLL::Compiler::ScopeStack::pushItem(LLVMValueRef memory, std::shared_ptr
 };
 
 void AltaLL::Compiler::ScopeStack::pushItem(LLVMValueRef memory, std::shared_ptr<AltaCore::DET::Type> type, LLVMBasicBlockRef sourceBlock) {
-	items.emplace_back(ScopeItem { sourceBlock, memory, type });
+	items.emplace_back(ScopeItem { sourceBlock, memory, type, nullptr, nullptr });
+};
+
+void AltaLL::Compiler::ScopeStack::pushRuntimeArray(LLVMValueRef array, LLVMValueRef count, std::shared_ptr<AltaCore::DET::Type> elementType, LLVMTypeRef countType) {
+	pushRuntimeArray(array, count, elementType, countType, LLVMGetInsertBlock(compiler._builders.top().get()));
+};
+
+void AltaLL::Compiler::ScopeStack::pushRuntimeArray(LLVMValueRef array, LLVMValueRef count, std::shared_ptr<AltaCore::DET::Type> elementType, LLVMTypeRef countType, LLVMBasicBlockRef sourceBlock) {
+	items.emplace_back(ScopeItem { sourceBlock, array, elementType, count, countType });
 };
 
 AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions) {
@@ -202,24 +262,26 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::sh
 	} else if (type->isUnion()) {
 		std::array<LLVMTypeRef, 2> members;
 		size_t unionSize = 0;
-		size_t alignment = 0;
 
 		members[0] = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(type->unionOf.size() - 1));
 
+		auto tagSize = LLVMStoreSizeOfType(_targetData.get(), members[0]);
+
 		for (const auto& component: type->unionOf) {
 			auto lltype = co_await translateType(component);
-			auto llsize = LLVMStoreSizeOfType(_targetData.get(), lltype);
-			auto llalign = LLVMPreferredAlignmentOfType(_targetData.get(), lltype);
-			if (llsize > unionSize) {
-				unionSize = llsize;
-			}
-			if (llalign > alignment) {
-				alignment = llalign;
+
+			members[1] = lltype;
+			auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+			members[1] = nullptr;
+
+			auto lltotalSize = LLVMStoreSizeOfType(_targetData.get(), tmpStruct);
+
+			if (lltotalSize > unionSize) {
+				unionSize = lltotalSize;
 			}
 		}
 
-		// FIXME: we need to take into account the right alignment for members
-		members[1] = LLVMArrayType(LLVMInt8TypeInContext(_llcontext.get()), unionSize);
+		members[1] = LLVMArrayType(LLVMInt8TypeInContext(_llcontext.get()), unionSize - tagSize);
 
 		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 	} else if (type->isOptional) {
@@ -657,7 +719,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 		}
 	} else {
 		if (additionalCopyInfo.second && exprType->indirectionLevel() < 1) {
-			result = co_await tmpify(result, exprType);
+			// XXX: check this; not sure if we should put it on the stack or not
+			result = co_await tmpify(result, exprType, false);
 			exprType = exprType->reference();
 		}
 
@@ -1723,9 +1786,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				LLVMSetValueName(llparam, param->name.c_str());
 			}
 
-			if (var->type->referenceLevel() == 0) {
+			if (var->type->referenceLevel() == 0 && !param->isVariable) {
 				llparam = co_await tmpify(llparam, var->type, false);
 				currentStack().pushItem(llparam, var->type);
+			} else if (param->isVariable) {
+				currentStack().pushRuntimeArray(llparam, llparamLen, var->type, LLVMInt64TypeInContext(_llcontext.get()));
 			}
 
 			_definedVariables[var->id] = llparam;
@@ -2096,7 +2161,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 			std::array<LLVMValueRef, 2> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false),     // access the first "array" item
-				LLVMConstInt(gepStructIndexType, index, false), // access the member
+				LLVMConstInt(gepStructIndexType, index + (varClass->isStructure ? 0 : 1) + varClass->parents.size(), false), // access the member
 			};
 
 			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->targetType->destroyIndirection()), result, gepIndices.data(), gepIndices.size(), ("@member_access_" + tmpIdxStr).c_str());
@@ -2280,13 +2345,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 		}
 	}
 
-	if (canCopy) {
-		rhs = co_await cast(rhs, rhsType, rhsTargetType, true, additionalCopyInfo(node->value, info->value), false, &node->value->position);
-	} else if (isNullopt) {
+	if (isNullopt) {
 		std::array<LLVMValueRef, 2> vals;
 		vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
 		vals[1] = LLVMGetPoison(co_await translateType(info->targetType->optionalTarget));
 		rhs = LLVMConstNamedStruct(co_await translateType(info->targetType), vals.data(), vals.size());
+	} else if (!info->strict) {
+		rhs = co_await cast(rhs, rhsType, rhsTargetType, canCopy, additionalCopyInfo(node->value, info->value), false, &node->value->position);
 	}
 
 	if (canDestroyVar) {
@@ -3192,9 +3257,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				LLVMSetValueName(llparam, param->name.c_str());
 			}
 
-			if (var->type->referenceLevel() == 0) {
+			if (var->type->referenceLevel() == 0 && !param->isVariable) {
 				llparam = co_await tmpify(llparam, var->type, false);
 				currentStack().pushItem(llparam, var->type);
+			} else if (param->isVariable) {
+				currentStack().pushRuntimeArray(llparam, llparamLen, var->type, LLVMInt64TypeInContext(_llcontext.get()));
 			}
 
 			_definedVariables[var->id] = llparam;
@@ -3685,8 +3752,41 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDereferenceExpression(std
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileWhileLoopStatement(std::shared_ptr<AltaCore::AST::WhileLoopStatement> node, std::shared_ptr<AltaCore::DH::WhileLoopStatement> info) {
-	// TODO
-	std::cerr << "TODO: WhileLoopStatement" << std::endl;
+	auto tmpIdx = nextTemp();
+	auto tmpIdxStr = std::to_string(tmpIdx);
+
+	auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+
+	auto condBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@while_" + tmpIdxStr + "_cond").c_str());
+	auto bodyBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@while_" + tmpIdxStr + "_body").c_str());
+	auto endBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@while_" + tmpIdxStr + "_end").c_str());
+	auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@while_" + tmpIdxStr + "_done").c_str());
+
+	LLVMBuildBr(_builders.top().get(), condBlock);
+
+	pushStack(ScopeStack::Type::Other);
+
+	LLVMPositionBuilderAtEnd(_builders.top().get(), condBlock);
+
+	auto cond = co_await compileNode(node->test, info->test);
+	auto asBool = co_await cast(cond, AltaCore::DET::Type::getUnderlyingType(info->test.get()), std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Bool), false, additionalCopyInfo(node->test, info->test), false, &node->test->position);
+
+	LLVMBuildCondBr(_builders.top().get(), asBool, bodyBlock, endBlock);
+
+	// build the end block now to avoid having to use startBranch/endBranch
+	LLVMPositionBuilderAtEnd(_builders.top().get(), endBlock);
+	co_await currentStack().cleanup();
+	LLVMBuildBr(_builders.top().get(), doneBlock);
+
+	LLVMPositionBuilderAtEnd(_builders.top().get(), bodyBlock);
+	co_await compileNode(node->body, info->body);
+	co_await currentStack().cleanup();
+	LLVMBuildBr(_builders.top().get(), condBlock);
+
+	popStack();
+
+	LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+
 	co_return NULL;
 };
 
