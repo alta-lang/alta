@@ -4056,7 +4056,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 		auto counterType = co_await translateType(info->counterType->type);
 		auto llcounter = LLVMBuildLoad2(_builders.top().get(), co_await translateType(info->counterType->type), startVar, ("@ranged_for_" + tmpIdxStr + "_counter_load").c_str());
 		bool isFP = info->counterType->type->isFloatingPoint();
-		auto llone = isFP ? LLVMConstReal(counterType, 0) : LLVMConstInt(counterType, 1, false);
+		auto llone = isFP ? LLVMConstReal(counterType, 1) : LLVMConstInt(counterType, 1, false);
 		auto llop = LLVMBuildBinOp(_builders.top().get(), node->decrement ? (isFP ? LLVMFSub : LLVMSub) : (isFP ? LLVMFAdd : LLVMAdd), llcounter, llone, ("@ranged_for_" + tmpIdxStr + (node->decrement ? "_dec" : "_inc")).c_str());
 		LLVMBuildStore(_builders.top().get(), llop, startVar);
 		LLVMBuildBr(_builders.top().get(), condBlock);

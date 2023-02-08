@@ -17,6 +17,9 @@ std::string AltaLL::cTypeNameify(std::shared_ptr<AltaCore::DET::Type> type, bool
 		}
 		for (auto& [name, param, isVariable, id]: type->parameters) {
 			result += '_';
+			if (isVariable) {
+				result += "$variable_";
+			}
 			auto target = isVariable ? param->point() : param;
 			result += mangleType(target);
 		}
