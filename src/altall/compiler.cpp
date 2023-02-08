@@ -1308,14 +1308,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doChildRetrieval(LLVMValueRef ex
 	co_return result;
 };
 
-AltaLL::Compiler::LLCoroutine AltaLL::Compiler::tmpify(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, bool withStack) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::tmpify(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, bool withStack, bool tmpifyRef) {
 	if (_inGenerator) {
 		throw std::runtime_error("TODO: tmpify in generators");
 	}
 
 	auto result = expr;
 
-	if (type->referenceLevel() == 0) {
+	if (type->referenceLevel() == 0 || tmpifyRef) {
 		auto adjustedType = type->deconstify();
 		auto lltype = co_await translateType(adjustedType);
 
@@ -1786,9 +1786,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				LLVMSetValueName(llparam, param->name.c_str());
 			}
 
-			if (var->type->referenceLevel() == 0 && !param->isVariable) {
-				llparam = co_await tmpify(llparam, var->type, false);
+			if (!param->isVariable) {
+				llparam = co_await tmpify(llparam, var->type, false, true);
 				currentStack().pushItem(llparam, var->type);
+				LLVMSetValueName(llparam, (param->name + "@on_stack").c_str());
 			} else if (param->isVariable) {
 				currentStack().pushRuntimeArray(llparam, llparamLen, var->type, LLVMInt64TypeInContext(_llcontext.get()));
 			}
@@ -1978,7 +1979,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 	}
 
 	if (!inModuleRoot && !_stacks.empty()) {
-		currentStack().pushItem(memory, info->variable->type);
+		currentNonTemporaryStack().pushItem(memory, info->variable->type);
 	}
 
 	if (node->initializationExpression) {
@@ -2266,7 +2267,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 		}
 	} else if (info->narrowedTo->nodeType() == AltaCore::DET::NodeType::Variable) {
 		auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(info->narrowedTo);
-		auto varType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(var)->destroyReferences());
+		auto varType = co_await translateType(var->type);
 
 		if (!result) {
 			if (_definedVariables[var->id]) {
@@ -2289,6 +2290,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 			auto mangled = mangleName(var);
 			_definedVariables[var->id] = LLVMAddGlobal(_llmod.get(), varType, mangled.c_str());
 			result = _definedVariables[var->id];
+		}
+
+		if (var->type->referenceLevel() > 0) {
+			result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@fetch_ref_" + tmpIdxStr).c_str());
 		}
 	}
 
@@ -2352,6 +2357,35 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 		rhs = LLVMConstNamedStruct(co_await translateType(info->targetType), vals.data(), vals.size());
 	} else if (!info->strict) {
 		rhs = co_await cast(rhs, rhsType, rhsTargetType, canCopy, additionalCopyInfo(node->value, info->value), false, &node->value->position);
+	}
+
+	if (!info->operatorMethod) {
+		LLVMOpcode binop = static_cast<LLVMOpcode>(0);
+		auto isFP = rhsTargetType->isFloatingPoint();
+		auto isSigned = rhsTargetType->isSigned();
+
+		switch (info->type) {
+			case AltaCore::Shared::AssignmentType::Simple:         binop = LLVMStore; break;
+			case AltaCore::Shared::AssignmentType::Addition:       binop = isFP ? LLVMFAdd : LLVMAdd; break;
+			case AltaCore::Shared::AssignmentType::Subtraction:    binop = isFP ? LLVMFSub : LLVMSub; break;
+			case AltaCore::Shared::AssignmentType::Multiplication: binop = isFP ? LLVMFMul : LLVMMul; break;
+			case AltaCore::Shared::AssignmentType::Division:       binop = isFP ? LLVMFDiv : (isSigned ? LLVMSDiv : LLVMUDiv); break;
+			case AltaCore::Shared::AssignmentType::Modulo:         binop = isFP ? LLVMFRem : (isSigned ? LLVMSRem : LLVMURem); break;
+			case AltaCore::Shared::AssignmentType::LeftShift:      binop = LLVMShl; break;
+			case AltaCore::Shared::AssignmentType::RightShift:     binop = isSigned ? LLVMAShr : LLVMLShr; break;
+			case AltaCore::Shared::AssignmentType::BitwiseAnd:     binop = LLVMAnd; break;
+			case AltaCore::Shared::AssignmentType::BitwiseOr:      binop = LLVMOr; break;
+			case AltaCore::Shared::AssignmentType::BitwiseXor:     binop = LLVMXor; break;
+		}
+
+		if (binop == static_cast<LLVMOpcode>(0)) {
+			throw std::runtime_error("Invalid assignment type");
+		}
+
+		if (binop != LLVMStore) {
+			auto lhsDeref = co_await loadRef(lhs, info->targetType);
+			rhs = LLVMBuildBinOp(_builders.top().get(), binop, lhsDeref, rhs, ("@assignment_operator_" + tmpIdxStr + "_binop").c_str());
+		}
 	}
 
 	if (canDestroyVar) {
@@ -3257,9 +3291,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				LLVMSetValueName(llparam, param->name.c_str());
 			}
 
-			if (var->type->referenceLevel() == 0 && !param->isVariable) {
-				llparam = co_await tmpify(llparam, var->type, false);
+			if (!param->isVariable) {
+				llparam = co_await tmpify(llparam, var->type, false, true);
 				currentStack().pushItem(llparam, var->type);
+				LLVMSetValueName(llparam, (param->name + "@on_stack").c_str());
 			} else if (param->isVariable) {
 				currentStack().pushRuntimeArray(llparam, llparamLen, var->type, LLVMInt64TypeInContext(_llcontext.get()));
 			}
@@ -3273,10 +3308,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		auto llparam = LLVMGetParam(llfunc, 1);
 		const auto& var = info->method->parameterVariables[0];
 
-		if (var->type->referenceLevel() == 0) {
-			llparam = co_await tmpify(llparam, var->type, false);
-			currentStack().pushItem(llparam, var->type);
-		}
+		LLVMSetValueName(llparam, "@val");
+
+		llparam = co_await tmpify(llparam, var->type, false, true);
+		currentStack().pushItem(llparam, var->type);
+		LLVMSetValueName(llparam, "@val@on_stack");
 
 		_definedVariables[var->id] = llparam;
 	}
@@ -4228,14 +4264,17 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 	_builders.push(builder);
 	pushStack(ScopeStack::Type::Function);
 
+	LLVMSetValueName(LLVMGetParam(llfunc, 0), "@this");
+
 	if (info->method->parameterVariables.size() > 0) {
 		const auto& var = info->method->parameterVariables.front();
 		auto llparam = LLVMGetParam(llfunc, 1);
 
-		if (var->type->referenceLevel() == 0) {
-			llparam = co_await tmpify(llparam, var->type, false);
-			currentStack().pushItem(llparam, var->type);
-		}
+		LLVMSetValueName(llparam, "@value");
+
+		llparam = co_await tmpify(llparam, var->type, false, true);
+		currentStack().pushItem(llparam, var->type);
+		LLVMSetValueName(llparam, "@value@on_stack");
 
 		_definedVariables[var->id] = llparam;
 	}

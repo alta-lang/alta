@@ -240,6 +240,15 @@ namespace AltaLL {
 			return _stacks.back();
 		};
 
+		inline ScopeStack& currentNonTemporaryStack() {
+			for (auto rit = _stacks.rbegin(); rit != _stacks.rend(); ++rit) {
+				if (rit->type != ScopeStack::Type::Temporary) {
+					return *rit;
+				}
+			}
+			throw std::runtime_error("No non-temporary stack?");
+		};
+
 		inline void pushStack(ScopeStack::Type type) {
 			if (type == ScopeStack::Type::Function) {
 				temporaryIndices.push(0);
@@ -358,7 +367,7 @@ namespace AltaLL {
 		LLCoroutine doParentRetrieval(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, std::shared_ptr<AltaCore::DET::Type> targetType, bool* didRetrieval = nullptr);
 		LLCoroutine doChildRetrieval(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, std::shared_ptr<AltaCore::DET::Type> targetType, bool* didRetrieval = nullptr);
 
-		LLCoroutine tmpify(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, bool withStack = true);
+		LLCoroutine tmpify(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, bool withStack = true, bool tmpifyRef = false);
 		LLCoroutine tmpify(std::shared_ptr<AltaCore::AST::ExpressionNode> expr, std::shared_ptr<AltaCore::DH::ExpressionNode> info);
 
 		Coroutine<void> processArgs(std::vector<ALTACORE_VARIANT<std::pair<std::shared_ptr<AltaCore::AST::ExpressionNode>, std::shared_ptr<AltaCore::DH::ExpressionNode>>, std::vector<std::pair<std::shared_ptr<AltaCore::AST::ExpressionNode>, std::shared_ptr<AltaCore::DH::ExpressionNode>>>>> adjustedArguments, std::vector<std::tuple<std::string, std::shared_ptr<AltaCore::DET::Type>, bool, std::string>> parameters, AltaCore::Errors::Position* position, std::vector<LLVMValueRef>& outputArgs);
