@@ -3,6 +3,7 @@
 
 #include <llvm-c/Core.h>
 #include <llvm-c/TargetMachine.h>
+#include <llvm-c/DebugInfo.h>
 #include <memory>
 #include <string>
 
@@ -23,6 +24,7 @@ namespace AltaLL {
 	ALTALL_LLWRAP_DEF(TargetMachine);
 	ALTALL_LLWRAP_DEF(TargetData);
 	ALTALL_LLWRAP_DEF(PassManager);
+	ALTALL_LLWRAP_DEF(DIBuilder);
 
 	static inline std::string wrapMessage(char* msg) {
 		std::string str(msg);

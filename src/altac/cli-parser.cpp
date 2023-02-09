@@ -137,7 +137,7 @@ const CLI::Parser& CLI::Parser::parse(int argCount, char** argArray) const {
       std::cout << std::endl;
       std::cout << "All options:" << std::endl;
       for (auto& option: options) {
-        if (option->isUnnamed()) continue;
+        if (option->isUnnamed() || option->hidden()) continue;
         std::cout << tab(1);
         if (!option->shortID().empty()) {
           std::cout << separator() << option->shortID();

@@ -7,6 +7,8 @@
 // DEBUGGING/DEVELOPMENT
 #include <iostream>
 
+#define ALTA_COMPILER_NAME "altac_llvm"
+
 using namespace std::literals;
 
 static ALTACORE_MAP<std::string, bool> varargTable;
@@ -4352,6 +4354,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAwaitExpression(std::shar
 };
 
 void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
+	_currentFile = root->info->module->path;
+
+	auto filenameStr = _currentFile.filename();
+	auto dirnameStr = _currentFile.dirname().toString();
+	_debugFiles[_currentFile] = LLVMDIBuilderCreateFile(_debugBuilder.get(), filenameStr.c_str(), filenameStr.size(), dirnameStr.c_str(), dirnameStr.size());
+	_compileUnits[_currentFile] = LLVMDIBuilderCreateCompileUnit(_debugBuilder.get(), LLVMDWARFSourceLanguageC, currentDebugFile(), ALTA_COMPILER_NAME, sizeof(ALTA_COMPILER_NAME), /* TODO */ false, "", 0, 0x01000000, "", 0, LLVMDWARFEmissionFull, 0, true, false, "", 0, "", 0);
+
 	if (!_definedTypes["_Alta_class_destructor"]) {
 		std::array<LLVMTypeRef, 1> dtorParams {
 			LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0),
@@ -4454,6 +4463,8 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto co = compileNode(root->statements[i], root->info->statements[i]);
 		co.coroutine.resume();
 	}
+
+	_currentFile = {};
 };
 
 void AltaLL::Compiler::finalize() {
@@ -4542,4 +4553,6 @@ void AltaLL::Compiler::finalize() {
 
 		_builders.pop();
 	}
+
+	LLVMDIBuilderFinalize(_debugBuilder.get());
 };

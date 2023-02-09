@@ -20,7 +20,7 @@ void AltaLL::finit() {
 	// nothing for now
 };
 
-void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Filesystem::Path binaryOutputPath) {
+void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Filesystem::Path binaryOutputPath, bool debug) {
 	auto llcontext = llwrap(LLVMContextCreate());
 	auto llmod = llwrap(LLVMModuleCreateWithNameInContext("alta_product", llcontext.get()));
 	std::string defaultTriple = wrapMessage(LLVMGetDefaultTargetTriple());
@@ -44,7 +44,7 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 		throw std::runtime_error("Failed to get target");
 	}
 
-	auto targetMachine = llwrap(LLVMCreateTargetMachine(rawTarget, defaultTriple.c_str(), hostCPU.c_str(), hostCPUFeatures.c_str(), LLVMCodeGenLevelDefault, LLVMRelocPIC, LLVMCodeModelDefault));
+	auto targetMachine = llwrap(LLVMCreateTargetMachine(rawTarget, defaultTriple.c_str(), hostCPU.c_str(), hostCPUFeatures.c_str(), debug ? LLVMCodeGenLevelNone : LLVMCodeGenLevelDefault, LLVMRelocPIC, LLVMCodeModelDefault));
 	auto targetData = llwrap(LLVMCreateTargetDataLayout(targetMachine.get()));
 
 	LLVMSetModuleDataLayout(llmod.get(), targetData.get());

@@ -342,18 +342,6 @@ int main(int argc, char** argv) {
 
     CLI::Parser parser("altac", "The Alta compiler", Alta::Version::version);
 
-    auto compileSwitch = Option()
-      .shortID('c')
-      .longID("compile")
-      .description("Whether to compile the generated C code with CMake after transpilation")
-      ;
-    auto generatorArg = Option()
-      .shortID('g')
-      .longID("cmake-generator")
-      .description("The generator to use with CMake when compiling code. Only has meaning when `-c` is specified")
-      .valueDescription("CMake Generator ID string")
-      .defaultValue("")
-      ;
     auto verboseSwitch = Option()
       .shortID('v')
       .longID("verbose")
@@ -375,6 +363,7 @@ int main(int argc, char** argv) {
       .shortID("bm")
       .longID("benchmark")
       .description("Whether to time each section of code processing and report the result")
+      .hidden(true)
       ;
     auto runtimeInitializer = Option()
       .shortID("ri")
@@ -430,12 +419,10 @@ int main(int argc, char** argv) {
     auto buildForDebugSwitch = Option()
       .shortID("d")
       .longID("debug")
-      .description("Builds the binary for debugging. This will set the CMake variable \"CMAKE_BUILD_TYPE\" to \"Debug\" (by default, it is set to \"Release\"). Note that some CMake generators ignore this variable. Running the Alta compiler with the `-c` switch (to compile the code after generating it) and with this switch will automatically handle those generators and build for debug.")
+      .description("Compiles the code for debugging. This not only adds debug information to the output, but it also disables optimizations to allow the output to reflect the source as closely as possible.")
       ;
 
     parser
-      .add(compileSwitch)
-      .add(generatorArg)
       .add(verboseSwitch)
       .add(outdirPath)
       .add(filenameString)
@@ -888,7 +875,7 @@ int main(int argc, char** argv) {
       AltaCore::Filesystem::mkdirp(outDir); // ensure the output directory has been created
 
       try {
-        AltaLL::compile(root, outDir / target.name);
+        AltaLL::compile(root, outDir / target.name, buildForDebug);
       } catch (AltaCore::Errors::ValidationError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed to compile" << CLI::COLOR_NORMAL << std::endl;
         logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));

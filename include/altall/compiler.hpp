@@ -235,6 +235,30 @@ namespace AltaLL {
 		ALTACORE_OPTIONAL<ScopeStack> _initFunctionScopeStack = ALTACORE_NULLOPT;
 		LLBuilder _initFunctionBuilder;
 		std::stack<size_t> temporaryIndices;
+		LLDIBuilder _debugBuilder = nullptr;
+		ALTACORE_MAP<AltaCore::Filesystem::Path, LLVMMetadataRef> _debugFiles;
+		ALTACORE_MAP<AltaCore::Filesystem::Path, LLVMMetadataRef> _compileUnits;
+		AltaCore::Filesystem::Path _currentFile;
+
+		inline LLVMMetadataRef currentDebugFile() {
+			return _debugFiles[_currentFile];
+		};
+
+		inline LLVMMetadataRef currentDebugUnit() {
+			return _compileUnits[_currentFile];
+		};
+
+		inline LLVMMetadataRef translateScope(std::shared_ptr<AltaCore::DET::Scope> scope) {
+
+		};
+
+		inline LLVMMetadataRef translateParentScope(std::shared_ptr<AltaCore::DET::ScopeItem> item) {
+			if (auto scope = item->parentScope.lock()) {
+				return translateScope(scope);
+			} else {
+				return currentDebugFile();
+			}
+		};
 
 		inline ScopeStack& currentStack() {
 			return _stacks.back();
@@ -482,7 +506,9 @@ namespace AltaLL {
 			_llmod(llmod),
 			_targetMachine(targetMachine),
 			_targetData(targetData)
-			{};
+		{
+			_debugBuilder = llwrap(LLVMCreateDIBuilder(_llmod.get()));
+		};
 
 		void compile(std::shared_ptr<AltaCore::AST::RootNode> root);
 		void finalize();

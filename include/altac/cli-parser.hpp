@@ -38,6 +38,7 @@ namespace CLI {
       CLI_PROPERTY(defaultValue, std::string);
       CLI_PROPERTY_DEFAULT(canRepeat, bool, false);
       CLI_PROPERTY_DEFAULT(required, bool, false);
+      CLI_PROPERTY_DEFAULT(hidden, bool, false);
 
       inline This& shortID(char id) {
         _shortID = id;
