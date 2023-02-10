@@ -4,6 +4,7 @@
 #include <altall/util.hpp>
 #include <altacore.hpp>
 #include <altall/altall.hpp>
+#include <altall/mangle.hpp>
 
 #if __has_include(<coroutine>)
 	#include <coroutine>
@@ -12,6 +13,8 @@
 	#include <experimental/coroutine>
 	#define ALTALL_COROUTINE_NS std::experimental
 #endif
+
+#define ALTA_COMPILER_NAME "altac_llvm"
 
 namespace AltaLL {
 	// adapted from and based on https://itnext.io/c-20-practical-coroutines-79202872ebba
@@ -239,6 +242,7 @@ namespace AltaLL {
 		ALTACORE_MAP<AltaCore::Filesystem::Path, LLVMMetadataRef> _debugFiles;
 		ALTACORE_MAP<AltaCore::Filesystem::Path, LLVMMetadataRef> _compileUnits;
 		AltaCore::Filesystem::Path _currentFile;
+		ALTACORE_MAP<std::string, LLVMMetadataRef> _definedScopes;
 
 		inline LLVMMetadataRef currentDebugFile() {
 			return _debugFiles[_currentFile];
@@ -248,8 +252,67 @@ namespace AltaLL {
 			return _compileUnits[_currentFile];
 		};
 
-		inline LLVMMetadataRef translateScope(std::shared_ptr<AltaCore::DET::Scope> scope) {
+		inline LLVMMetadataRef debugFileForModule(std::shared_ptr<AltaCore::DET::Module> module) {
+			if (!_debugFiles[module->path]) {
+				auto filenameStr = module->path.filename();
+				auto dirnameStr = module->path.toString();
+				_debugFiles[_currentFile] = LLVMDIBuilderCreateFile(_debugBuilder.get(), filenameStr.c_str(), filenameStr.size(), dirnameStr.c_str(), dirnameStr.size());
+				_compileUnits[_currentFile] = LLVMDIBuilderCreateCompileUnit(_debugBuilder.get(), LLVMDWARFSourceLanguageC, currentDebugFile(), ALTA_COMPILER_NAME, sizeof(ALTA_COMPILER_NAME), /* TODO */ false, "", 0, 0x01000000, "", 0, LLVMDWARFEmissionFull, 0, true, false, "", 0, "", 0);
+			}
+			return _debugFiles[module->path];
+		};
 
+		inline LLVMMetadataRef translateFunction(std::shared_ptr<AltaCore::DET::Function> func, bool asDefinition = false) {
+			auto mangled = mangleName(func);
+			auto parentScope = func->parentScope.lock();
+			auto parentModule = AltaCore::Util::getModule(parentScope.get()).lock();
+			auto debugFile = debugFileForModule(parentModule);
+			auto llparentScope = translateScope(parentScope);
+			LLVMMetadataRef funcType;
+			// TODO: working here
+			LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), debugFile, );
+			if (!_definedScopes[func->id]) {
+				_definedScopes[func->id] = LLVMDIBuilderCreateFunction(_debugBuilder.get(), llparentScope, func->name.c_str(), func->name.size(), mangled.c_str(), mangled.size(), debugFile, func->position.line, funcType, false, false, func->position.line, LLVMDIFlagZero, /* TODO */ false);
+			}
+			if (asDefinition) {
+				return LLVMDIBuilderCreateFunction(_debugBuilder.get(), llparentScope, func->name.c_str(), func->name.size(), mangled.c_str(), mangled.size(), debugFile, func->position.line, funcType, false, true, func->position.line, LLVMDIFlagZero, /* TODO */ false);
+			} else {
+				return _definedScopes[func->id];
+			}
+		};
+
+		inline LLVMMetadataRef translateScope(std::shared_ptr<AltaCore::DET::Scope> scope) {
+			if (!scope) {
+				return currentDebugFile();
+			}
+
+			auto it = _definedScopes.find(scope->id);
+			if (it != _definedScopes.end()) {
+				return it->second;
+			}
+
+			LLVMMetadataRef llscope = nullptr;
+
+			if (auto parentClass = scope->parentClass.lock()) {
+				if (!_definedScopes[parentClass->id]) {
+					_definedScopes[parentClass->id] = LLVMDIBuilderCreateNameSpace(_debugBuilder.get(), translateScope(parentClass->parentScope.lock()), parentClass->name.c_str(), parentClass->name.size(), false);
+				}
+				llscope = _definedScopes[parentClass->id];
+			} else if (auto parentFunc = scope->parentFunction.lock()) {
+				llscope = translateFunction(parentFunc);
+			} else if (auto parentNS = scope->parentNamespace.lock()) {
+				if (!_definedScopes[parentNS->id]) {
+					_definedScopes[parentNS->id] = LLVMDIBuilderCreateNameSpace(_debugBuilder.get(), translateScope(parentNS->parentScope.lock()), parentNS->name.c_str(), parentNS->name.size(), false);
+				}
+				llscope = _definedScopes[parentNS->id];
+			} else if (auto parentModule = scope->parentModule.lock()) {
+				llscope = debugFileForModule(parentModule);
+			} else {
+				llscope = LLVMDIBuilderCreateLexicalBlock(_debugBuilder.get(), translateScope(scope->parent.lock()), debugFileForModule(AltaCore::Util::getModule(scope.get()).lock()), scope->position.line, scope->position.column);
+			}
+
+			_definedScopes[scope->id] = llscope;
+			return llscope;
 		};
 
 		inline LLVMMetadataRef translateParentScope(std::shared_ptr<AltaCore::DET::ScopeItem> item) {
