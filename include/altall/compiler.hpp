@@ -252,6 +252,8 @@ namespace AltaLL {
 			return _compileUnits[_currentFile];
 		};
 
+		LLVMMetadataRef translateTypeDebug(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions = true);
+
 		inline LLVMMetadataRef debugFileForModule(std::shared_ptr<AltaCore::DET::Module> module) {
 			if (!_debugFiles[module->path]) {
 				auto filenameStr = module->path.filename();
@@ -268,9 +270,7 @@ namespace AltaLL {
 			auto parentModule = AltaCore::Util::getModule(parentScope.get()).lock();
 			auto debugFile = debugFileForModule(parentModule);
 			auto llparentScope = translateScope(parentScope);
-			LLVMMetadataRef funcType;
-			// TODO: working here
-			LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), debugFile, );
+			LLVMMetadataRef funcType = translateTypeDebug(AltaCore::DET::Type::getUnderlyingType(func), false);
 			if (!_definedScopes[func->id]) {
 				_definedScopes[func->id] = LLVMDIBuilderCreateFunction(_debugBuilder.get(), llparentScope, func->name.c_str(), func->name.size(), mangled.c_str(), mangled.size(), debugFile, func->position.line, funcType, false, false, func->position.line, LLVMDIFlagZero, /* TODO */ false);
 			}

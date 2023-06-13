@@ -1624,6 +1624,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::returnNull() {
 	co_return NULL;
 };
 
+LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions) {
+	// TODO: working here
+};
+
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileNode(std::shared_ptr<AltaCore::AST::Node> node, std::shared_ptr<AltaCore::DH::Node> info) {
 	switch (node->nodeType()) {
 		case AltaCore::AST::NodeType::Node: return returnNull();
