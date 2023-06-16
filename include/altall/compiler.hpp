@@ -230,6 +230,7 @@ namespace AltaLL {
 		LLTargetData _targetData;
 		std::stack<LLBuilder> _builders;
 		ALTACORE_MAP<std::string, LLVMTypeRef> _definedTypes;
+		ALTACORE_MAP<std::string, LLVMMetadataRef> _definedDebugTypes;
 		bool _inGenerator = false;
 		ALTACORE_MAP<std::string, LLVMValueRef> _definedFunctions;
 		std::deque<ScopeStack> _stacks;

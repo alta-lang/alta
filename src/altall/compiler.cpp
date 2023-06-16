@@ -3,6 +3,7 @@
 #include <altall/altall.hpp>
 #include <bit>
 #include <unordered_set>
+#include <llvm/BinaryFormat/Dwarf.h>
 
 // DEBUGGING/DEVELOPMENT
 #include <iostream>
@@ -1625,7 +1626,138 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::returnNull() {
 };
 
 LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions) {
-	// TODO: working here
+	auto mangled = "_non_native_" + mangleType(type);
+
+	if (usePointersToFunctions && type->isFunction && type->isRawFunction) {
+		mangled = "_ptr_" + mangled;
+	}
+
+	if (_definedDebugTypes[mangled.c_str()]) {
+		return _definedDebugTypes[mangled.c_str()];
+	}
+
+	LLVMMetadataRef result = NULL;
+
+	if (type->isNative && !type->isFunction) {
+		switch (type->nativeTypeName) {
+			case AltaCore::DET::NativeType::Integer: {
+				uint8_t bits = 32;
+
+				for (const auto& modifier: type->modifiers) {
+					if (modifier & static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long)) {
+						if (bits < 64) {
+							bits *= 2;
+						}
+					}
+
+					if (modifier & static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Short)) {
+						if (bits > 8) {
+							bits /= 2;
+						}
+					}
+
+					if (modifier & (static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Pointer) | static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Reference))) {
+						break;
+					}
+				}
+
+				auto name = "int" + std::to_string(bits) + "_t";
+
+				result = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), name.c_str(), name.size(), bits, llvm::dwarf::DW_ATE_float, LLVMDIFlagZero);
+			} break;
+			case AltaCore::DET::NativeType::Byte:        result = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "byte", 4, 8, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero); break;
+			case AltaCore::DET::NativeType::Bool:        result = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "bool", 4, 8, llvm::dwarf::DW_ATE_boolean, LLVMDIFlagZero); break;
+			case AltaCore::DET::NativeType::Void:        result = LLVMDIBuilderCreateUnspecifiedType(_debugBuilder.get(), "void", 4); break;
+			case AltaCore::DET::NativeType::Double:      result = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "double", 6, 64, llvm::dwarf::DW_ATE_float, LLVMDIFlagZero); break;
+			case AltaCore::DET::NativeType::Float:       result = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "float", 5, 32, llvm::dwarf::DW_ATE_float, LLVMDIFlagZero); break;
+			case AltaCore::DET::NativeType::UserDefined: result = NULL; break;
+		}
+	} else if (type->isFunction) {
+		if (type->isRawFunction) {
+			std::vector<LLVMMetadataRef> params {
+				translateTypeDebug(type->returnType),
+			};
+			bool isVararg = false;
+
+			if (type->isMethod) {
+				params.push_back(translateTypeDebug(std::make_shared<AltaCore::DET::Type>(type->methodParent)->reference()));
+			}
+
+			for (const auto& [name, paramType, isVariable, id]: type->parameters) {
+				auto lltype = translateTypeDebug(paramType);
+
+				if (isVariable) {
+					if (varargTable[id]) {
+						isVararg = true;
+					} else {
+						params.push_back(LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "uint64_t", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero));
+						params.push_back(LLVMDIBuilderCreatePointerType(_debugBuilder.get(), lltype, LLVMPointerSize(_targetData.get()) * 8, 0, 0, NULL, 0));
+					}
+				} else {
+					params.push_back(lltype);
+				}
+			}
+
+			result = LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), currentDebugFile(), params.data(), params.size(), LLVMDIFlagZero);
+
+			if (usePointersToFunctions) {
+				result = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), result, LLVMPointerSize(_targetData.get()) * 8, 0, 0, NULL, 0);
+			}
+		} else {
+			// TODO: working here
+			result = _definedTypes["_Alta_basic_function"];
+		}
+	} else if (type->isUnion()) {
+		std::array<LLVMMetadataRef, 2> members;
+		size_t unionSize = 0;
+
+		members[0] = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(type->unionOf.size() - 1));
+
+		auto tagSize = LLVMStoreSizeOfType(_targetData.get(), members[0]);
+
+		for (const auto& component: type->unionOf) {
+			auto lltype = co_await translateType(component);
+
+			members[1] = lltype;
+			auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+			members[1] = nullptr;
+
+			auto lltotalSize = LLVMStoreSizeOfType(_targetData.get(), tmpStruct);
+
+			if (lltotalSize > unionSize) {
+				unionSize = lltotalSize;
+			}
+		}
+
+		members[1] = LLVMArrayType(LLVMInt8TypeInContext(_llcontext.get()), unionSize - tagSize);
+
+		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+	} else if (type->isOptional) {
+		std::array<LLVMTypeRef, 2> members;
+
+		members[0] = LLVMInt1TypeInContext(_llcontext.get());
+		members[1] = co_await translateType(type->optionalTarget);
+
+		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+	} else if (type->bitfield) {
+		result = co_await translateType(type->bitfield->underlyingBitfieldType.lock());
+	} else if (type->klass) {
+		result = co_await defineClassType(type->klass);
+	}
+
+	if (!result) {
+		co_return result;
+	}
+
+	for (const auto& modifier: type->modifiers) {
+		if (modifier & (static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Pointer) | static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Reference))) {
+			result = LLVMPointerType(result, 0);
+		}
+	}
+
+	_definedTypes[mangled.c_str()] = result;
+
+	co_return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileNode(std::shared_ptr<AltaCore::AST::Node> node, std::shared_ptr<AltaCore::DH::Node> info) {
