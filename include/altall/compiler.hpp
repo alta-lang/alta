@@ -5,6 +5,8 @@
 #include <altacore.hpp>
 #include <altall/altall.hpp>
 #include <altall/mangle.hpp>
+#include <llvm-c/Types.h>
+#include <memory>
 
 #if __has_include(<coroutine>)
 	#include <coroutine>
@@ -244,6 +246,9 @@ namespace AltaLL {
 		ALTACORE_MAP<AltaCore::Filesystem::Path, LLVMMetadataRef> _compileUnits;
 		AltaCore::Filesystem::Path _currentFile;
 		ALTACORE_MAP<std::string, LLVMMetadataRef> _definedScopes;
+		uint64_t _pointerBits;
+		LLVMMetadataRef _unknownDebugFile;
+		unsigned int _compositeCounter = 0;
 
 		inline LLVMMetadataRef currentDebugFile() {
 			return _debugFiles[_currentFile];
@@ -254,6 +259,7 @@ namespace AltaLL {
 		};
 
 		LLVMMetadataRef translateTypeDebug(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions = true);
+		LLVMMetadataRef translateClassDebug(std::shared_ptr<AltaCore::DET::Class> klass);
 
 		inline LLVMMetadataRef debugFileForModule(std::shared_ptr<AltaCore::DET::Module> module) {
 			if (!_debugFiles[module->path]) {
@@ -282,9 +288,25 @@ namespace AltaLL {
 			}
 		};
 
+		inline LLVMMetadataRef debugFileForScope(std::shared_ptr<AltaCore::DET::Scope> scope) {
+			if (auto mod = AltaCore::Util::getModule(scope.get()).lock()) {
+				return debugFileForModule(mod);
+			} else {
+				return _unknownDebugFile;
+			}
+		};
+
+		inline LLVMMetadataRef debugFileForScopeItem(std::shared_ptr<AltaCore::DET::ScopeItem> item) {
+			if (auto scope = item->parentScope.lock()) {
+				return debugFileForScope(scope);
+			} else {
+				return _unknownDebugFile;
+			}
+		}
+
 		inline LLVMMetadataRef translateScope(std::shared_ptr<AltaCore::DET::Scope> scope) {
 			if (!scope) {
-				return currentDebugFile();
+				return _unknownDebugFile;
 			}
 
 			auto it = _definedScopes.find(scope->id);
@@ -320,7 +342,7 @@ namespace AltaLL {
 			if (auto scope = item->parentScope.lock()) {
 				return translateScope(scope);
 			} else {
-				return currentDebugFile();
+				return _unknownDebugFile;
 			}
 		};
 
@@ -572,6 +594,9 @@ namespace AltaLL {
 			_targetData(targetData)
 		{
 			_debugBuilder = llwrap(LLVMCreateDIBuilder(_llmod.get()));
+			_pointerBits = LLVMPointerSize(_targetData.get()) * 8;
+
+			_unknownDebugFile = LLVMDIBuilderCreateFile(_debugBuilder.get(), "<unknown>", 9, "", 0);
 		};
 
 		void compile(std::shared_ptr<AltaCore::AST::RootNode> root);

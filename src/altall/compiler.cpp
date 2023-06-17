@@ -1,9 +1,17 @@
 #include <altall/compiler.hpp>
 #include <altall/mangle.hpp>
 #include <altall/altall.hpp>
+#include <array>
 #include <bit>
+#include <cstdint>
+#include <llvm-c/Core.h>
+#include <llvm-c/DebugInfo.h>
+#include <llvm-c/Target.h>
+#include <llvm-c/Types.h>
 #include <unordered_set>
+
 #include <llvm/BinaryFormat/Dwarf.h>
+#include <llvm/IR/DIBuilder.h>
 
 // DEBUGGING/DEVELOPMENT
 #include <iostream>
@@ -1625,6 +1633,45 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::returnNull() {
 	co_return NULL;
 };
 
+LLVMMetadataRef AltaLL::Compiler::translateClassDebug(std::shared_ptr<AltaCore::DET::Class> klass) {
+	if (_definedDebugTypes[klass->id]) {
+		return _definedDebugTypes[klass->id];
+	}
+
+	auto co = defineClassType(klass);
+	co.coroutine.resume();
+	auto lltype = co.await_resume();
+
+	auto mangled = mangleName(klass);
+
+	auto tmpDebug = _definedDebugTypes[klass->id] = LLVMDIBuilderCreateReplaceableCompositeType(_debugBuilder.get(), _compositeCounter++, klass->name.c_str(), klass->name.size(), translateParentScope(klass), debugFileForScopeItem(klass), klass->position.line, 0, LLVMStoreSizeOfType(_targetData.get(), lltype), LLVMABIAlignmentOfType(_targetData.get(), lltype), LLVMDIFlagZero, "", 0);
+
+	std::vector<LLVMMetadataRef> members;
+
+	if (!klass->isStructure && !klass->isBitfield) {
+		// every class requires an instance info structure
+		auto debugInstanceInfo = _definedDebugTypes["_Alta_instance_info"];
+		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateScope(klass->scope), "", 0, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugInstanceInfo), LLVMDITypeGetAlignInBits(debugInstanceInfo), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()), LLVMDIFlagZero, debugInstanceInfo));
+
+		// the parents are included as members from the start of the structure
+		for (const auto& parent: klass->parents) {
+			auto parentType = translateClassDebug(parent);
+			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateScope(klass->scope), "", 0, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(parentType), LLVMDITypeGetAlignInBits(parentType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()), LLVMDIFlagZero, parentType));
+		}
+	}
+
+	for (const auto& member: klass->members) {
+		auto memberType = translateTypeDebug(member->type);
+		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateScope(klass->scope), member->name.c_str(), member->name.size(), debugFileForScopeItem(member), member->position.line, LLVMDITypeGetSizeInBits(memberType), LLVMDITypeGetAlignInBits(memberType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()), LLVMDIFlagZero, memberType));
+	}
+
+	auto permaNode = _definedDebugTypes[klass->id] = LLVMDIBuilderCreateClassType(_debugBuilder.get(), translateParentScope(klass), klass->name.c_str(), klass->name.size(), debugFileForScopeItem(klass), klass->position.line, LLVMStoreSizeOfType(_targetData.get(), lltype), LLVMABIAlignmentOfType(_targetData.get(), lltype), 0, LLVMDIFlagZero, NULL, members.data(), members.size(), NULL, NULL, "", 0);
+
+	LLVMMetadataReplaceAllUsesWith(tmpDebug, permaNode);
+
+	return permaNode;
+};
+
 LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions) {
 	auto mangled = "_non_native_" + mangleType(type);
 
@@ -1635,6 +1682,8 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 	if (_definedDebugTypes[mangled.c_str()]) {
 		return _definedDebugTypes[mangled.c_str()];
 	}
+
+	auto debugFile = debugFileForScopeItem(type);
 
 	LLVMMetadataRef result = NULL;
 
@@ -1691,73 +1740,104 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 						isVararg = true;
 					} else {
 						params.push_back(LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "uint64_t", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero));
-						params.push_back(LLVMDIBuilderCreatePointerType(_debugBuilder.get(), lltype, LLVMPointerSize(_targetData.get()) * 8, 0, 0, NULL, 0));
+						params.push_back(LLVMDIBuilderCreatePointerType(_debugBuilder.get(), lltype, _pointerBits, _pointerBits, 0, NULL, 0));
 					}
 				} else {
 					params.push_back(lltype);
 				}
 			}
 
-			result = LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), currentDebugFile(), params.data(), params.size(), LLVMDIFlagZero);
+			result = LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), debugFile, params.data(), params.size(), LLVMDIFlagZero);
 
 			if (usePointersToFunctions) {
-				result = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), result, LLVMPointerSize(_targetData.get()) * 8, 0, 0, NULL, 0);
+				result = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), result, _pointerBits, _pointerBits, 0, NULL, 0);
 			}
 		} else {
 			// TODO: working here
-			result = _definedTypes["_Alta_basic_function"];
+			result = _definedDebugTypes["_Alta_basic_function"];
 		}
 	} else if (type->isUnion()) {
-		std::array<LLVMMetadataRef, 2> members;
-		size_t unionSize = 0;
+		std::vector<LLVMMetadataRef> members;
+		std::array<LLVMMetadataRef, 2> structMembers;
+		std::array<LLVMTypeRef, 2> offsetMembers;
 
-		members[0] = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(type->unionOf.size() - 1));
+		auto tagBits = std::bit_width(type->unionOf.size() - 1);
+		auto tagType = LLVMIntTypeInContext(_llcontext.get(), tagBits);
+		auto tagDebugType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "", 0, tagBits, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagArtificial);
 
-		auto tagSize = LLVMStoreSizeOfType(_targetData.get(), members[0]);
+		uint64_t unionSize = 0;
+		uint32_t unionAlign = 0;
+
+		structMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, tagBits, LLVMABIAlignmentOfType(_targetData.get(), tagType) * 8, 0, LLVMDIFlagArtificial, tagDebugType);
+		offsetMembers[0] = tagType;
 
 		for (const auto& component: type->unionOf) {
-			auto lltype = co_await translateType(component);
+			auto co = translateType(component);
+			co.coroutine.resume();
+			offsetMembers[1] = co.await_resume();
 
-			members[1] = lltype;
-			auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
-			members[1] = nullptr;
+			auto debugType = translateTypeDebug(component);
 
-			auto lltotalSize = LLVMStoreSizeOfType(_targetData.get(), tmpStruct);
+			auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), offsetMembers.data(), offsetMembers.size(), false);
+			offsetMembers[1] = nullptr;
 
-			if (lltotalSize > unionSize) {
-				unionSize = lltotalSize;
+			auto offset = LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1);
+			structMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), offsetMembers[1]), LLVMABIAlignmentOfType(_targetData.get(), offsetMembers[1]), offset, LLVMDIFlagArtificial, debugType);
+
+			auto size = LLVMStoreSizeOfType(_targetData.get(), tmpStruct);
+			auto align = LLVMABIAlignmentOfType(_targetData.get(), tmpStruct);
+
+			if (size > unionSize) {
+				unionSize = size;
 			}
+
+			if (align > unionAlign) {
+				unionAlign = align;
+			}
+
+			members.push_back(LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, size, align, LLVMDIFlagArtificial, NULL, structMembers.data(), structMembers.size(), 0, NULL, "", 0));
+			structMembers[1] = nullptr;
 		}
 
-		members[1] = LLVMArrayType(LLVMInt8TypeInContext(_llcontext.get()), unionSize - tagSize);
-
-		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+		result = LLVMDIBuilderCreateUnionType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, unionSize, unionAlign, LLVMDIFlagZero, members.data(), members.size(), 0, "", 0);
 	} else if (type->isOptional) {
 		std::array<LLVMTypeRef, 2> members;
+		std::array<LLVMMetadataRef, 2> debugMembers;
 
 		members[0] = LLVMInt1TypeInContext(_llcontext.get());
-		members[1] = co_await translateType(type->optionalTarget);
 
-		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+		auto co = translateType(type->optionalTarget);
+		co.coroutine.resume();
+		members[1] = co.await_resume();
+
+		auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+
+		auto boolType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "bool", 4, 8, llvm::dwarf::DW_ATE_boolean, LLVMDIFlagZero);
+		debugMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, 8, 8, 0, LLVMDIFlagArtificial, boolType);
+
+		auto targetType = translateTypeDebug(type->optionalTarget);
+		debugMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMDITypeGetSizeInBits(targetType), LLVMDITypeGetAlignInBits(targetType), LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1), LLVMDIFlagArtificial, targetType);
+
+		result = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), tmpStruct), LLVMABIAlignmentOfType(_targetData.get(), tmpStruct), LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
 	} else if (type->bitfield) {
-		result = co_await translateType(type->bitfield->underlyingBitfieldType.lock());
+		result = translateTypeDebug(type->bitfield->underlyingBitfieldType.lock());
 	} else if (type->klass) {
-		result = co_await defineClassType(type->klass);
+		result = translateClassDebug(type->klass);
 	}
 
 	if (!result) {
-		co_return result;
+		return result;
 	}
 
 	for (const auto& modifier: type->modifiers) {
 		if (modifier & (static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Pointer) | static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Reference))) {
-			result = LLVMPointerType(result, 0);
+			result = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), result, _pointerBits, _pointerBits, 0, "", 0);
 		}
 	}
 
-	_definedTypes[mangled.c_str()] = result;
+	_definedDebugTypes[mangled.c_str()] = result;
 
-	co_return result;
+	return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileNode(std::shared_ptr<AltaCore::AST::Node> node, std::shared_ptr<AltaCore::DH::Node> info) {
@@ -4569,6 +4649,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		//auto llplain = co_await translateType(asPlain);
 
 		auto voidPointer = LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0);
+		auto debugVoidPointer = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), LLVMDIBuilderCreateUnspecifiedType(_debugBuilder.get(), "void", 4), _pointerBits, _pointerBits, 0, "", 0);
 
 		std::array<LLVMTypeRef, 2> members {
 			// function pointer
@@ -4577,8 +4658,14 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			// lambda state pointer
 			voidPointer,
 		};
+		std::array<LLVMMetadataRef, 2> debugMembers {
+			debugVoidPointer,
+			debugVoidPointer,
+		};
 
 		_definedTypes["_Alta_basic_function"] = LLVMStructType(members.data(), members.size(), false);
+
+		_definedDebugTypes["_Alta_basic_function"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_function", sizeof("_Alta_basic_function") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), _definedTypes["_Alta_basic_function"]), LLVMABIAlignmentOfType(_targetData.get(), _definedTypes["_Alta_basic_function"]), LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
 	}
 
 	if (!_definedTypes["_Alta_basic_lambda_state"]) {
