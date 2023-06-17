@@ -1,6 +1,10 @@
 #ifndef ALTALL_COMPILER_HPP
 #define ALTALL_COMPILER_HPP
 
+#include "altacore/det/class.hpp"
+#include "altacore/det/scope-item.hpp"
+#include "altacore/det/scope.hpp"
+#include "altacore/util.hpp"
 #include <altall/util.hpp>
 #include <altacore.hpp>
 #include <altall/altall.hpp>
@@ -41,14 +45,18 @@ namespace AltaLL {
 			template<typename PromiseResult>
 			struct Promise {
 				std::conditional_t<std::is_same_v<PromiseResult, void>, bool, PromiseResult> value = {};
-				ALTALL_COROUTINE_NS::coroutine_handle<> continuation = ALTALL_COROUTINE_NS::noop_coroutine();
+				ALTALL_COROUTINE_NS::coroutine_handle<> continuation {};
+				bool ready = false;
 
 				struct FinalContinuation {
 					constexpr bool await_ready() const noexcept {
 						return false;
 					};
-					ALTALL_COROUTINE_NS::coroutine_handle<> await_suspend(HandleWithContinuation auto caller) const noexcept {
-						return caller.promise().continuation;
+					// see https://stackoverflow.com/a/67557722/6620880
+					void await_suspend(HandleWithContinuation auto caller) const noexcept {
+						if (caller.promise().continuation && std::exchange(caller.promise().ready, true)) {
+							caller.promise().continuation.resume();
+						}
 					};
 					constexpr void await_resume() const noexcept {
 						// do nothing
@@ -75,14 +83,18 @@ namespace AltaLL {
 			// https://gcc.gnu.org/bugzilla/show_bug.cgi?id=85282
 			template<std::same_as<void> T>
 			struct Promise<T> {
-				ALTALL_COROUTINE_NS::coroutine_handle<> continuation = ALTALL_COROUTINE_NS::noop_coroutine();
+				ALTALL_COROUTINE_NS::coroutine_handle<> continuation {};
+				bool ready = false;
 
 				struct FinalContinuation {
 					constexpr bool await_ready() const noexcept {
 						return false;
 					};
-					ALTALL_COROUTINE_NS::coroutine_handle<> await_suspend(HandleWithContinuation auto caller) const noexcept {
-						return caller.promise().continuation;
+					// see https://stackoverflow.com/a/67557722/6620880
+					void await_suspend(HandleWithContinuation auto caller) const noexcept {
+						if (caller.promise().continuation && std::exchange(caller.promise().ready, true)) {
+							caller.promise().continuation.resume();
+						}
 					};
 					constexpr void await_resume() const noexcept {
 						// do nothing
@@ -143,9 +155,11 @@ namespace AltaLL {
 				return false;
 			};
 
-			ALTALL_COROUTINE_NS::coroutine_handle<> await_suspend(ALTALL_COROUTINE_NS::coroutine_handle<> caller) {
+			// see https://stackoverflow.com/a/67557722/6620880
+			bool await_suspend(ALTALL_COROUTINE_NS::coroutine_handle<> caller) noexcept {
 				coroutine.promise().continuation = caller;
-				return coroutine;
+				coroutine.resume();
+				return !std::exchange(coroutine.promise().ready, true);
 			};
 
 			Result await_resume() {
