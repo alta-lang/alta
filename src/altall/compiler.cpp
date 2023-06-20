@@ -1,3 +1,6 @@
+#include "altacore/det-shared.hpp"
+#include "altacore/det/function.hpp"
+#include "altacore/det/type.hpp"
 #include <altall/compiler.hpp>
 #include <altall/mangle.hpp>
 #include <altall/altall.hpp>
@@ -8,7 +11,13 @@
 #include <llvm-c/DebugInfo.h>
 #include <llvm-c/Target.h>
 #include <llvm-c/Types.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Metadata.h>
+#include <memory>
+#include <regex>
+#include <stdexcept>
 #include <unordered_set>
+#include <vector>
 
 #include <llvm/BinaryFormat/Dwarf.h>
 #include <llvm/IR/DIBuilder.h>
@@ -19,6 +28,10 @@
 #define ALTA_COMPILER_NAME "altac_llvm"
 
 using namespace std::literals;
+
+template<typename T> T* unwrapDI(LLVMMetadataRef node) {
+	return (T*)llvm::unwrap<llvm::MDNode>(node);
+};
 
 static ALTACORE_MAP<std::string, bool> varargTable;
 ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> AltaLL::Compiler::invalidValueExpressionTable;
@@ -150,9 +163,13 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::cleanup() {
 			std::array<LLVMValueRef, 1> gepIndices {
 				counterVal,
 			};
-			auto elmRef = LLVMBuildGEP2(compiler._builders.top().get(), co_await compiler.translateType(item.type), item.source, gepIndices.data(), gepIndices.size(), ("@stack_cleanup_" + tmpIdxStr + "_elm_ref").c_str());
 
-			co_await compiler.doDtor(elmRef, item.type, nullptr, false);
+			assert(item.type->pointerLevel() > 0);
+			auto arrayTarget = item.type->follow();
+
+			auto elmRef = LLVMBuildGEP2(compiler._builders.top().get(), co_await compiler.translateType(arrayTarget), item.source, gepIndices.data(), gepIndices.size(), ("@stack_cleanup_" + tmpIdxStr + "_elm_ref").c_str());
+
+			co_await compiler.doDtor(elmRef, arrayTarget, nullptr, false);
 
 			auto inc = LLVMBuildAdd(compiler._builders.top().get(), counterVal, LLVMConstInt(item.countType, 1, false), ("@stack_cleanup_" + tmpIdxStr + "_counter_inc").c_str());
 			LLVMBuildStore(compiler._builders.top().get(), inc, counter);
@@ -1644,28 +1661,87 @@ LLVMMetadataRef AltaLL::Compiler::translateClassDebug(std::shared_ptr<AltaCore::
 
 	auto mangled = mangleName(klass);
 
-	auto tmpDebug = _definedDebugTypes[klass->id] = LLVMDIBuilderCreateReplaceableCompositeType(_debugBuilder.get(), _compositeCounter++, klass->name.c_str(), klass->name.size(), translateParentScope(klass), debugFileForScopeItem(klass), klass->position.line, 0, LLVMStoreSizeOfType(_targetData.get(), lltype), LLVMABIAlignmentOfType(_targetData.get(), lltype), LLVMDIFlagZero, "", 0);
+	auto tmpDebug = _definedDebugTypes[klass->id] = LLVMDIBuilderCreateReplaceableCompositeType(_debugBuilder.get(), _compositeCounter++, klass->name.c_str(), klass->name.size(), translateParentScope(klass), debugFileForScopeItem(klass), klass->position.line, 0, LLVMStoreSizeOfType(_targetData.get(), lltype) * 8, LLVMABIAlignmentOfType(_targetData.get(), lltype)  * 8, LLVMDIFlagZero, "", 0);
 
 	std::vector<LLVMMetadataRef> members;
 
 	if (!klass->isStructure && !klass->isBitfield) {
 		// every class requires an instance info structure
 		auto debugInstanceInfo = _definedDebugTypes["_Alta_instance_info"];
-		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateScope(klass->scope), "", 0, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugInstanceInfo), LLVMDITypeGetAlignInBits(debugInstanceInfo), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()), LLVMDIFlagZero, debugInstanceInfo));
+		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "__instance_info", sizeof("__instance_info") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugInstanceInfo), LLVMDITypeGetAlignInBits(debugInstanceInfo), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagProtected, debugInstanceInfo));
 
 		// the parents are included as members from the start of the structure
 		for (const auto& parent: klass->parents) {
 			auto parentType = translateClassDebug(parent);
-			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateScope(klass->scope), "", 0, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(parentType), LLVMDITypeGetAlignInBits(parentType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()), LLVMDIFlagZero, parentType));
+			LLVMDIBuilderCreateInheritance(_debugBuilder.get(), tmpDebug, parentType, LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, 0, LLVMDIFlagPublic);
 		}
 	}
 
 	for (const auto& member: klass->members) {
 		auto memberType = translateTypeDebug(member->type);
-		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateScope(klass->scope), member->name.c_str(), member->name.size(), debugFileForScopeItem(member), member->position.line, LLVMDITypeGetSizeInBits(memberType), LLVMDITypeGetAlignInBits(memberType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()), LLVMDIFlagZero, memberType));
+		uint64_t flags = LLVMDIFlagZero;
+
+		switch (member->visibility) {
+			case AltaCore::Shared::Visibility::Public:
+				flags |= LLVMDIFlagPublic;
+			case AltaCore::Shared::Visibility::Protected:
+				flags |= LLVMDIFlagProtected;
+				break;
+			case AltaCore::Shared::Visibility::Private:
+				flags |= LLVMDIFlagPrivate;
+				break;
+
+			// there are no corresponding visibility attributes for LLVM, so just use `public` to avoid preventing valid accesses within the module/package
+			case AltaCore::Shared::Visibility::Module:
+				flags |= LLVMDIFlagPublic;
+				break;
+			case AltaCore::Shared::Visibility::Package:
+				flags |= LLVMDIFlagPublic;
+				break;
+		}
+
+		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, member->name.c_str(), member->name.size(), debugFileForScopeItem(member), member->position.line, LLVMDITypeGetSizeInBits(memberType), LLVMDITypeGetAlignInBits(memberType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, static_cast<LLVMDIFlags>(flags), memberType));
 	}
 
-	auto permaNode = _definedDebugTypes[klass->id] = LLVMDIBuilderCreateClassType(_debugBuilder.get(), translateParentScope(klass), klass->name.c_str(), klass->name.size(), debugFileForScopeItem(klass), klass->position.line, LLVMStoreSizeOfType(_targetData.get(), lltype), LLVMABIAlignmentOfType(_targetData.get(), lltype), 0, LLVMDIFlagZero, NULL, members.data(), members.size(), NULL, NULL, "", 0);
+#if 0
+	for (const auto& item: klass->scope->items) {
+		if (item->nodeType() != AltaCore::DET::NodeType::Function) continue;
+		auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(item);
+
+		// `asDefinition = true` because we know that all methods within classes *must* be defined (we only support declarations for free functions)
+		if (func->genericParameterCount > 0) {
+			if (auto ast = func->ast.lock()) {
+				if (auto info = func->info.lock()) {
+					for (const auto& inst: info->genericInstantiations) {
+						members.push_back(translateFunction(inst->function, true));
+					}
+				}
+			}
+		} else {
+			members.push_back(translateFunction(func, true));
+		}
+	}
+#endif
+
+	LLVMMetadataRef templateParams = NULL;
+
+	if (!klass->genericArguments.empty()) {
+		std::vector<LLVMMetadataRef> generics;
+		auto ast = klass->ast.lock();
+		auto info = klass->info.lock();
+		for (size_t i = 0; i < klass->genericArguments.size(); ++i) {
+			auto scope = tmpDebug;
+			auto type = translateTypeDebug(klass->genericArguments[i]);
+			//LLVMDumpValue(LLVMMetadataAsValue(_llcontext.get(), scope));
+			//LLVMDumpValue(LLVMMetadataAsValue(_llcontext.get(), type));
+			auto unwrappedScope = unwrapDI<llvm::DIScope>(scope);
+			auto unwrappedType = unwrapDI<llvm::DIType>(type);
+			generics.push_back(llvm::wrap(llvm::unwrap(_debugBuilder.get())->createTemplateTypeParameter(unwrappedScope, info->genericDetails[i]->alias->name, unwrappedType, false)));
+		}
+		templateParams = LLVMDIBuilderGetOrCreateArray(_debugBuilder.get(), generics.data(), generics.size());
+	}
+
+	auto permaNode = _definedDebugTypes[klass->id] = LLVMDIBuilderCreateClassType(_debugBuilder.get(), translateParentScope(klass), klass->name.c_str(), klass->name.size(), debugFileForScopeItem(klass), klass->position.line, LLVMStoreSizeOfType(_targetData.get(), lltype) * 8, LLVMABIAlignmentOfType(_targetData.get(), lltype) * 8, 0, LLVMDIFlagZero, NULL, members.data(), members.size(), NULL, templateParams, "", 0);
 
 	LLVMMetadataReplaceAllUsesWith(tmpDebug, permaNode);
 
@@ -1710,9 +1786,9 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 					}
 				}
 
-				auto name = "int" + std::to_string(bits) + "_t";
+				auto name = (type->isSigned() ? "i" : "u") + std::to_string(bits);
 
-				result = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), name.c_str(), name.size(), bits, llvm::dwarf::DW_ATE_float, LLVMDIFlagZero);
+				result = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), name.c_str(), name.size(), bits, type->isSigned() ? llvm::dwarf::DW_ATE_signed : llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
 			} break;
 			case AltaCore::DET::NativeType::Byte:        result = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "byte", 4, 8, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero); break;
 			case AltaCore::DET::NativeType::Bool:        result = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "bool", 4, 8, llvm::dwarf::DW_ATE_boolean, LLVMDIFlagZero); break;
@@ -1729,7 +1805,8 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 			bool isVararg = false;
 
 			if (type->isMethod) {
-				params.push_back(translateTypeDebug(std::make_shared<AltaCore::DET::Type>(type->methodParent)->reference()));
+				auto parentPtrType = translateTypeDebug(std::make_shared<AltaCore::DET::Type>(type->methodParent)->reference());
+				params.push_back(LLVMDIBuilderCreateObjectPointerType(_debugBuilder.get(), parentPtrType));
 			}
 
 			for (const auto& [name, paramType, isVariable, id]: type->parameters) {
@@ -1739,8 +1816,8 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 					if (varargTable[id]) {
 						isVararg = true;
 					} else {
-						params.push_back(LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "uint64_t", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero));
-						params.push_back(LLVMDIBuilderCreatePointerType(_debugBuilder.get(), lltype, _pointerBits, _pointerBits, 0, NULL, 0));
+						params.push_back(LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero));
+						params.push_back(LLVMDIBuilderCreateArrayType(_debugBuilder.get(), 0, LLVMDITypeGetAlignInBits(lltype), lltype, NULL, 0));
 					}
 				} else {
 					params.push_back(lltype);
@@ -1753,7 +1830,6 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 				result = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), result, _pointerBits, _pointerBits, 0, NULL, 0);
 			}
 		} else {
-			// TODO: working here
 			result = _definedDebugTypes["_Alta_basic_function"];
 		}
 	} else if (type->isUnion()) {
@@ -1763,12 +1839,13 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 
 		auto tagBits = std::bit_width(type->unionOf.size() - 1);
 		auto tagType = LLVMIntTypeInContext(_llcontext.get(), tagBits);
-		auto tagDebugType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "", 0, tagBits, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagArtificial);
+		auto tagDebugTypeName = "__tag" + std::to_string(tagBits);
+		auto tagDebugType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), tagDebugTypeName.c_str(), tagDebugTypeName.size(), LLVMStoreSizeOfType(_targetData.get(), tagType) * 8, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagArtificial);
 
 		uint64_t unionSize = 0;
 		uint32_t unionAlign = 0;
 
-		structMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, tagBits, LLVMABIAlignmentOfType(_targetData.get(), tagType) * 8, 0, LLVMDIFlagArtificial, tagDebugType);
+		structMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__tag", sizeof("__tag") - 1, debugFile, type->position.line, tagBits, LLVMABIAlignmentOfType(_targetData.get(), tagType) * 8, 0, LLVMDIFlagArtificial, tagDebugType);
 		offsetMembers[0] = tagType;
 
 		for (const auto& component: type->unionOf) {
@@ -1779,10 +1856,11 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 			auto debugType = translateTypeDebug(component);
 
 			auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), offsetMembers.data(), offsetMembers.size(), false);
-			offsetMembers[1] = nullptr;
 
 			auto offset = LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1);
-			structMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), offsetMembers[1]), LLVMABIAlignmentOfType(_targetData.get(), offsetMembers[1]), offset, LLVMDIFlagArtificial, debugType);
+			structMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), offsetMembers[1]) * 8, LLVMABIAlignmentOfType(_targetData.get(), offsetMembers[1]) * 8, offset * 8, LLVMDIFlagArtificial, debugType);
+
+			offsetMembers[1] = nullptr;
 
 			auto size = LLVMStoreSizeOfType(_targetData.get(), tmpStruct);
 			auto align = LLVMABIAlignmentOfType(_targetData.get(), tmpStruct);
@@ -1795,11 +1873,13 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 				unionAlign = align;
 			}
 
-			members.push_back(LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, size, align, LLVMDIFlagArtificial, NULL, structMembers.data(), structMembers.size(), 0, NULL, "", 0));
+			auto memberStruct = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, size * 8, align * 8, LLVMDIFlagArtificial, NULL, structMembers.data(), structMembers.size(), 0, NULL, "", 0);
+			auto mangledName = mangleType(component);
+			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), mangledName.c_str(), mangledName.size(), debugFile, type->position.line, size * 8, align * 8, 0, LLVMDIFlagArtificial, memberStruct));
 			structMembers[1] = nullptr;
 		}
 
-		result = LLVMDIBuilderCreateUnionType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, unionSize, unionAlign, LLVMDIFlagZero, members.data(), members.size(), 0, "", 0);
+		result = LLVMDIBuilderCreateUnionType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, unionSize * 8, unionAlign * 8, LLVMDIFlagZero, members.data(), members.size(), 0, "", 0);
 	} else if (type->isOptional) {
 		std::array<LLVMTypeRef, 2> members;
 		std::array<LLVMMetadataRef, 2> debugMembers;
@@ -1813,12 +1893,12 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 		auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		auto boolType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "bool", 4, 8, llvm::dwarf::DW_ATE_boolean, LLVMDIFlagZero);
-		debugMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, 8, 8, 0, LLVMDIFlagArtificial, boolType);
+		debugMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__present", sizeof("__present") - 1, debugFile, type->position.line, 8, 8, 0, LLVMDIFlagArtificial, boolType);
 
 		auto targetType = translateTypeDebug(type->optionalTarget);
-		debugMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMDITypeGetSizeInBits(targetType), LLVMDITypeGetAlignInBits(targetType), LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1), LLVMDIFlagArtificial, targetType);
+		debugMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMDITypeGetSizeInBits(targetType), LLVMDITypeGetAlignInBits(targetType), LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1) * 8, LLVMDIFlagArtificial, targetType);
 
-		result = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), tmpStruct), LLVMABIAlignmentOfType(_targetData.get(), tmpStruct), LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
+		result = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), tmpStruct) * 8, LLVMABIAlignmentOfType(_targetData.get(), tmpStruct) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
 	} else if (type->bitfield) {
 		result = translateTypeDebug(type->bitfield->underlyingBitfieldType.lock());
 	} else if (type->klass) {
@@ -1933,8 +2013,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileExpressionStatement(std::
 	}
 
 	pushStack(ScopeStack::Type::Temporary);
+	pushDebugLocation(node->position, info->inputScope);
 	co_await compileNode(node->expression, info->expression);
 	co_await currentStack().cleanup();
+	popDebugLocation();
 	popStack();
 
 	if (modInitFunc) {
@@ -1945,9 +2027,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileExpressionStatement(std::
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBlockNode(std::shared_ptr<AltaCore::AST::BlockNode> node, std::shared_ptr<AltaCore::DH::BlockNode> info) {
+	pushDebugLocation(node->position, info->inputScope);
 	for (size_t i = 0; i < node->statements.size(); ++i) {
+		pushDebugLocation(node->statements[i]->position);
 		co_await compileNode(node->statements[i], info->statements[i]);
+		popDebugLocation();
 	}
+	popDebugLocation();
 	co_return NULL;
 };
 
@@ -1970,6 +2056,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 		auto origLLFuncType = llfuncType;
 		auto origLLFunc = llfunc;
 
+		auto llfuncDebug = translateFunction(info->function, true);
+		LLVMSetSubprogram(llfunc, llfuncDebug);
+
 		LLVMSetLinkage(llfunc, mangled == "main" ? LLVMExternalLinkage : LLVMInternalLinkage);
 
 		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
@@ -1978,9 +2067,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 		_builders.push(builder);
 		pushStack(ScopeStack::Type::Function);
+		pushUnknownDebugLocation(info->function->scope);
 
 		if (info->function->isMethod) {
-			LLVMSetValueName(LLVMGetParam(llfunc, 0), "@this");
+			auto selfParam = LLVMGetParam(llfunc, 0);
+			LLVMSetValueName(selfParam, "@this");
+
+			auto tmpThis = co_await tmpify(selfParam, info->function->parentClassType, false, true);
+
+			auto thisDebugType = LLVMDIBuilderCreateObjectPointerType(_debugBuilder.get(), translateTypeDebug(info->function->parentClassType));
+			auto thisDebugVar = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), "this", sizeof("this") - 1, 1, debugFileForScopeItem(info->function), node->position.line, thisDebugType, false, LLVMDIFlagZero);
+			auto thisDebugLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), node->position.line, node->position.column, translateScope(info->function->scope), NULL);
+
+			LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmpThis, thisDebugVar, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), thisDebugLoc, LLVMGetInsertBlock(_builders.top().get()));
 		}
 
 		size_t llparamIndex = info->function->isMethod ? 1 : 0;
@@ -1992,16 +2091,34 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			auto llparam = LLVMGetParam(llfunc, llparamIndex);
 			++llparamIndex;
 
-			LLVMSetValueName(llparam, ((param->isVariable ? "@len_" : "") + param->name).c_str());
+			auto paramName = (param->isVariable ? "@len_" : "") + param->name;
+			auto paramNameDebug = std::regex_replace(paramName, std::regex("@"), "__");
+
+			LLVMSetValueName(llparam, paramName.c_str());
+
+			auto paramTypeDebug = param->isVariable ? LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero) : translateTypeDebug(var->type);
+			auto llparamDebug = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), paramNameDebug.c_str(), paramNameDebug.size(), llparamIndex, debugFileForScope(info->function->scope), param->position.line, paramTypeDebug, false, LLVMDIFlagZero);
+
+			auto paramLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), param->position.line, param->position.column, translateScope(info->function->scope), NULL);
 
 			LLVMValueRef llparamLen = NULL;
 
 			if (param->isVariable) {
+				auto tmp = co_await tmpify(llparam, std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Integer, std::vector<uint8_t> { static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long), static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long) }), false, true);
+
+				LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmp, llparamDebug, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), paramLoc, entryBlock);
+
 				llparamLen = llparam;
 				llparam = LLVMGetParam(llfunc, llparamIndex);
 				++llparamIndex;
 
 				LLVMSetValueName(llparam, param->name.c_str());
+
+				paramNameDebug = std::regex_replace(param->name, std::regex("@"), "__");
+
+				auto elmDebugType = translateTypeDebug(var->type->followBlindly());
+				paramTypeDebug = LLVMDIBuilderCreateArrayType(_debugBuilder.get(), 0, LLVMDITypeGetAlignInBits(elmDebugType), elmDebugType, NULL, 0);
+				llparamDebug = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), paramNameDebug.c_str(), paramNameDebug.size(), llparamIndex, debugFileForScope(info->function->scope), param->position.line, paramTypeDebug, false, LLVMDIFlagZero);
 			}
 
 			if (!param->isVariable) {
@@ -2012,13 +2129,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				currentStack().pushRuntimeArray(llparam, llparamLen, var->type, LLVMInt64TypeInContext(_llcontext.get()));
 			}
 
+			LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), llparam, llparamDebug, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), paramLoc, entryBlock);
+
 			_definedVariables[var->id] = llparam;
 			if (llparamLen) {
 				_definedVariables["_Alta_array_length_" + var->id] = llparamLen;
 			}
 		}
 
+		pushDebugLocation(node->body->position, info->function->scope);
+
 		co_await compileNode(node->body, info->body);
+
+		popDebugLocation();
 
 		auto functionReturnType = info->function->isGenerator ? info->function->generatorReturnType : (info->function->isAsync ? info->function->coroutineReturnType : info->function->returnType);
 
@@ -2033,6 +2156,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			}
 		}
 
+		popDebugLocation();
 		popStack();
 		_builders.pop();
 
@@ -2070,21 +2194,31 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			auto optionalFuncType = LLVMFunctionType(retType, llparams.data(), llparams.size(), false);
 			auto [llfuncType, llfunc] = co_await declareFunction(variant, optionalFuncType);
 
+			auto llfuncDebug = translateFunction(variant, true);
+			LLVMSetSubprogram(llfunc, llfuncDebug);
+
 			auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
 			auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
 			_builders.push(builder);
 			pushStack(ScopeStack::Type::Function);
+			pushUnknownDebugLocation(variant->scope);
 
 			std::vector<LLVMValueRef> args;
 
 			if (info->function->isMethod) {
 				auto selfParam = LLVMGetParam(llfunc, 0);
 				args.push_back(selfParam);
-				if (info->function->isMethod) {
-					LLVMSetValueName(selfParam, "@this");
-				}
+				LLVMSetValueName(selfParam, "@this");
+
+				auto tmpThis = co_await tmpify(selfParam, info->function->parentClassType, false, true);
+
+				auto thisDebugType = LLVMDIBuilderCreateObjectPointerType(_debugBuilder.get(), translateTypeDebug(info->function->parentClassType));
+				auto thisDebugVar = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(variant->scope), "this", sizeof("this") - 1, 1, debugFileForScopeItem(variant), node->position.line, thisDebugType, false, LLVMDIFlagZero);
+				auto thisDebugLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), node->position.line, node->position.column, translateScope(variant->scope), NULL);
+
+				LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmpThis, thisDebugVar, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), thisDebugLoc, LLVMGetInsertBlock(_builders.top().get()));
 			}
 
 			optionalIndex = 0;
@@ -2117,6 +2251,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				LLVMBuildRet(_builders.top().get(), call);
 			}
 
+			popDebugLocation();
 			popStack();
 			_builders.pop();
 		}
@@ -2128,6 +2263,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::shared_ptr<AltaCore::AST::ReturnDirectiveNode> node, std::shared_ptr<AltaCore::DH::ReturnDirectiveNode> info) {
 	LLVMValueRef expr = NULL;
 	auto exprType = node->expression ? AltaCore::DET::Type::getUnderlyingType(info->expression.get()) : nullptr;
+
+	pushDebugLocation(node->position, info->inputScope);
 
 	if (node->expression) {
 		auto functionReturnType = info->parentFunction ? (info->parentFunction->isGenerator ? info->parentFunction->generatorReturnType : (info->parentFunction->isAsync ? info->parentFunction->coroutineReturnType : info->parentFunction->returnType)) : nullptr;
@@ -2168,6 +2305,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 		LLVMBuildRetVoid(_builders.top().get());
 	}
 
+	popDebugLocation();
+
 	co_return NULL;
 };
 
@@ -2183,6 +2322,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 	auto mangled = mangleName(info->variable);
 	LLVMValueRef memory = NULL;
 
+	pushDebugLocation(node->position, info->inputScope);
+
 	if (!_definedVariables[info->variable->id]) {
 		if (inModuleRoot) {
 			memory = LLVMAddGlobal(_llmod.get(), lltype, mangled.c_str());
@@ -2194,6 +2335,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 		_definedVariables[info->variable->id] = memory;
 	} else {
 		memory = _definedVariables[info->variable->id];
+	}
+
+	if (inModuleRoot) {
+		auto gve = LLVMDIBuilderCreateGlobalVariableExpression(_debugBuilder.get(), translateParentScope(info->variable), info->variable->name.c_str(), info->variable->name.size(), mangled.c_str(), mangled.size(), debugFileForScopeItem(info->variable), node->position.line, translateTypeDebug(info->variable->type), false, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), NULL, 0);
+		LLVMGlobalSetMetadata(memory, llvm::LLVMContext::MD_dbg, gve);
+	} else {
+		auto debugVar = _definedDebugVariables[info->variable->id] = LLVMDIBuilderCreateAutoVariable(_debugBuilder.get(), translateParentScope(info->variable), info->variable->name.c_str(), info->variable->name.size(), debugFileForScopeItem(info->variable), node->position.line, translateTypeDebug(info->variable->type), false, LLVMDIFlagZero, 0);
+		LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), memory, debugVar, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), _debugLocations.top(), LLVMGetInsertBlock(_builders.top().get()));
 	}
 
 	if (!inModuleRoot && !_stacks.empty()) {
@@ -2240,16 +2389,21 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 		}
 	}
 
+	popDebugLocation();
+
 	co_return memory;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<AltaCore::AST::Accessor> node, std::shared_ptr<AltaCore::DH::Accessor> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	LLVMValueRef result = NULL;
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
 
 	if (info->getsVariableLength) {
 		auto targetInfo = std::dynamic_pointer_cast<AltaCore::DH::Fetch>(info->target);
+		popDebugLocation();
 		co_return _definedVariables["_Alta_array_length_" + targetInfo->narrowedTo->id];
 	} else if (info->narrowedTo) {
 		if (info->accessesNamespace) {
@@ -2292,9 +2446,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 				}
 			}
 
+			popDebugLocation();
 			co_return result;
 		} else if (auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(info->narrowedTo)) {
 			auto [llfuncType, llfunc] = co_await declareFunction(func);
+			popDebugLocation();
 			co_return llfunc;
 		} else {
 			auto parentFunc = AltaCore::Util::getFunction(info->inputScope).lock();
@@ -2448,16 +2604,20 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 		throw std::runtime_error("Unable to determine accessor result");
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<AltaCore::AST::Fetch> node, std::shared_ptr<AltaCore::DH::Fetch> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
 
 	if (!info->narrowedTo) {
 		if (info->readAccessor) {
 			auto [llfuncType, llfunc] = co_await declareFunction(info->readAccessor);
+			popDebugLocation();
 			co_return LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, nullptr, 0, ("@getter_call_" + tmpIdxStr).c_str());
 		}
 
@@ -2468,6 +2628,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 		auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(info->narrowedTo);
 		if (!var->parentScope.expired() && !var->parentScope.lock()->parentClass.expired()) {
 			auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+			popDebugLocation();
 			co_return LLVMGetParam(llfunc, 0);
 		}
 	}
@@ -2528,10 +2689,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 		throw std::runtime_error("Unable to determine result for fetch");
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std::shared_ptr<AltaCore::AST::AssignmentExpression> node, std::shared_ptr<AltaCore::DH::AssignmentExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto lhs = co_await compileNode(node->target, info->target);
 	LLVMValueRef result = NULL;
 	auto tmpIdx = nextTemp();
@@ -2563,6 +2727,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 
 				std::cerr << "TODO: bitfield assignment: assign back result" << std::endl;
 
+				popDebugLocation();
 				co_return result;
 			}
 		}
@@ -2623,6 +2788,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 		result = lhs; // the result of the assignment is a reference to the assignee
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
@@ -2631,6 +2797,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBooleanLiteralNode(std::s
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shared_ptr<AltaCore::AST::BinaryOperation> node, std::shared_ptr<AltaCore::DH::BinaryOperation> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto lhs = co_await compileNode(node->left, info->left);
 	auto rhs = co_await compileNode(node->right, info->right);
 	LLVMValueRef result = NULL;
@@ -2788,10 +2956,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 		}
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(std::shared_ptr<AltaCore::AST::FunctionCallExpression> node, std::shared_ptr<AltaCore::DH::FunctionCallExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	LLVMValueRef result = NULL;
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
@@ -2915,6 +3086,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 		result = LLVMBuildCall2(_builders.top().get(), funcType, result, args.data(), args.size(), isVoid ? "" : ("@call_" + tmpIdxStr).c_str());
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
@@ -2944,6 +3116,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAttributeStatement(std::s
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalStatement(std::shared_ptr<AltaCore::AST::ConditionalStatement> node, std::shared_ptr<AltaCore::DH::ConditionalStatement> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto entryBlock = LLVMGetInsertBlock(_builders.top().get());
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
@@ -3026,10 +3200,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalStatement(std:
 
 	LLVMPositionBuilderAtEnd(_builders.top().get(), finalBlock);
 
+	popDebugLocation();
 	co_return NULL;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std::shared_ptr<AltaCore::AST::ConditionalExpression> node, std::shared_ptr<AltaCore::DH::ConditionalExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	LLVMValueRef result = NULL;
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
@@ -3069,6 +3246,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std
 	LLVMAddIncoming(result, &primaryResult, &finalTrueBlock, 1);
 	LLVMAddIncoming(result, &secondaryResult, &finalFalseBlock, 1);
 
+	popDebugLocation();
 	co_return result;
 };
 
@@ -3084,6 +3262,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 		}
 
 		auto llclassType = co_await defineClassType(info->klass);
+		translateClassDebug(info->klass);
 
 		std::array<LLVMTypeRef, 3> initParams {
 			co_await translateType(info->initializerMethod->parentClassType),
@@ -3098,11 +3277,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 		}
 
 		auto initFunc = _definedFunctions["_init_" + info->klass->id];
+		auto debugFunc = translateFunction(info->initializerMethod, true);
+		LLVMSetSubprogram(initFunc, debugFunc);
 
 		LLVMSetLinkage(initFunc, LLVMInternalLinkage);
 
 		_builders.push(llwrap(LLVMCreateBuilderInContext(_llcontext.get())));
 		pushStack(ScopeStack::Type::Function);
+		pushUnknownDebugLocation(info->initializerMethod->scope);
 
 		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), initFunc, "@entry");
 		LLVMPositionBuilderAtEnd(_builders.top().get(), entryBlock);
@@ -3372,6 +3554,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 
 		LLVMBuildRetVoid(_builders.top().get());
 
+		popDebugLocation();
 		popStack();
 		_builders.pop();
 
@@ -3480,8 +3663,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 	auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 	LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
+	auto llfuncDebug = translateFunction(info->method, true);
+	LLVMSetSubprogram(llfunc, llfuncDebug);
+
 	_builders.push(builder);
 	pushStack(ScopeStack::Type::Function);
+	pushUnknownDebugLocation(info->method->scope);
 
 	if (isCtor || isTo || isDtor) {
 		LLVMSetValueName(LLVMGetParam(llfunc, 0), "@this");
@@ -3617,7 +3804,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 			}
 		}
 	} else {
+		pushDebugLocation(node->body->position, info->method->scope);
 		co_await compileNode(node->body, info->body);
+		popDebugLocation();
 	}
 
 	if (isDtor) {
@@ -3810,10 +3999,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		std::cerr << "TODO: handle special class methods with optionals/defaults" << std::endl;
 	}
 
+	popDebugLocation();
 	co_return NULL;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpression(std::shared_ptr<AltaCore::AST::ClassInstantiationExpression> node, std::shared_ptr<AltaCore::DH::ClassInstantiationExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	LLVMValueRef result = NULL;
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
@@ -3960,10 +4152,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpress
 		result = LLVMBuildCall2(_builders.top().get(), funcType, _definedFunctions[methodID], args.data(), args.size(), ("@class_inst_" + tmpIdxStr).c_str());
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compilePointerExpression(std::shared_ptr<AltaCore::AST::PointerExpression> node, std::shared_ptr<AltaCore::DH::PointerExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto result = co_await compileNode(node->target, info->target);
 	auto type = AltaCore::DET::Type::getUnderlyingType(info->target.get());
 
@@ -3971,10 +4166,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compilePointerExpression(std::sh
 		result = co_await tmpify(result, type, true);
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDereferenceExpression(std::shared_ptr<AltaCore::AST::DereferenceExpression> node, std::shared_ptr<AltaCore::DH::DereferenceExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto result = co_await compileNode(node->target, info->target);
 	auto type = AltaCore::DET::Type::getUnderlyingType(info->target.get());
 
@@ -3995,6 +4193,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDereferenceExpression(std
 				LLVMConstInt(gepStructIndexType, 1, false), // get the contained type from the optional
 			};
 			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(type->destroyReferences()), result, gepIndices.data(), gepIndices.size(), ("@opt_unwrap_ref_" + tmpIdxStr).c_str());
+			if (type->optionalTarget->referenceLevel() > 0) {
+				// this behavior is neither ideal nor desired, but for the sake of preserving compatibility with the existing code,
+				// when the optional contains a reference, we return that reference instead of a reference to the reference.
+				//
+				// i think i'm going to rework the compiler (including the frontend) to just do away with the current reference behavior (and maybe references altogether),
+				// since it's way too confusing and error-prone.
+				result = LLVMBuildLoad2(_builders.top().get(), co_await translateType(type->optionalTarget), result, ("@opt_unwrap_ref_deref_" + tmpIdxStr).c_str());
+			}
 		} else {
 			result = LLVMBuildExtractValue(_builders.top().get(), result, 1, ("@opt_unwrap_" + tmpIdxStr).c_str());
 		}
@@ -4002,10 +4208,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDereferenceExpression(std
 		throw std::runtime_error("Invalid dereference");
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileWhileLoopStatement(std::shared_ptr<AltaCore::AST::WhileLoopStatement> node, std::shared_ptr<AltaCore::DH::WhileLoopStatement> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
 
@@ -4019,6 +4228,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileWhileLoopStatement(std::s
 	LLVMBuildBr(_builders.top().get(), condBlock);
 
 	pushStack(ScopeStack::Type::Other);
+	pushLoop(doneBlock, condBlock);
 
 	LLVMPositionBuilderAtEnd(_builders.top().get(), condBlock);
 
@@ -4037,17 +4247,24 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileWhileLoopStatement(std::s
 	co_await currentStack().cleanup();
 	LLVMBuildBr(_builders.top().get(), condBlock);
 
+	popLoop();
 	popStack();
 
 	LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
 
+	popDebugLocation();
 	co_return NULL;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileCastExpression(std::shared_ptr<AltaCore::AST::CastExpression> node, std::shared_ptr<AltaCore::DH::CastExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto expr = co_await compileNode(node->target, info->target);
 	auto exprType = AltaCore::DET::Type::getUnderlyingType(info->target.get());
-	co_return co_await cast(expr, exprType, info->type->type, false, additionalCopyInfo(node->target, info->target), true, &node->position);
+	auto val = co_await cast(expr, exprType, info->type->type, false, additionalCopyInfo(node->target, info->target), true, &node->position);
+
+	popDebugLocation();
+	co_return val;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassReadAccessorDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassReadAccessorDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassReadAccessorDefinitionStatement> info) {
@@ -4061,6 +4278,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileCharacterLiteralNode(std:
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::shared_ptr<AltaCore::AST::SubscriptExpression> node, std::shared_ptr<AltaCore::DH::SubscriptExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	LLVMValueRef result = NULL;
 
 	if (info->enumeration) {
@@ -4090,6 +4309,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::
 		}
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
@@ -4100,6 +4320,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSuperClassFetch(std::shar
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileInstanceofExpression(std::shared_ptr<AltaCore::AST::InstanceofExpression> node, std::shared_ptr<AltaCore::DH::InstanceofExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto targetType = AltaCore::DET::Type::getUnderlyingType(info->target.get());
 	auto& testType = info->type->type;
 	auto tmpIdx = nextTemp();
@@ -4180,6 +4402,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileInstanceofExpression(std:
 		result = llfalse;
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
@@ -4190,6 +4413,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileForLoopStatement(std::sha
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(std::shared_ptr<AltaCore::AST::RangedForLoopStatement> node, std::shared_ptr<AltaCore::DH::RangedForLoopStatement> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
@@ -4208,11 +4433,16 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 		auto startVar = co_await tmpify(castedStart, info->counterType->type, true);
 		_definedVariables[info->counter->id] = startVar;
 
+		auto debugCounter = LLVMDIBuilderCreateAutoVariable(_debugBuilder.get(), translateScope(info->wrapperScope), info->counter->name.c_str(), info->counter->name.size(), debugFileForScopeItem(info->counter), node->position.line, translateTypeDebug(info->counter->type), false, LLVMDIFlagZero, 0);
+		auto debugLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), node->position.line, node->position.column, translateScope(info->wrapperScope), NULL);
+		LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), startVar, debugCounter, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), debugLoc, LLVMGetInsertBlock(_builders.top().get()));
+
 		LLVMSetValueName(startVar, ("@ranged_for_counter_" + tmpIdxStr).c_str());
 
 		LLVMBuildBr(_builders.top().get(), condBlock);
 
 		pushStack(ScopeStack::Type::Other);
+		pushLoop(doneBlock, incdecBlock);
 
 		LLVMPositionBuilderAtEnd(_builders.top().get(), condBlock);
 
@@ -4285,6 +4515,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 		co_await currentStack().cleanup();
 		LLVMBuildBr(_builders.top().get(), incdecBlock);
 
+		popLoop();
 		popStack();
 
 		// now build the done block
@@ -4296,10 +4527,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 		std::cerr << "TODO: support generator-based for-loops" << std::endl;
 	}
 
+	popDebugLocation();
 	co_return NULL;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileUnaryOperation(std::shared_ptr<AltaCore::AST::UnaryOperation> node, std::shared_ptr<AltaCore::DH::UnaryOperation> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	LLVMValueRef result = NULL;
 	auto compiled = co_await compileNode(node->target, info->target);
 	auto tmpIdx = nextTemp();
@@ -4374,6 +4608,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileUnaryOperation(std::share
 		}
 	}
 
+	popDebugLocation();
 	co_return result;
 };
 
@@ -4412,8 +4647,34 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDeleteStatement(std::shar
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileControlDirective(std::shared_ptr<AltaCore::AST::ControlDirective> node, std::shared_ptr<AltaCore::DH::Node> info) {
-	// TODO
-	std::cerr << "TODO: ControlDirective" << std::endl;
+	pushDebugLocation(node->position, info->inputScope);
+
+	if (_loops.empty()) {
+		throw std::runtime_error("Found control directive (break/continue) but no loop found");
+	}
+
+	auto& loop = currentLoop();
+
+	// clean up all the scopes up to and including the loop's root scope
+	for (auto rit = _stacks.rbegin(); rit != _stacks.rend(); ++rit) {
+		rit->cleanup();
+		if (&*rit == loop.rootScope) {
+			break;
+		}
+	}
+
+	// now branch to the target block
+	LLVMBuildBr(_builders.top().get(), node->isBreak ? loop.breakBlock : loop.continueBlock);
+
+	// insert a dummy block in case we generate code after the continue or break.
+	//
+	// this is just for the sake of being able to compile; this could would never actually be executed.
+	auto tmpIdx = nextTemp();
+	auto tmpIdxStr = std::to_string(tmpIdx);
+	auto dummy = LLVMAppendBasicBlockInContext(_llcontext.get(), LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get())), ("@control_dummy_block_" + tmpIdxStr).c_str());
+	LLVMPositionBuilderAtEnd(_builders.top().get(), dummy);
+
+	popDebugLocation();
 	co_return NULL;
 };
 
@@ -4455,7 +4716,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(std::shared_ptr<AltaCore::AST::SpecialFetchExpression> node, std::shared_ptr<AltaCore::DH::SpecialFetchExpression> info) {
+	pushDebugLocation(node->position, info->inputScope);
+
 	if (invalidValueExpressionTable.find(info->id) != invalidValueExpressionTable.end()) {
+		popDebugLocation();
 		co_return LLVMConstNull(co_await translateType(invalidValueExpressionTable[info->id]));
 	} else if (info->items.size() == 1 && info->items.front()->id == AltaCore::Util::getModule(info->inputScope.get()).lock()->internal.schedulerVariable->id) {
 		throw std::runtime_error("TODO: scheduler fetch");
@@ -4468,6 +4732,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(st
 			throw std::runtime_error("special fetch variable not defined");
 		}
 
+		popDebugLocation();
 		co_return result;
 	}
 };
@@ -4479,10 +4744,23 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 	auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 	LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
+	auto llfuncDebug = translateFunction(info->method, true);
+	LLVMSetSubprogram(llfunc, llfuncDebug);
+
 	_builders.push(builder);
 	pushStack(ScopeStack::Type::Function);
+	pushUnknownDebugLocation(info->method->scope);
 
-	LLVMSetValueName(LLVMGetParam(llfunc, 0), "@this");
+	auto selfParam = LLVMGetParam(llfunc, 0);
+	LLVMSetValueName(selfParam, "@this");
+
+	auto tmpThis = co_await tmpify(selfParam, info->method->parentClassType, false, true);
+
+	auto thisDebugType = LLVMDIBuilderCreateObjectPointerType(_debugBuilder.get(), translateTypeDebug(info->method->parentClassType));
+	auto thisDebugVar = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->method->scope), "this", sizeof("this") - 1, 1, debugFileForScopeItem(info->method), node->position.line, thisDebugType, false, LLVMDIFlagZero);
+	auto thisDebugLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), node->position.line, node->position.column, translateScope(info->method->scope), NULL);
+
+	LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmpThis, thisDebugVar, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), thisDebugLoc, LLVMGetInsertBlock(_builders.top().get()));
 
 	if (info->method->parameterVariables.size() > 0) {
 		const auto& var = info->method->parameterVariables.front();
@@ -4494,10 +4772,17 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 		currentStack().pushItem(llparam, var->type);
 		LLVMSetValueName(llparam, "@value@on_stack");
 
+		auto debugVar = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateParentScope(var), "__value", sizeof("__value") - 1, 2, debugFileForScopeItem(var), node->position.line, translateTypeDebug(var->type), false, LLVMDIFlagZero);
+		auto debugLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), node->position.line, node->position.column, translateParentScope(var), NULL);
+
+		LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), llparam, debugVar, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), debugLoc, LLVMGetInsertBlock(_builders.top().get()));
+
 		_definedVariables[var->id] = llparam;
 	}
 
+	pushDebugLocation(node->block->position, info->method->scope);
 	co_await compileNode(node->block, info->block);
+	popDebugLocation();
 
 	if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(_builders.top().get()))) {
 		auto functionReturnType = info->method->isGenerator ? info->method->generatorReturnType : (info->method->isAsync ? info->method->coroutineReturnType : info->method->returnType);
@@ -4512,6 +4797,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 		}
 	}
 
+	popDebugLocation();
 	popStack();
 	_builders.pop();
 
@@ -4520,6 +4806,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode(std::shared_ptr<AltaCore::AST::EnumerationDefinitionNode> node, std::shared_ptr<AltaCore::DH::EnumerationDefinitionNode> info) {
 	auto lltype = co_await translateType(info->memberType);
+	std::vector<LLVMMetadataRef> debugMembers;
 
 	if (!info->memberType->isNative) {
 		throw std::runtime_error("Support non-native enums");
@@ -4545,8 +4832,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode
 
 		LLVMSetInitializer(_definedVariables[memberVar->id], llval);
 
+		debugMembers.push_back(LLVMDIBuilderCreateEnumerator(_debugBuilder.get(), key.c_str(), key.size(), memberVar->type->isSigned() ? LLVMConstIntGetSExtValue(llval) : (int64_t)LLVMConstIntGetZExtValue(llval), !memberVar->type->isSigned()));
+
 		prevVal = llval;
 	}
+
+	LLVMDIBuilderCreateEnumerationType(_debugBuilder.get(), translateParentScope(info->ns), info->ns->name.c_str(), info->ns->name.size(), debugFileForScopeItem(info->ns), node->position.line, LLVMStoreSizeOfType(_targetData.get(), lltype) * 8, LLVMABIAlignmentOfType(_targetData.get(), lltype) * 8, debugMembers.data(), debugMembers.size(), translateTypeDebug(info->memberType));
 
 	co_return NULL;
 };
@@ -4572,16 +4863,26 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAwaitExpression(std::shar
 void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 	_currentFile = root->info->module->path;
 
-	auto filenameStr = _currentFile.filename();
+	auto filenameStr = _currentFile.basename();
 	auto dirnameStr = _currentFile.dirname().toString();
 	_debugFiles[_currentFile] = LLVMDIBuilderCreateFile(_debugBuilder.get(), filenameStr.c_str(), filenameStr.size(), dirnameStr.c_str(), dirnameStr.size());
-	_compileUnits[_currentFile] = LLVMDIBuilderCreateCompileUnit(_debugBuilder.get(), LLVMDWARFSourceLanguageC, currentDebugFile(), ALTA_COMPILER_NAME, sizeof(ALTA_COMPILER_NAME), /* TODO */ false, "", 0, 0x01000000, "", 0, LLVMDWARFEmissionFull, 0, true, false, "", 0, "", 0);
+	_compileUnits[_currentFile] = LLVMDIBuilderCreateCompileUnit(_debugBuilder.get(), LLVMDWARFSourceLanguageC_plus_plus, currentDebugFile(), ALTA_COMPILER_NAME, sizeof(ALTA_COMPILER_NAME), /* TODO */ false, "", 0, 0x01000000, "", 0, LLVMDWARFEmissionFull, 0, true, false, "", 0, "", 0);
+	_rootDebugScopes[_currentFile] = _debugFiles[_currentFile];
 
 	if (!_definedTypes["_Alta_class_destructor"]) {
 		std::array<LLVMTypeRef, 1> dtorParams {
 			LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0),
 		};
 		_definedTypes["_Alta_class_destructor"] = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), dtorParams.data(), dtorParams.size(), false);
+
+		auto debugVoidType = LLVMDIBuilderCreateUnspecifiedType(_debugBuilder.get(), "void", 4);
+
+		std::array<LLVMMetadataRef, 2> dtorDebugParams {
+			debugVoidType,
+			LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugVoidType, _pointerBits, _pointerBits, 0, "", 0),
+		};
+
+		_definedDebugTypes["_Alta_class_destructor"] = LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), _unknownDebugFile, dtorDebugParams.data(), dtorDebugParams.size(), LLVMDIFlagZero);
 	}
 
 	if (!_definedTypes["_Alta_class_info"]) {
@@ -4606,7 +4907,41 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		members[4] = i64Type;
 		members[5] = i64Type;
 		members[6] = i64Type;
-		_definedTypes["_Alta_class_info"] = LLVMStructType(members.data(), members.size(), false);
+		auto classInfoType = _definedTypes["_Alta_class_info"] = LLVMStructType(members.data(), members.size(), false);
+
+		auto debugCharType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "byte", 4, 8, llvm::dwarf::DW_ATE_unsigned_char, LLVMDIFlagZero);
+		auto debugStringType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugCharType, _pointerBits, _pointerBits, 0, "", 0);
+		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
+
+		auto mapType = [&](size_t index) {
+			switch (index) {
+				case 0:
+				case 2:
+					return debugStringType;
+
+				case 3:
+				case 4:
+				case 5:
+				case 6:
+					return debugI64Type;
+
+				case 1: {
+					auto debugDtorType = _definedDebugTypes["_Alta_class_destructor"];
+					return LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugDtorType, _pointerBits, _pointerBits, 0, "", 0);
+				};
+
+				default:
+					throw std::out_of_range("bad index");
+			}
+		};
+
+		std::array<LLVMMetadataRef, 7> debugMembers;
+		for (size_t i = 0; i < debugMembers.size(); ++i) {
+			auto debugType = mapType(i);
+			debugMembers[i] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), classInfoType, i) * 8, LLVMDIFlagZero, debugType);
+		}
+
+		_definedDebugTypes["_Alta_class_info"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_class_info", sizeof("_Alta_class_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), classInfoType), LLVMABIAlignmentOfType(_targetData.get(), classInfoType), LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
 	}
 
 	if (!_definedTypes["_Alta_instance_info"]) {
@@ -4617,7 +4952,15 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		*/
 		std::array<LLVMTypeRef, 1> members;
 		members[0] = LLVMPointerType(_definedTypes["_Alta_class_info"], 0);
-		_definedTypes["_Alta_instance_info"] = LLVMStructType(members.data(), members.size(), false);
+		auto instanceInfoStruct = _definedTypes["_Alta_instance_info"] = LLVMStructType(members.data(), members.size(), false);
+
+		auto debugClassInfo = _definedDebugTypes["_Alta_class_info"];
+
+		std::array<LLVMMetadataRef, 1> debugElements {
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugClassInfo), LLVMDITypeGetAlignInBits(debugClassInfo), 0, LLVMDIFlagZero, debugClassInfo),
+		};
+
+		_definedDebugTypes["_Alta_instance_info"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_instance_info", sizeof("_Alta_instance_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), instanceInfoStruct) * 8, LLVMABIAlignmentOfType(_targetData.get(), instanceInfoStruct) * 8, LLVMDIFlagZero, NULL, debugElements.data(), debugElements.size(), 0, NULL, "", 0);
 	}
 
 	if (!_definedTypes["_Alta_basic_class"]) {
@@ -4658,14 +5001,15 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			// lambda state pointer
 			voidPointer,
 		};
+
+		auto funcType = _definedTypes["_Alta_basic_function"] = LLVMStructType(members.data(), members.size(), false);
+
 		std::array<LLVMMetadataRef, 2> debugMembers {
-			debugVoidPointer,
-			debugVoidPointer,
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 0), LLVMDIFlagZero, debugVoidPointer),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 1), LLVMDIFlagZero, debugVoidPointer),
 		};
 
-		_definedTypes["_Alta_basic_function"] = LLVMStructType(members.data(), members.size(), false);
-
-		_definedDebugTypes["_Alta_basic_function"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_function", sizeof("_Alta_basic_function") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), _definedTypes["_Alta_basic_function"]), LLVMABIAlignmentOfType(_targetData.get(), _definedTypes["_Alta_basic_function"]), LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
+		_definedDebugTypes["_Alta_basic_function"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_function", sizeof("_Alta_basic_function") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), funcType) * 8, LLVMABIAlignmentOfType(_targetData.get(), funcType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
 	}
 
 	if (!_definedTypes["_Alta_basic_lambda_state"]) {
