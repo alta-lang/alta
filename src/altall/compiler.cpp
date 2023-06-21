@@ -1079,8 +1079,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 	co_return result;
 };
 
-AltaLL::Compiler::LLCoroutine AltaLL::Compiler::loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType) {
-	for (size_t i = 0; i < exprType->referenceLevel(); ++i) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, size_t finalRefLevel) {
+	for (size_t i = finalRefLevel; i < exprType->referenceLevel(); ++i) {
 		exprType = exprType->dereference();
 		expr = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType), expr, "");
 	}
@@ -2537,6 +2537,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			uint64_t mask = UINT64_MAX >> (64 - bitCount);
 			auto underlyingType = co_await translateType(info->targetType->bitfield->underlyingBitfieldType.lock());
 
+			_bitfieldAccessTargets[info->id] = result;
+
 			result = co_await loadRef(result, info->targetType);
 			result = LLVMBuildAnd(_builders.top().get(), result, LLVMConstInt(underlyingType, mask, false), ("@bitfield_access_" + tmpIdxStr + "_masked").c_str());
 			result = LLVMBuildLShr(_builders.top().get(), result, LLVMConstInt(underlyingType, start, false), ("@bitfield_access_" + tmpIdxStr + "_shifted").c_str());
@@ -2768,10 +2770,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 				result = LLVMBuildShl(_builders.top().get(), extended, LLVMConstInt(underlyingType, start, false), ("@bitfield_assignment_" + tmpIdxStr + "_shift").c_str());
 				result = LLVMBuildOr(_builders.top().get(), result, bitfieldFetchMasked, ("@bitfield_assignment_" + tmpIdxStr).c_str());
 
-				std::cerr << "TODO: bitfield assignment: assign back result" << std::endl;
+				auto accessTarget = _bitfieldAccessTargets[acc->id];
+				accessTarget = co_await loadRef(accessTarget, acc->targetType, 1);
+
+				LLVMBuildStore(_builders.top().get(), result, accessTarget);
 
 				popDebugLocation();
-				co_return result;
+				co_return rhs;
 			}
 		}
 	}

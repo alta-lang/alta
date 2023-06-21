@@ -289,6 +289,7 @@ namespace AltaLL {
 		unsigned int _compositeCounter = 0;
 		std::stack<LLVMMetadataRef> _debugLocations;
 		std::stack<LoopEntry> _loops;
+		ALTACORE_MAP<std::string, LLVMValueRef> _bitfieldAccessTargets;
 
 		inline LLVMMetadataRef currentDebugFile() {
 			return _debugFiles[_currentFile];
@@ -649,7 +650,7 @@ namespace AltaLL {
 		LLCoroutine doCopyCtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, CopyInfo additionalCopyInfo, bool* didCopy = nullptr);
 		LLCoroutine doDtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didDtor = nullptr, bool force = false);
 
-		LLCoroutine loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
+		LLCoroutine loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, size_t finalRefLevel = 0);
 
 		LLCoroutine getRealInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
 		LLCoroutine getRootInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
