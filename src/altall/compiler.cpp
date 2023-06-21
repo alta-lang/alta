@@ -421,12 +421,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 				currentType = dest;
 				copy = false;
 			} else if (component.special == SCT::WrapFunction) {
-				throw std::runtime_error("TODO: support function wrapping");
-
 				auto wrappedCopy = exprType->copy();
 				wrappedCopy->isRawFunction = false;
 				currentType = dest;
 				copy = false;
+
+				auto wrapped = LLVMConstNull(co_await translateType(wrappedCopy));
+				result = LLVMBuildInsertValue(_builders.top().get(), wrapped, result, 0, ("@function_wrap_" + tmpIdxStr).c_str());
 			}
 			bool didCopy = false;
 			if (copy && additionalCopyInfo.first && canCopy()) {

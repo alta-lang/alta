@@ -1,5 +1,9 @@
 import printLine from "io"
 
+function doAnotherThing(someNum: int): int {
+	return someNum + 4
+}
+
 literal function main(): int {
 	let foo = 5
 	let bar = 8
@@ -17,6 +21,16 @@ literal function main(): int {
 	printLine("foo = ", foo) # 3
 	printLine("bar = ", bar) # 8
 	printLine("do a thing returned: ", doAThing(7)) # 7
+
+	doAThing = doAnotherThing
+
+	printLine("foo = ", foo) # 3
+	printLine("bar = ", bar) # 8
+	printLine("do a thing returned: ", doAThing(3)) # 7
+
+	printLine("foo = ", foo) # 3
+	printLine("bar = ", bar) # 8
+	printLine("do a thing returned: ", doAThing(7)) # 11
 
 	return 0
 }
