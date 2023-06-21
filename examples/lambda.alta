@@ -1,0 +1,22 @@
+import printLine from "io"
+
+literal function main(): int {
+	let foo = 5
+	let bar = 8
+
+	let doAThing = @copy(bar) (someNum: int) => int {
+		foo = someNum
+		bar = someNum
+		return someNum
+	}
+
+	printLine("foo = ", foo) # 5
+	printLine("bar = ", bar) # 8
+	printLine("do a thing returned: ", doAThing(3)) # 3
+
+	printLine("foo = ", foo) # 3
+	printLine("bar = ", bar) # 8
+	printLine("do a thing returned: ", doAThing(7)) # 7
+
+	return 0
+}

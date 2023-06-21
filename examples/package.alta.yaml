@@ -22,3 +22,6 @@ targets:
 - name: tcp-client
   main: tcp-client.alta
   type: exe
+- name: lambda
+  main: lambda.alta
+  type: exe

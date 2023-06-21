@@ -1,6 +1,7 @@
 #ifndef ALTALL_COMPILER_HPP
 #define ALTALL_COMPILER_HPP
 
+#include "altacore/det-shared.hpp"
 #include "altacore/det/class.hpp"
 #include "altacore/det/module.hpp"
 #include "altacore/det/scope-item.hpp"
@@ -339,7 +340,23 @@ namespace AltaLL {
 				auto tmpNode = _definedScopes[func->id] = LLVMTemporaryMDNode(_llcontext.get(), NULL, 0);
 
 				auto llparentScope = translateScope(parentScope);
-				LLVMMetadataRef funcType = translateTypeDebug(AltaCore::DET::Type::getUnderlyingType(func), false);
+
+				if (func->isLambda) {
+					// a subprogram can't be the direct child of another subprogram.
+					// *however*, a subprogram is allowed to have a nested class/structure definition,
+					// and *this* can have a subprogram attached to it.
+					auto dummy = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(AltaCore::Util::getFunction(parentScope).lock()), "<lambda>", sizeof("<lambda>") - 1, debugFile, 0, 0, 0, LLVMDIFlagArtificial, NULL, NULL, 0, 0, NULL, "", 0);
+					llparentScope = dummy;
+				}
+
+				auto altaFuncType = AltaCore::DET::Type::getUnderlyingType(func);
+
+				if (func->isLambda) {
+					altaFuncType->isRawFunction = true;
+					altaFuncType->parameters.insert(altaFuncType->parameters.begin(), { "@lambda_state", std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Void)->point(), false, "" });
+				}
+
+				LLVMMetadataRef funcType = translateTypeDebug(altaFuncType, false);
 
 				uint64_t flags = LLVMDIFlagZero;
 

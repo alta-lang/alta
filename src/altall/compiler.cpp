@@ -1,6 +1,7 @@
 #include "altacore/det-shared.hpp"
 #include "altacore/det/function.hpp"
 #include "altacore/det/type.hpp"
+#include "altacore/util.hpp"
 #include <altall/compiler.hpp>
 #include <altall/mangle.hpp>
 #include <altall/altall.hpp>
@@ -116,7 +117,8 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::cleanup() {
 		co_return;
 	}
 
-	for (const auto& item: items) {
+	for (auto rit = items.rbegin(); rit != items.rend(); ++rit) {
+		const auto& item = *rit;
 		LLVMBasicBlockRef doneBlock = NULL;
 
 		if (item.type->referenceLevel() > 0) {
@@ -936,7 +938,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_lambda_state::reference_count
 			};
 
-			auto refCountPtr = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_basic_lambda_state"], lambdaState, gepIndices.data(), gepIndices.size(), "");
+			auto refCountPtr = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_basic_lambda_state"], lambdaState, gepIndices.data(), gepIndices.size(), "@dtor_fat_func_refcnt_ptr");
 
 			// UDecWrap is not available in my current version of LLVM (nor in any version of the C API I can currently find)
 			//auto old = LLVMBuildAtomicRMW(_builders.top().get(),  LLVMAtomicRMWBinOpUDecWrap, refCountPtr, LLVMConstInt(refCountType, 0, false), LLVMAtomicOrderingRelease, false);
@@ -952,13 +954,15 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), cleanupBlock);
 
-			// for now, just abort
-			auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
-			if (!_definedFunctions["abort"]) {
-				_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
-			}
+			gepIndices[1] = LLVMConstInt(gepStructIndexType, 1, false); // _Alta_basic_lambda_state::destructor
+			auto dtorPtr = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_basic_lambda_state"], lambdaState, gepIndices.data(), gepIndices.size(), "@dtor_fat_func_dtor_ptr");
+			auto dtor = LLVMBuildLoad2(_builders.top().get(), LLVMPointerType(_definedTypes["_Alta_lambda_destructor"], 0), dtorPtr, "@dtor_fat_func_dtor");
 
-			LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
+			std::array<LLVMValueRef, 1> dtorArgs {
+				lambdaState,
+			};
+
+			LLVMBuildCall2(_builders.top().get(), _definedTypes["_Alta_lambda_destructor"], dtor, dtorArgs.data(), dtorArgs.size(), "");
 
 			LLVMBuildBr(_builders.top().get(), doneBlock);
 
@@ -1471,6 +1475,11 @@ AltaLL::Compiler::Coroutine<std::pair<LLVMTypeRef, LLVMValueRef>> AltaLL::Compil
 
 	if (function->isConstructor) {
 		altaFuncType->returnType = function->parentClassType->destroyReferences();
+	}
+
+	if (function->isLambda) {
+		altaFuncType->isRawFunction = true;
+		altaFuncType->parameters.insert(altaFuncType->parameters.begin(), { "@lambda_state", std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Void)->point(), false, "" });
 	}
 
 	if (!llfuncType) {
@@ -2456,7 +2465,20 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			auto parentFunc = AltaCore::Util::getFunction(info->inputScope).lock();
 
 			if (parentFunc && parentFunc->isLambda) {
-				throw std::runtime_error("TODO: support lambdas");
+				for (const auto& var: parentFunc->copiedVariables) {
+					if (var->id == info->narrowedTo->id) {
+						result = _definedVariables["@lambda_copy@" + mangleName(parentFunc) + "@" + var->id];
+						popDebugLocation();
+						co_return result;
+					}
+				}
+				for (const auto& var: parentFunc->referencedVariables) {
+					if (var->id == info->narrowedTo->id) {
+						result = _definedVariables["@lambda_ref@" + mangleName(parentFunc) + "@" + var->id];
+						popDebugLocation();
+						co_return result;
+					}
+				}
 			}
 
 			result = co_await tmpify(node->target, info->target);
@@ -2516,7 +2538,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 
 			result = co_await loadRef(result, info->targetType);
 			result = LLVMBuildAnd(_builders.top().get(), result, LLVMConstInt(underlyingType, mask, false), ("@bitfield_access_" + tmpIdxStr + "_masked").c_str());
-			result = LLVMBuildLShr(_builders.top().get(), result, LLVMConstInt(underlyingType, start, false), ("@bitfield_access_" + tmpIdxStr).c_str());
+			result = LLVMBuildLShr(_builders.top().get(), result, LLVMConstInt(underlyingType, start, false), ("@bitfield_access_" + tmpIdxStr + "_shifted").c_str());
+			result = LLVMBuildIntCast2(_builders.top().get(), result, co_await translateType(field->type->destroyIndirection()), field->type->isSigned(), ("@bitfield_access_" + tmpIdxStr).c_str());
 		} else {
 			// find the index of the variable
 			size_t index = 0;
@@ -2624,6 +2647,23 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 		throw std::runtime_error("Invalid fetch: must be narrowed");
 	}
 
+	auto parentFunc = AltaCore::Util::getFunction(info->inputScope).lock();
+
+	if (parentFunc && parentFunc->isLambda) {
+		for (const auto& var: parentFunc->copiedVariables) {
+			if (var->id == info->narrowedTo->id) {
+				popDebugLocation();
+				co_return _definedVariables["@lambda_copy@" + mangleName(parentFunc) + "@" + var->id];
+			}
+		}
+		for (const auto& var: parentFunc->referencedVariables) {
+			if (var->id == info->narrowedTo->id) {
+				popDebugLocation();
+				co_return _definedVariables["@lambda_ref@" + mangleName(parentFunc) + "@" + var->id];
+			}
+		}
+	}
+
 	if (info->narrowedTo->nodeType() == AltaCore::DET::NodeType::Variable && info->narrowedTo->name == "this") {
 		auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(info->narrowedTo);
 		if (!var->parentScope.expired() && !var->parentScope.lock()->parentClass.expired()) {
@@ -2713,16 +2753,18 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 	if (auto acc = std::dynamic_pointer_cast<AltaCore::DH::Accessor>(info->target)) {
 		if (auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(acc->narrowedTo)) {
 			if (var->isBitfieldEntry) {
-				// "get operand" accesses the operand of the `lshr`, so we're left with the `and`
-				auto bitfieldFetchMasked = LLVMGetOperand(lhs, 0);
+				// "get operand" accesses the operand of the cast, so we're left with the `lshr`, which we then access so that we're left with the `and`
+				auto bitfieldFetchMasked = LLVMGetOperand(LLVMGetOperand(lhs, 0), 0);
 				auto [start, end] = var->bitfieldBits;
 				auto bitCount = (end - start) + 1;
 				uint64_t mask = UINT64_MAX >> (64 - bitCount);
-				auto underlyingType = co_await translateType(info->targetType->bitfield->underlyingBitfieldType.lock());
+				auto bitfieldClass = AltaCore::Util::getClass(var->parentScope.lock()).lock();
+				auto underlyingType = co_await translateType(bitfieldClass->underlyingBitfieldType.lock());
 
 				rhs = co_await loadRef(rhs, rhsType);
 
-				result = LLVMBuildShl(_builders.top().get(), rhs, LLVMConstInt(underlyingType, start, false), ("@bitfield_assignment_" + tmpIdxStr + "_shift").c_str());
+				auto extended = LLVMBuildIntCast2(_builders.top().get(), rhs, underlyingType, info->targetType->destroyIndirection()->isSigned(), ("@bitfield_assignment_" + tmpIdxStr + "_extended").c_str());
+				result = LLVMBuildShl(_builders.top().get(), extended, LLVMConstInt(underlyingType, start, false), ("@bitfield_assignment_" + tmpIdxStr + "_shift").c_str());
 				result = LLVMBuildOr(_builders.top().get(), result, bitfieldFetchMasked, ("@bitfield_assignment_" + tmpIdxStr).c_str());
 
 				std::cerr << "TODO: bitfield assignment: assign back result" << std::endl;
@@ -3799,7 +3841,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 			if (member->type->indirectionLevel() > 0) {
 				LLVMBuildStore(_builders.top().get(), LLVMBuildLoad2(_builders.top().get(), co_await translateType(member->type), sourceMember, ""), selfMember);
 			} else {
-				auto copy = co_await doCopyCtor(sourceMember, member->type->reference(), std::make_pair(true, false));
+				bool didCopy = false;
+				auto copy = co_await doCopyCtor(sourceMember, member->type->reference(), std::make_pair(true, false), &didCopy);
+				if (!didCopy) {
+					copy = LLVMBuildLoad2(_builders.top().get(), co_await translateType(member->type), sourceMember, ("@that_load@" + member->name).c_str());
+				}
 				LLVMBuildStore(_builders.top().get(), copy, selfMember);
 			}
 		}
@@ -3817,12 +3863,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 		// first, destroy members
 
-		for (size_t i = 0; i < info->klass->members.size(); ++i) {
-			const auto& member = info->klass->members[i];
+		for (size_t i = info->klass->members.size(); i > 0; --i) {
+			auto idx = i - 1;
+			const auto& member = info->klass->members[idx];
 
 			std::array<LLVMValueRef, 2> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
-				LLVMConstInt(gepStructIndexType, 1 + info->klass->parents.size() + i, false), // the member
+				LLVMConstInt(gepStructIndexType, 1 + info->klass->parents.size() + idx, false), // the member
 			};
 
 			auto llmember = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), ("@this_" + member->name).c_str());
@@ -4708,11 +4755,277 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBitfieldDefinitionNode(st
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::shared_ptr<AltaCore::AST::LambdaExpression> node, std::shared_ptr<AltaCore::DH::LambdaExpression> info) {
-	// TODO
-	std::cerr << "TODO: LambdaExpression" << std::endl;
-
 	auto lllambdaType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(info.get()));
-	co_return LLVMConstNull(lllambdaType);
+
+	auto retType = co_await translateType(info->function->returnType);
+
+	if (info->function->isGenerator || info->function->isAsync) {
+		throw std::runtime_error("TODO: generator lambdas");
+	}
+
+	std::vector<LLVMTypeRef> lambdaStateMembers {
+		_definedTypes["_Alta_basic_lambda_state"],
+	};
+
+	for (const auto& ref: info->function->referencedVariables) {
+		// TODO: filter out copied variables from the referenced variables vector in a higher layer (e.g. AltaCore)
+		bool found = false;
+		for (const auto& copy: info->function->copiedVariables) {
+			if (copy->id == ref->id) {
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			continue;
+		}
+
+		auto target = co_await translateType(ref->type);
+		lambdaStateMembers.push_back(LLVMPointerType(target, 0));
+	}
+
+	for (const auto& copy: info->function->copiedVariables) {
+		auto target = co_await translateType(copy->type);
+		lambdaStateMembers.push_back(target);
+	}
+
+	auto lambdaStateType = LLVMStructTypeInContext(_llcontext.get(), lambdaStateMembers.data(), lambdaStateMembers.size(), false);
+
+	auto mangled = mangleName(info->function);
+	auto [llfuncType, llfunc] = co_await declareFunction(info->function);
+
+	auto llfuncDebug = translateFunction(info->function, true);
+	LLVMSetSubprogram(llfunc, llfuncDebug);
+
+	LLVMSetLinkage(llfunc, LLVMInternalLinkage);
+
+	auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
+	auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+	LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+	_builders.push(builder);
+	pushStack(ScopeStack::Type::Function);
+	pushUnknownDebugLocation(info->function->scope);
+
+	auto lambdaState = LLVMGetParam(llfunc, 0);
+
+	auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+	auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+	size_t refCount = 0;
+
+	for (size_t i = 0; i < info->function->referencedVariables.size(); ++i) {
+		const auto& var = info->function->referencedVariables[i];
+
+		bool found = false;
+		for (const auto& copy: info->function->copiedVariables) {
+			if (copy->id == var->id) {
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			continue;
+		}
+
+		++refCount;
+
+		auto type = co_await translateType(var->type);
+		std::array<LLVMValueRef, 2> gepIndices {
+			LLVMConstInt(gepIndexType, 0, false),
+			LLVMConstInt(gepStructIndexType, i + 1, false),
+		};
+		auto gep = LLVMBuildGEP2(_builders.top().get(), lambdaStateType, lambdaState, gepIndices.data(), gepIndices.size(), ("@lambda_ref_gep_" + std::to_string(i)).c_str());
+		auto ptr = LLVMBuildLoad2(_builders.top().get(), LLVMPointerType(type, 0), gep, ("@lambda_ref@" + mangleName(var)).c_str());
+		_definedVariables["@lambda_ref@" + mangleName(info->function) + "@" + var->id] = ptr;
+	}
+
+	for (size_t i = 0; i < info->function->copiedVariables.size(); ++i) {
+		const auto& var = info->function->copiedVariables[i];
+		std::array<LLVMValueRef, 2> gepIndices {
+			LLVMConstInt(gepIndexType, 0, false),
+			LLVMConstInt(gepStructIndexType, refCount + i + 1, false),
+		};
+		auto gep = LLVMBuildGEP2(_builders.top().get(), lambdaStateType, lambdaState, gepIndices.data(), gepIndices.size(), ("@lambda_copy@" + mangleName(var)).c_str());
+		_definedVariables["@lambda_copy@" + mangleName(info->function) + "@" + var->id] = gep;
+	}
+
+	size_t llparamIndex = 1;
+	for (size_t i = 0; i < info->parameters.size(); ++i) {
+		const auto& param = node->parameters[i];
+		const auto& paramInfo = info->parameters[i];
+		const auto& var = info->function->parameterVariables[i];
+
+		auto llparam = LLVMGetParam(llfunc, llparamIndex);
+		++llparamIndex;
+
+		auto paramName = (param->isVariable ? "@len_" : "") + param->name;
+		auto paramNameDebug = std::regex_replace(paramName, std::regex("@"), "__");
+
+		LLVMSetValueName(llparam, paramName.c_str());
+
+		auto paramTypeDebug = param->isVariable ? LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero) : translateTypeDebug(var->type);
+		auto llparamDebug = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), paramNameDebug.c_str(), paramNameDebug.size(), llparamIndex, debugFileForScope(info->function->scope), param->position.line, paramTypeDebug, false, LLVMDIFlagZero);
+
+		auto paramLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), param->position.line, param->position.column, translateScope(info->function->scope), NULL);
+
+		LLVMValueRef llparamLen = NULL;
+
+		if (param->isVariable) {
+			auto tmp = co_await tmpify(llparam, std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Integer, std::vector<uint8_t> { static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long), static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long) }), false, true);
+
+			LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmp, llparamDebug, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), paramLoc, entryBlock);
+
+			llparamLen = llparam;
+			llparam = LLVMGetParam(llfunc, llparamIndex);
+			++llparamIndex;
+
+			LLVMSetValueName(llparam, param->name.c_str());
+
+			paramNameDebug = std::regex_replace(param->name, std::regex("@"), "__");
+
+			auto elmDebugType = translateTypeDebug(var->type->followBlindly());
+			paramTypeDebug = LLVMDIBuilderCreateArrayType(_debugBuilder.get(), 0, LLVMDITypeGetAlignInBits(elmDebugType), elmDebugType, NULL, 0);
+			llparamDebug = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), paramNameDebug.c_str(), paramNameDebug.size(), llparamIndex, debugFileForScope(info->function->scope), param->position.line, paramTypeDebug, false, LLVMDIFlagZero);
+		}
+
+		if (!param->isVariable) {
+			llparam = co_await tmpify(llparam, var->type, false, true);
+			currentStack().pushItem(llparam, var->type);
+			LLVMSetValueName(llparam, (param->name + "@on_stack").c_str());
+		} else if (param->isVariable) {
+			currentStack().pushRuntimeArray(llparam, llparamLen, var->type, LLVMInt64TypeInContext(_llcontext.get()));
+		}
+
+		LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), llparam, llparamDebug, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), paramLoc, entryBlock);
+
+		_definedVariables[var->id] = llparam;
+		if (llparamLen) {
+			_definedVariables["_Alta_array_length_" + var->id] = llparamLen;
+		}
+	}
+
+	pushDebugLocation(node->body->position, info->function->scope);
+
+	co_await compileNode(node->body, info->body);
+
+	popDebugLocation();
+
+	auto functionReturnType = info->function->isGenerator ? info->function->generatorReturnType : (info->function->isAsync ? info->function->coroutineReturnType : info->function->returnType);
+
+	if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(_builders.top().get()))) {
+		if (functionReturnType && *functionReturnType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
+			// insert an implicit return
+			co_await currentStack().cleanup();
+
+			LLVMBuildRetVoid(_builders.top().get());
+		} else {
+			LLVMBuildUnreachable(_builders.top().get());
+		}
+	}
+
+	popDebugLocation();
+	popStack();
+	_builders.pop();
+
+	auto lambdaFunc = llfunc;
+
+	auto mangledDtor = "@dtor@" + mangled;
+	std::array<LLVMTypeRef, 1> dtorParams {
+		LLVMPointerType(lambdaStateType, 0),
+	};
+	auto lambdaDtorFunc = llfunc = LLVMAddFunction(_llmod.get(), mangledDtor.c_str(), LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), dtorParams.data(), dtorParams.size(), false));
+	_definedFunctions[mangledDtor] = llfunc;
+
+	LLVMSetLinkage(llfunc, LLVMInternalLinkage);
+
+	entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
+	builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+	LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+	_builders.push(builder);
+	pushStack(ScopeStack::Type::Function);
+	pushUnknownDebugLocation(info->function->scope);
+
+	lambdaState = LLVMGetParam(llfunc, 0);
+
+	for (size_t i = info->function->copiedVariables.size(); i > 0; --i) {
+		auto idx = i - 1;
+		const auto& var = info->function->copiedVariables[idx];
+		std::array<LLVMValueRef, 2> gepIndices {
+			LLVMConstInt(gepIndexType, 0, false),
+			LLVMConstInt(gepStructIndexType, refCount + idx + 1, false),
+		};
+		auto gep = LLVMBuildGEP2(_builders.top().get(), lambdaStateType, lambdaState, gepIndices.data(), gepIndices.size(), ("@lambda_copy@" + mangleName(var)).c_str());
+
+		co_await doDtor(gep, var->type);
+	}
+
+	LLVMBuildFree(_builders.top().get(), lambdaState);
+
+	LLVMBuildRetVoid(_builders.top().get());
+
+	popDebugLocation();
+	popStack();
+	_builders.pop();
+
+	lambdaState = LLVMBuildMalloc(_builders.top().get(), lambdaStateType, ("@lambda_state@" + mangled).c_str());
+
+	std::array<LLVMValueRef, 2> basicStateGEPIndices {
+		LLVMConstInt(gepIndexType, 0, false), // the first "array" member
+		LLVMConstInt(gepStructIndexType, 0, false), // <lambda state>::_Alta_basic_lambda_state
+	};
+	auto basicState = LLVMBuildGEP2(_builders.top().get(), lambdaStateType, lambdaState, basicStateGEPIndices.data(), basicStateGEPIndices.size(), ("@lambda_basic_state@" + mangled).c_str());
+	std::array<LLVMValueRef, 2> basicStateInitMembers {
+		LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), 1, false),
+		lambdaDtorFunc,
+	};
+	LLVMBuildStore(_builders.top().get(), LLVMConstNamedStruct(_definedTypes["_Alta_basic_lambda_state"], basicStateInitMembers.data(), basicStateInitMembers.size()), basicState);
+
+	for (size_t i = 0; i < info->function->referencedVariables.size(); ++i) {
+		const auto& var = info->function->referencedVariables[i];
+
+		bool found = false;
+		for (const auto& copy: info->function->copiedVariables) {
+			if (copy->id == var->id) {
+				found = true;
+				break;
+			}
+		}
+		if (found) {
+			continue;
+		}
+
+		std::array<LLVMValueRef, 2> gepIndices {
+			LLVMConstInt(gepIndexType, 0, false),
+			LLVMConstInt(gepStructIndexType, i + 1, false),
+		};
+		auto gep = LLVMBuildGEP2(_builders.top().get(), lambdaStateType, lambdaState, gepIndices.data(), gepIndices.size(), ("@lambda_init_ref_gep@" + std::to_string(i) + "@" + mangled).c_str());
+		LLVMBuildStore(_builders.top().get(), _definedVariables[var->id], gep);
+	}
+
+	for (size_t i = 0; i < info->function->copiedVariables.size(); ++i) {
+		const auto& var = info->function->copiedVariables[i];
+
+		std::array<LLVMValueRef, 2> gepIndices {
+			LLVMConstInt(gepIndexType, 0, false),
+			LLVMConstInt(gepStructIndexType, refCount + i + 1, false),
+		};
+		auto gep = LLVMBuildGEP2(_builders.top().get(), lambdaStateType, lambdaState, gepIndices.data(), gepIndices.size(), ("@lambda_init_copy_gep@" + std::to_string(i) + "@" + mangled).c_str());
+		bool didCopy = false;
+		auto copy = co_await doCopyCtor(_definedVariables[var->id], var->type->reference(true), std::make_pair(true, false), &didCopy);
+		if (!didCopy) {
+			copy = LLVMBuildLoad2(_builders.top().get(), co_await translateType(var->type), _definedVariables[var->id], ("@lambda_var_load@" + mangleName(var)).c_str());
+		}
+		LLVMBuildStore(_builders.top().get(), copy, gep);
+	}
+
+	auto voidPointerType = LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0);
+	auto lambda = LLVMGetUndef(_definedTypes["_Alta_basic_function"]);
+	lambda = LLVMBuildInsertValue(_builders.top().get(), lambda, lambdaFunc, 0, ("@lambda_init_func@" + mangled).c_str());
+	lambda = LLVMBuildInsertValue(_builders.top().get(), lambda, lambdaState, 1, ("@lambda@" + mangled).c_str());
+
+	co_return lambda;
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(std::shared_ptr<AltaCore::AST::SpecialFetchExpression> node, std::shared_ptr<AltaCore::DH::SpecialFetchExpression> info) {
@@ -4885,6 +5198,22 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		_definedDebugTypes["_Alta_class_destructor"] = LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), _unknownDebugFile, dtorDebugParams.data(), dtorDebugParams.size(), LLVMDIFlagZero);
 	}
 
+	if (!_definedTypes["_Alta_lambda_destructor"]) {
+		std::array<LLVMTypeRef, 1> dtorParams {
+			LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0),
+		};
+		_definedTypes["_Alta_lambda_destructor"] = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), dtorParams.data(), dtorParams.size(), false);
+
+		auto debugVoidType = LLVMDIBuilderCreateUnspecifiedType(_debugBuilder.get(), "void", 4);
+
+		std::array<LLVMMetadataRef, 2> dtorDebugParams {
+			debugVoidType,
+			LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugVoidType, _pointerBits, _pointerBits, 0, "", 0),
+		};
+
+		_definedDebugTypes["_Alta_lambda_destructor"] = LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), _unknownDebugFile, dtorDebugParams.data(), dtorDebugParams.size(), LLVMDIFlagZero);
+	}
+
 	if (!_definedTypes["_Alta_class_info"]) {
 		/*
 		struct _Alta_class_info {
@@ -4897,6 +5226,16 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			uint64_t offset_to_next;
 		};
 		*/
+		static const std::array<const char*, 7> memberNames {
+			"type_name",
+			"destructor",
+			"child_name",
+			"offset_from_real",
+			"offset_from_base",
+			"offset_from_owner",
+			"offset_to_next",
+		};
+
 		std::array<LLVMTypeRef, 7> members;
 		auto stringType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
 		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
@@ -4912,6 +5251,8 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto debugCharType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "byte", 4, 8, llvm::dwarf::DW_ATE_unsigned_char, LLVMDIFlagZero);
 		auto debugStringType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugCharType, _pointerBits, _pointerBits, 0, "", 0);
 		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
+		auto debugDtorType = _definedDebugTypes["_Alta_class_destructor"];
+		auto debugDtorPtrType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugDtorType, _pointerBits, _pointerBits, 0, "", 0);
 
 		auto mapType = [&](size_t index) {
 			switch (index) {
@@ -4925,10 +5266,8 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 				case 6:
 					return debugI64Type;
 
-				case 1: {
-					auto debugDtorType = _definedDebugTypes["_Alta_class_destructor"];
-					return LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugDtorType, _pointerBits, _pointerBits, 0, "", 0);
-				};
+				case 1:
+					return debugDtorPtrType;
 
 				default:
 					throw std::out_of_range("bad index");
@@ -4938,7 +5277,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		std::array<LLVMMetadataRef, 7> debugMembers;
 		for (size_t i = 0; i < debugMembers.size(); ++i) {
 			auto debugType = mapType(i);
-			debugMembers[i] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), classInfoType, i) * 8, LLVMDIFlagZero, debugType);
+			debugMembers[i] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, memberNames[i], strlen(memberNames[i]), _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), classInfoType, i) * 8, LLVMDIFlagZero, debugType);
 		}
 
 		_definedDebugTypes["_Alta_class_info"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_class_info", sizeof("_Alta_class_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), classInfoType), LLVMABIAlignmentOfType(_targetData.get(), classInfoType), LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
@@ -5016,11 +5355,13 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		/*
 		struct _Alta_basic_lambda_state {
 			uint64_t reference_count;
+			void (*destructor)(void*);
 		};
 		*/
 
-		std::array<LLVMTypeRef, 1> members {
+		std::array<LLVMTypeRef, 2> members {
 			LLVMInt64TypeInContext(_llcontext.get()),
+			LLVMPointerType(_definedTypes["_Alta_lambda_destructor"], 0),
 		};
 
 		_definedTypes["_Alta_basic_lambda_state"] = LLVMStructType(members.data(), members.size(), false);
