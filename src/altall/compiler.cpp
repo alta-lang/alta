@@ -1826,7 +1826,7 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 					if (varargTable[id]) {
 						isVararg = true;
 					} else {
-						params.push_back(LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero));
+						params.push_back(LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero));
 						params.push_back(LLVMDIBuilderCreateArrayType(_debugBuilder.get(), 0, LLVMDITypeGetAlignInBits(lltype), lltype, NULL, 0));
 					}
 				} else {
@@ -2106,7 +2106,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			LLVMSetValueName(llparam, paramName.c_str());
 
-			auto paramTypeDebug = param->isVariable ? LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero) : translateTypeDebug(var->type);
+			auto paramTypeDebug = param->isVariable ? LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero) : translateTypeDebug(var->type);
 			auto llparamDebug = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), paramNameDebug.c_str(), paramNameDebug.size(), llparamIndex, debugFileForScope(info->function->scope), param->position.line, paramTypeDebug, false, LLVMDIFlagZero);
 
 			auto paramLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), param->position.line, param->position.column, translateScope(info->function->scope), NULL);
@@ -2366,6 +2366,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 			pushStack(ScopeStack::Type::Temporary);
 			auto compiled = co_await compileNode(node->initializationExpression, info->initializationExpression);
 			auto casted = co_await cast(compiled, exprType, info->variable->type, true, additionalCopyInfo(node->initializationExpression, info->initializationExpression), false, &node->initializationExpression->position);
+			co_await currentStack().cleanup();
 			popStack();
 			if (LLVMIsConstant(casted)) {
 				LLVMSetInitializer(memory, casted);
@@ -3132,6 +3133,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 			throw std::runtime_error("Call target is null?");
 		}
 		result = LLVMBuildCall2(_builders.top().get(), funcType, result, args.data(), args.size(), isVoid ? "" : ("@call_" + tmpIdxStr).c_str());
+	}
+
+	if (node->maybe) {
+		// for now, since we don't have exception support, we just wrap the result in an optional
+		auto resultType = AltaCore::DET::Type::getUnderlyingType(info.get());
+		auto funcRetType = resultType->optionalTarget;
+		result = co_await cast(result, funcRetType, resultType, false, additionalCopyInfo(node, info), false, &node->position);
 	}
 
 	popDebugLocation();
@@ -4033,6 +4041,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 		_builders.pop();
 
+		auto llfuncReturnsRef = llfunc2;
+		auto llfuncTypeReturnsRef = llfuncType2;
+
 		if (info->isCastConstructor) {
 			auto [castFuncType, castFunc] = co_await declareFunction(info->correspondingMethod);
 
@@ -4046,10 +4057,133 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 			LLVMBuildRet(builder.get(), result);
 		}
-	}
 
-	if (info->optionalVariantFunctions.size() > 0) {
-		std::cerr << "TODO: handle special class methods with optionals/defaults" << std::endl;
+		if (info->optionalVariantFunctions.size() > 0) {
+			for (const auto& [variant, optionalValueProvided]: info->optionalVariantFunctions) {
+				std::vector<LLVMTypeRef> llparamsOptional;
+
+				size_t optionalIndex = 0;
+				size_t variantIndex = 0;
+				for (size_t i = 0; i < info->parameters.size(); ++i) {
+					const auto& param = node->parameters[i];
+					const auto& paramInfo = info->parameters[i];
+
+					if (paramInfo->defaultValue && !optionalValueProvided[optionalIndex++]) {
+						continue;
+					}
+
+					const auto& var = variant->parameterVariables[variantIndex];
+					auto type = paramInfo->type->type;
+					auto lltype = co_await translateType(type);
+
+					if (param->isVariable) {
+						llparamsOptional.push_back(LLVMInt64TypeInContext(_llcontext.get()));
+						llparamsOptional.push_back(LLVMPointerType(lltype, 0));
+					} else {
+						llparamsOptional.push_back(lltype);
+					}
+
+					++variantIndex;
+				}
+
+				auto optionalFuncType = LLVMFunctionType(llclassType, llparamsOptional.data(), llparamsOptional.size(), false);
+				auto optionalMethodID = variant->id;
+
+				if (!_definedFunctions[optionalMethodID]) {
+					auto mangled = mangleName(variant);
+					_definedFunctions[optionalMethodID] = LLVMAddFunction(_llmod.get(), mangled.c_str(), optionalFuncType);
+				}
+
+				auto llfuncOptional = _definedFunctions[optionalMethodID];
+
+				auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfuncOptional, "@entry");
+				auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+				LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+				_builders.push(builder);
+				pushStack(ScopeStack::Type::Function);
+
+				std::vector<LLVMValueRef> args;
+
+				optionalIndex = 0;
+				variantIndex = 0;
+
+				for (size_t i = 0; i < info->parameters.size(); ++i) {
+					const auto& paramInfo = info->parameters[i];
+
+					if (paramInfo->defaultValue && !optionalValueProvided[optionalIndex++]) {
+						auto compiled = co_await compileNode(node->parameters[i]->defaultValue, paramInfo->defaultValue);
+						auto casted = co_await cast(compiled, AltaCore::DET::Type::getUnderlyingType(paramInfo->defaultValue.get()), paramInfo->type->type, false, additionalCopyInfo(node->parameters[i]->defaultValue, paramInfo->defaultValue), false, &node->parameters[i]->defaultValue->position);
+						args.push_back(casted);
+					} else {
+						auto llparam = LLVMGetParam(llfuncOptional, variantIndex);
+						LLVMSetValueName(llparam, node->parameters[i]->name.c_str());
+						args.push_back(llparam);
+						++variantIndex;
+					}
+				}
+
+				auto call = LLVMBuildCall2(_builders.top().get(), llfuncTypeReturnsInstance, llfuncReturnsInstance, args.data(), args.size(), "@default_call");
+
+				currentStack().cleanup();
+
+				LLVMBuildRet(_builders.top().get(), call);
+
+				popStack();
+				_builders.pop();
+
+				// now build the persistent version
+				optionalMethodID = "_persistent_" + optionalMethodID;
+
+				optionalFuncType = LLVMFunctionType(llclassRefType, llparamsOptional.data(), llparamsOptional.size(), false);
+
+				if (!_definedFunctions[optionalMethodID]) {
+					auto mangled = "_persistent_" + mangleName(variant);
+					_definedFunctions[optionalMethodID] = LLVMAddFunction(_llmod.get(), mangled.c_str(), optionalFuncType);
+				}
+
+				llfuncOptional = _definedFunctions[optionalMethodID];
+
+				entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfuncOptional, "@entry");
+				builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+				LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+				_builders.push(builder);
+				pushStack(ScopeStack::Type::Function);
+
+				args.clear();
+
+				optionalIndex = 0;
+				variantIndex = 0;
+
+				for (size_t i = 0; i < info->parameters.size(); ++i) {
+					const auto& paramInfo = info->parameters[i];
+
+					if (paramInfo->defaultValue && !optionalValueProvided[optionalIndex++]) {
+						auto compiled = co_await compileNode(node->parameters[i]->defaultValue, paramInfo->defaultValue);
+						auto casted = co_await cast(compiled, AltaCore::DET::Type::getUnderlyingType(paramInfo->defaultValue.get()), paramInfo->type->type, false, additionalCopyInfo(node->parameters[i]->defaultValue, paramInfo->defaultValue), false, &node->parameters[i]->defaultValue->position);
+						args.push_back(casted);
+					} else {
+						auto llparam = LLVMGetParam(llfuncOptional, variantIndex);
+						LLVMSetValueName(llparam, node->parameters[i]->name.c_str());
+						args.push_back(llparam);
+						++variantIndex;
+					}
+				}
+
+				call = LLVMBuildCall2(_builders.top().get(), llfuncTypeReturnsRef, llfuncReturnsRef, args.data(), args.size(), "@default_call");
+
+				currentStack().cleanup();
+
+				LLVMBuildRet(_builders.top().get(), call);
+
+				popStack();
+				_builders.pop();
+			}
+		}
+	} else {
+		// only constructors can have optional/default parameters
+		assert(info->optionalVariantFunctions.size() == 0);
 	}
 
 	popDebugLocation();
@@ -4870,7 +5004,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 
 		LLVMSetValueName(llparam, paramName.c_str());
 
-		auto paramTypeDebug = param->isVariable ? LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero) : translateTypeDebug(var->type);
+		auto paramTypeDebug = param->isVariable ? LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero) : translateTypeDebug(var->type);
 		auto llparamDebug = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), paramNameDebug.c_str(), paramNameDebug.size(), llparamIndex, debugFileForScope(info->function->scope), param->position.line, paramTypeDebug, false, LLVMDIFlagZero);
 
 		auto paramLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), param->position.line, param->position.column, translateScope(info->function->scope), NULL);
@@ -4966,6 +5100,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 
 		co_await doDtor(gep, var->type);
 	}
+
+	co_await currentStack().cleanup();
 
 	LLVMBuildFree(_builders.top().get(), lambdaState);
 
@@ -5256,7 +5392,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 
 		auto debugCharType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "byte", 4, 8, llvm::dwarf::DW_ATE_unsigned_char, LLVMDIFlagZero);
 		auto debugStringType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugCharType, _pointerBits, _pointerBits, 0, "", 0);
-		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 8, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
+		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
 		auto debugDtorType = _definedDebugTypes["_Alta_class_destructor"];
 		auto debugDtorPtrType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugDtorType, _pointerBits, _pointerBits, 0, "", 0);
 
