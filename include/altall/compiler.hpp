@@ -213,8 +213,7 @@ namespace AltaLL {
 			Compiler& compiler;
 			Type type;
 
-			LLVMValueRef suspendableStackStub = nullptr;
-			LLVMBasicBlockRef suspendableStackStubBlock = nullptr;
+			LLVMValueRef suspendableStackPush = nullptr;
 			LLVMValueRef suspendableContext = nullptr;
 			std::vector<LLVMTypeRef> suspendableAllocationTypes;
 			std::vector<LLVMValueRef> suspendableAllocations;
@@ -525,12 +524,11 @@ namespace AltaLL {
 			_stacks.emplace_back(*this, type);
 		};
 
-		inline void popStack() {
+		inline Coroutine<void> popStack() {
 			if (_stacks.back().type == ScopeStack::Type::Function) {
 				temporaryIndices.pop();
 			}
-			auto co = _stacks.back().popping();
-			co.await_resume();
+			co_await _stacks.back().popping();
 			_stacks.pop_back();
 		};
 
@@ -745,13 +743,14 @@ namespace AltaLL {
 		std::pair<LLVMValueRef, LLVMTypeRef> defineRuntimeFunction(const std::string& name);
 
 		// <runtime-builders>
-		void buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, LLVMValueRef stackSize);
-		void buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, size_t stackSize);
+		LLVMValueRef buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, LLVMValueRef stackSize);
+		LLVMValueRef buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, size_t stackSize);
 		void buildSuspendablePopStack(LLBuilder builder, LLVMValueRef suspendableContext);
 		LLVMValueRef buildSuspendableAlloca(LLBuilder builder, LLVMValueRef suspendableContext);
 		void buildSuspendableReload(LLBuilder builder, LLVMValueRef suspendableContext);
 
 		void updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset);
+		void updateSuspendablePushStack(LLVMValueRef push, size_t stackSize);
 		// </runtime-builders>
 
 		LLCoroutine returnNull();

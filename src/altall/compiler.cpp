@@ -225,14 +225,11 @@ AltaLL::Compiler::ScopeStack::ScopeStack(Compiler& _compiler, Type _type):
 		return;
 	}
 
-	// we need to set up a stub that we'll update once we pop the stack off.
-	// this stub is in charge of allocating stack space for the new scope inside
-	// a suspendable function.
-	suspendableStackStub = LLVMBuildUnreachable(compiler._builders.top().get());
-	suspendableStackStubBlock = LLVMGetInsertBlock(compiler._builders.top().get());
+	auto insertBlock = LLVMGetInsertBlock(compiler._builders.top().get());
 	suspendableContext = compiler.currentSuspendableContext();
+	suspendableStackPush = compiler.buildSuspendablePushStack(compiler._builders.top(), suspendableContext, static_cast<size_t>(0));
 
-	auto func = LLVMGetBasicBlockParent(suspendableStackStubBlock);
+	auto func = LLVMGetBasicBlockParent(insertBlock);
 
 	suspendableReloadBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), func, "@reload_stack");
 	suspendableReloadBuilder = llwrap(LLVMCreateBuilderInContext(compiler._llcontext.get()));
@@ -247,7 +244,7 @@ AltaLL::Compiler::ScopeStack::ScopeStack(Compiler& _compiler, Type _type):
 };
 
 AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::popping() {
-	if (!suspendableStackStub) {
+	if (!suspendableContext) {
 		co_return;
 	}
 
@@ -259,12 +256,10 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::popping() {
 	}
 
 	auto builder = llwrap(LLVMCreateBuilderInContext(compiler._llcontext.get()));
-	LLVMPositionBuilder(builder.get(), suspendableStackStubBlock, suspendableStackStub);
-	LLVMInstructionEraseFromParent(suspendableStackStub);
 
-	compiler.buildSuspendablePushStack(builder, suspendableContext, totalStackSize);
+	compiler.updateSuspendablePushStack(suspendableStackPush, totalStackSize);
 
-	auto func = LLVMGetBasicBlockParent(suspendableStackStubBlock);
+	auto func = LLVMGetBasicBlockParent(suspendableReloadBlock);
 	auto badBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), func, "@bad_state_index");
 	LLVMPositionBuilderAtEnd(suspendableReloadBuilder.get(), badBlock);
 	LLVMBuildUnreachable(suspendableReloadBuilder.get());
@@ -278,7 +273,7 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::popping() {
 };
 
 LLVMValueRef AltaLL::Compiler::ScopeStack::buildAlloca(LLVMTypeRef lltype, const std::string& name) {
-	if (suspendableStackStub) {
+	if (suspendableContext) {
 		auto alloca = compiler.buildSuspendableAlloca(suspendableReloadBuilder, suspendableContext);
 		suspendableAllocationTypes.push_back(lltype);
 		suspendableAllocations.push_back(alloca);
@@ -2051,16 +2046,16 @@ std::pair<LLVMValueRef, LLVMTypeRef> AltaLL::Compiler::defineRuntimeFunction(con
 	return std::make_pair(llfunc, llfuncType);
 };
 
-void AltaLL::Compiler::buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, LLVMValueRef stackSize) {
+LLVMValueRef AltaLL::Compiler::buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, LLVMValueRef stackSize) {
 	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_suspendable_push_stack");
 	std::array<LLVMValueRef, 2> args {
 		LLVMBuildPointerCast(builder.get(), suspendableContext, LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0), ""),
 		stackSize,
 	};
-	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+	return LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
 };
 
-void AltaLL::Compiler::buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, size_t stackSize) {
+LLVMValueRef AltaLL::Compiler::buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, size_t stackSize) {
 	return buildSuspendablePushStack(builder, suspendableContext, LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), stackSize, false));
 };
 
@@ -2091,6 +2086,10 @@ void AltaLL::Compiler::buildSuspendableReload(LLBuilder builder, LLVMValueRef su
 
 void AltaLL::Compiler::updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset) {
 	LLVMSetOperand(alloca, 1, LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), stackOffset, false));
+};
+
+void AltaLL::Compiler::updateSuspendablePushStack(LLVMValueRef push, size_t stackSize) {
+	LLVMSetOperand(push, 1, LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), stackSize, false));
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileNode(std::shared_ptr<AltaCore::AST::Node> node, std::shared_ptr<AltaCore::DH::Node> info) {
@@ -2190,7 +2189,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileExpressionStatement(std::
 	co_await compileNode(node->expression, info->expression);
 	co_await currentStack().cleanup();
 	popDebugLocation();
-	popStack();
+	co_await popStack();
 
 	if (modInitFunc) {
 		exitInitFunction();
@@ -2380,7 +2379,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			auto load = LLVMBuildLoad2(_builders.top().get(), llclass, suspendableContext, "@ret_context");
 			LLVMBuildRet(_builders.top().get(), load);
 			popDebugLocation();
-			popStack();
+			co_await popStack();
 
 			// now build the actual suspendable function
 
@@ -2419,7 +2418,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			_suspendableStateIndex.push(0);
 			_suspendStateIndexValue.push(stateIndexLoad);
 
-			pushStack(ScopeStack::Type::Function);
 			pushUnknownDebugLocation(nextFunc->scope);
 
 			if (info->function->isMethod) {
@@ -2441,7 +2439,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				auto llparam = buildSuspendableAlloca(_builders.top(), suspendableContext);
 				updateSuspendableAlloca(llparam, LLVMOffsetOfElement(_targetData.get(), paramStackType, paramStackIndex++));
 
-				currentStack().pushItem(llparam, var->type);
 				LLVMSetValueName(llparam, (param->name + "@on_stack").c_str());
 
 				_definedVariables[var->id] = llparam;
@@ -2454,6 +2451,16 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			LLVMPositionBuilderAtEnd(builder.get(), initialStateBlock);
 
 			_suspendableStateBlocks.push({ initialStateBlock });
+
+			pushStack(ScopeStack::Type::Function);
+
+			for (size_t i = 0; i < info->parameters.size(); ++i) {
+				const auto& param = node->parameters[i];
+				const auto& paramInfo = info->parameters[i];
+				const auto& var = info->function->parameterVariables[i];
+
+				currentStack().pushItem(_definedVariables[var->id], var->type);
+			}
 		}
 
 		pushDebugLocation(node->body->position, nextFunc ? nextFunc->scope : info->function->scope);
@@ -2491,7 +2498,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 		}
 
 		popDebugLocation();
-		popStack();
+		co_await popStack();
 		_builders.pop();
 
 		if (info->function->isMethod) {
@@ -2599,7 +2606,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			}
 
 			popDebugLocation();
-			popStack();
+			co_await popStack();
 			_builders.pop();
 		}
 	}
@@ -2619,7 +2626,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 		pushStack(ScopeStack::Type::Temporary);
 		expr = co_await compileNode(node->expression, info->expression);
 		co_await currentStack().cleanup();
-		popStack();
+		co_await popStack();
 
 		if (functionReturnType && functionReturnType->referenceLevel() > 0) {
 			// if we're returning a reference, there's no need to copy anything
@@ -2709,7 +2716,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 			auto compiled = co_await compileNode(node->initializationExpression, info->initializationExpression);
 			auto casted = co_await cast(compiled, exprType, info->variable->type, true, additionalCopyInfo(node->initializationExpression, info->initializationExpression), false, &node->initializationExpression->position);
 			co_await currentStack().cleanup();
-			popStack();
+			co_await popStack();
 			if (LLVMIsConstant(casted)) {
 				LLVMSetInitializer(memory, casted);
 			} else {
@@ -2722,7 +2729,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 			auto casted = co_await cast(compiled, exprType, info->variable->type, true, additionalCopyInfo(node->initializationExpression, info->initializationExpression), false, &node->initializationExpression->position);
 			LLVMBuildStore(_builders.top().get(), casted, memory);
 			co_await currentStack().cleanup();
-			popStack();
+			co_await popStack();
 		}
 	} else if (!inModuleRoot && info->variable->type->klass && info->variable->type->indirectionLevel() == 0) {
 		LLVMValueRef init = NULL;
@@ -3565,7 +3572,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalStatement(std:
 		co_await currentStack().cleanup();
 
 		// finally, we can pop the scope stack off
-		popStack();
+		co_await popStack();
 
 		// we're still in the "true" block; let's go to the final block (if we don't terminate otherwise)
 		if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(_builders.top().get()))) {
@@ -3589,7 +3596,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalStatement(std:
 
 		co_await currentStack().cleanup();
 
-		popStack();
+		co_await popStack();
 
 		if (!LLVMGetBasicBlockTerminator(LLVMGetInsertBlock(_builders.top().get()))) {
 			LLVMBuildBr(_builders.top().get(), finalBlock);
@@ -3953,7 +3960,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 		LLVMBuildRetVoid(_builders.top().get());
 
 		popDebugLocation();
-		popStack();
+		co_await popStack();
 		_builders.pop();
 
 		if (info->defaultConstructor) {
@@ -4290,7 +4297,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		}
 	}
 
-	popStack();
+	co_await popStack();
 	_builders.pop();
 
 	if (isCtor) {
@@ -4473,7 +4480,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 				LLVMBuildRet(_builders.top().get(), call);
 
-				popStack();
+				co_await popStack();
 				_builders.pop();
 
 				// now build the persistent version
@@ -4521,7 +4528,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 				LLVMBuildRet(_builders.top().get(), call);
 
-				popStack();
+				co_await popStack();
 				_builders.pop();
 			}
 		}
@@ -4758,10 +4765,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileWhileLoopStatement(std::s
 	auto endBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@while_" + tmpIdxStr + "_end").c_str());
 	auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@while_" + tmpIdxStr + "_done").c_str());
 
-	LLVMBuildBr(_builders.top().get(), condBlock);
-
 	pushStack(ScopeStack::Type::Other);
 	pushLoop(doneBlock, condBlock);
+
+	LLVMBuildBr(_builders.top().get(), condBlock);
 
 	LLVMPositionBuilderAtEnd(_builders.top().get(), condBlock);
 
@@ -4781,7 +4788,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileWhileLoopStatement(std::s
 	LLVMBuildBr(_builders.top().get(), condBlock);
 
 	popLoop();
-	popStack();
+	co_await popStack();
 
 	LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
 
@@ -4972,10 +4979,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 
 		LLVMSetValueName(startVar, ("@ranged_for_counter_" + tmpIdxStr).c_str());
 
-		LLVMBuildBr(_builders.top().get(), condBlock);
-
 		pushStack(ScopeStack::Type::Other);
 		pushLoop(doneBlock, incdecBlock);
+
+		LLVMBuildBr(_builders.top().get(), condBlock);
 
 		LLVMPositionBuilderAtEnd(_builders.top().get(), condBlock);
 
@@ -5049,13 +5056,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 		LLVMBuildBr(_builders.top().get(), incdecBlock);
 
 		popLoop();
-		popStack();
+		co_await popStack();
 
 		// now build the done block
 		LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
 		co_await currentStack().cleanup();
 
-		popStack();
+		co_await popStack();
 	} else {
 		std::cerr << "TODO: support generator-based for-loops" << std::endl;
 	}
@@ -5413,7 +5420,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 	}
 
 	popDebugLocation();
-	popStack();
+	co_await popStack();
 	_builders.pop();
 
 	auto lambdaFunc = llfunc;
@@ -5456,7 +5463,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 	LLVMBuildRetVoid(_builders.top().get());
 
 	popDebugLocation();
-	popStack();
+	co_await popStack();
 	_builders.pop();
 
 	lambdaState = LLVMBuildMalloc(_builders.top().get(), lambdaStateType, ("@lambda_state@" + mangled).c_str());
@@ -5605,7 +5612,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 	}
 
 	popDebugLocation();
-	popStack();
+	co_await popStack();
 	_builders.pop();
 
 	_suspendableContext.pop();
