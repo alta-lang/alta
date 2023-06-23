@@ -18,6 +18,7 @@
 #include <regex>
 #include <stdexcept>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <llvm/BinaryFormat/Dwarf.h>
@@ -192,6 +193,10 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::cleanup() {
 		}
 	}
 
+	if (suspendableContext) {
+		compiler.buildSuspendablePopStack(compiler._builders.top(), suspendableContext);
+	}
+
 	co_return;
 };
 
@@ -209,6 +214,78 @@ void AltaLL::Compiler::ScopeStack::pushRuntimeArray(LLVMValueRef array, LLVMValu
 
 void AltaLL::Compiler::ScopeStack::pushRuntimeArray(LLVMValueRef array, LLVMValueRef count, std::shared_ptr<AltaCore::DET::Type> elementType, LLVMTypeRef countType, LLVMBasicBlockRef sourceBlock) {
 	items.emplace_back(ScopeItem { sourceBlock, array, elementType, count, countType });
+};
+
+AltaLL::Compiler::ScopeStack::ScopeStack(Compiler& _compiler, Type _type):
+	compiler(_compiler),
+	type(_type)
+{
+	if (!compiler.inSuspendableFunction()) {
+		// we don't need to do anything fancy
+		return;
+	}
+
+	// we need to set up a stub that we'll update once we pop the stack off.
+	// this stub is in charge of allocating stack space for the new scope inside
+	// a suspendable function.
+	suspendableStackStub = LLVMBuildUnreachable(compiler._builders.top().get());
+	suspendableStackStubBlock = LLVMGetInsertBlock(compiler._builders.top().get());
+	suspendableContext = compiler.currentSuspendableContext();
+
+	auto func = LLVMGetBasicBlockParent(suspendableStackStubBlock);
+
+	suspendableReloadBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), func, "@reload_stack");
+	suspendableReloadBuilder = llwrap(LLVMCreateBuilderInContext(compiler._llcontext.get()));
+	suspendableStateIndexValue = compiler._suspendStateIndexValue.top();
+	LLVMPositionBuilderAtEnd(suspendableReloadBuilder.get(), suspendableReloadBlock);
+
+	LLVMBuildBr(compiler._builders.top().get(), suspendableReloadBlock);
+
+	auto continuation = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), func, "@reload_stack_continue");
+	suspendableContinuations.emplace_back(compiler._suspendableStateIndex.top(), continuation);
+	LLVMPositionBuilderAtEnd(_compiler._builders.top().get(), continuation);
+};
+
+AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::popping() {
+	if (!suspendableStackStub) {
+		co_return;
+	}
+
+	auto stackStruct = LLVMStructTypeInContext(compiler._llcontext.get(), suspendableAllocationTypes.data(), suspendableAllocationTypes.size(), false);
+	auto totalStackSize = LLVMStoreSizeOfType(compiler._targetData.get(), stackStruct);
+
+	for (size_t i = 0; i < suspendableAllocationTypes.size(); ++i) {
+		compiler.updateSuspendableAlloca(suspendableAllocations[i], LLVMOffsetOfElement(compiler._targetData.get(), stackStruct, i));
+	}
+
+	auto builder = llwrap(LLVMCreateBuilderInContext(compiler._llcontext.get()));
+	LLVMPositionBuilder(builder.get(), suspendableStackStubBlock, suspendableStackStub);
+	LLVMInstructionEraseFromParent(suspendableStackStub);
+
+	compiler.buildSuspendablePushStack(builder, suspendableContext, totalStackSize);
+
+	auto func = LLVMGetBasicBlockParent(suspendableStackStubBlock);
+	auto badBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), func, "@bad_state_index");
+	LLVMPositionBuilderAtEnd(suspendableReloadBuilder.get(), badBlock);
+	LLVMBuildUnreachable(suspendableReloadBuilder.get());
+	LLVMPositionBuilderAtEnd(suspendableReloadBuilder.get(), suspendableReloadBlock);
+
+	auto switchInstr = LLVMBuildSwitch(suspendableReloadBuilder.get(), suspendableStateIndexValue, badBlock, suspendableContinuations.size());
+
+	for (const auto& [stateIndex, returnBlock]: suspendableContinuations) {
+		LLVMAddCase(switchInstr, LLVMConstInt(LLVMInt64TypeInContext(compiler._llcontext.get()), stateIndex, false), returnBlock);
+	}
+};
+
+LLVMValueRef AltaLL::Compiler::ScopeStack::buildAlloca(LLVMTypeRef lltype, const std::string& name) {
+	if (suspendableStackStub) {
+		auto alloca = compiler.buildSuspendableAlloca(suspendableReloadBuilder, suspendableContext);
+		suspendableAllocationTypes.push_back(lltype);
+		suspendableAllocations.push_back(alloca);
+		return alloca;
+	} else {
+		return LLVMBuildAlloca(compiler._builders.top().get(), lltype, name.c_str());
+	}
 };
 
 AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions) {
@@ -1342,17 +1419,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doChildRetrieval(LLVMValueRef ex
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::tmpify(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, bool withStack, bool tmpifyRef) {
-	if (_inGenerator) {
-		throw std::runtime_error("TODO: tmpify in generators");
-	}
-
 	auto result = expr;
 
 	if (type->referenceLevel() == 0 || tmpifyRef) {
 		auto adjustedType = type->deconstify();
 		auto lltype = co_await translateType(adjustedType);
 
-		auto var = LLVMBuildAlloca(_builders.top().get(), lltype, "");
+		auto var = currentStack().buildAlloca(lltype);
 
 		if (withStack && canPush(type) && !_stacks.empty()) {
 			currentStack().pushItem(var, adjustedType);
@@ -1450,7 +1523,9 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::defineClassType(std::
 
 	std::vector<LLVMTypeRef> members;
 
-	if (!klass->isStructure && !klass->isBitfield) {
+	bool suspendable = klass->name == "@Generator@" || klass->name == "@Coroutine@";
+
+	if (!klass->isStructure && !klass->isBitfield && /* TEMPORARY */ !suspendable) {
 		// every class requires an instance info structure
 		members.push_back(_definedTypes["_Alta_instance_info"]);
 
@@ -1458,6 +1533,11 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::defineClassType(std::
 		for (const auto& parent: klass->parents) {
 			members.push_back(co_await defineClassType(parent));
 		}
+	}
+
+	if (suspendable) {
+		// suspendable contexts require suspendable context info
+		members.push_back(_definedTypes["_Alta_basic_suspendable"]);
 	}
 
 	for (const auto& member: klass->members) {
@@ -1930,6 +2010,89 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 	return result;
 };
 
+std::pair<LLVMValueRef, LLVMTypeRef> AltaLL::Compiler::defineRuntimeFunction(const std::string& name) {
+	LLVMValueRef llfunc = NULL;
+	LLVMTypeRef llfuncType = NULL;
+
+	if (name == "_Alta_suspendable_push_stack") {
+		auto basicSuspendablePtrType = LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0);
+		auto voidType = LLVMVoidTypeInContext(_llcontext.get());
+		std::array<LLVMTypeRef, 2> params {
+			basicSuspendablePtrType,
+			LLVMInt64TypeInContext(_llcontext.get()),
+		};
+		llfuncType = LLVMFunctionType(voidType, params.data(), params.size(), false);
+	} else if (name == "_Alta_suspendable_pop_stack" || name == "_Alta_suspendable_reload") {
+		auto basicSuspendablePtrType = LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0);
+		auto voidType = LLVMVoidTypeInContext(_llcontext.get());
+		std::array<LLVMTypeRef, 1> params {
+			basicSuspendablePtrType,
+		};
+		llfuncType = LLVMFunctionType(voidType, params.data(), params.size(), false);
+	} else if (name == "_Alta_suspendable_alloca") {
+		auto basicSuspendablePtrType = LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0);
+		auto voidType = LLVMVoidTypeInContext(_llcontext.get());
+		auto voidPointerType = LLVMPointerType(voidType, 0);
+		std::array<LLVMTypeRef, 2> params {
+			basicSuspendablePtrType,
+			LLVMInt64TypeInContext(_llcontext.get()),
+		};
+		llfuncType = LLVMFunctionType(voidPointerType, params.data(), params.size(), false);
+	} else {
+		throw std::runtime_error("Unknown runtime function: " + name);
+	}
+
+	if (!_definedFunctions[name]) {
+		_definedFunctions[name] = LLVMAddFunction(_llmod.get(), name.c_str(), llfuncType);
+	}
+
+	llfunc = _definedFunctions[name];
+
+	return std::make_pair(llfunc, llfuncType);
+};
+
+void AltaLL::Compiler::buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, LLVMValueRef stackSize) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_suspendable_push_stack");
+	std::array<LLVMValueRef, 2> args {
+		LLVMBuildPointerCast(builder.get(), suspendableContext, LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0), ""),
+		stackSize,
+	};
+	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+};
+
+void AltaLL::Compiler::buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, size_t stackSize) {
+	return buildSuspendablePushStack(builder, suspendableContext, LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), stackSize, false));
+};
+
+void AltaLL::Compiler::buildSuspendablePopStack(LLBuilder builder, LLVMValueRef suspendableContext) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_suspendable_pop_stack");
+	std::array<LLVMValueRef, 1> args {
+		LLVMBuildPointerCast(builder.get(), suspendableContext, LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0), ""),
+	};
+	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+};
+
+LLVMValueRef AltaLL::Compiler::buildSuspendableAlloca(LLBuilder builder, LLVMValueRef suspendableContext) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_suspendable_alloca");
+	std::array<LLVMValueRef, 2> args {
+		LLVMBuildPointerCast(builder.get(), suspendableContext, LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0), ""),
+		LLVMGetPoison(LLVMInt64TypeInContext(_llcontext.get())),
+	};
+	return LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+};
+
+void AltaLL::Compiler::buildSuspendableReload(LLBuilder builder, LLVMValueRef suspendableContext) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_suspendable_reload");
+	std::array<LLVMValueRef, 1> args {
+		LLVMBuildPointerCast(builder.get(), suspendableContext, LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0), ""),
+	};
+	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+};
+
+void AltaLL::Compiler::updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset) {
+	LLVMSetOperand(alloca, 1, LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), stackOffset, false));
+};
+
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileNode(std::shared_ptr<AltaCore::AST::Node> node, std::shared_ptr<AltaCore::DH::Node> info) {
 	switch (node->nodeType()) {
 		case AltaCore::AST::NodeType::Node: return returnNull();
@@ -2056,15 +2219,15 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 		auto retType = co_await translateType(info->function->returnType);
 
-		if (info->function->isGenerator || info->function->isAsync) {
-			std::cerr << "TODO: generator functions" << std::endl;
-			continue;
-		}
+		auto genClass = info->function->isGenerator ? info->generator : (info->function->isAsync ? info->coroutine : nullptr);
+		auto llclass = genClass ? co_await defineClassType(genClass) : NULL;
 
 		auto mangled = mangleName(info->function);
 		auto [llfuncType, llfunc] = co_await declareFunction(info->function);
 		auto origLLFuncType = llfuncType;
 		auto origLLFunc = llfunc;
+
+		std::shared_ptr<AltaCore::DET::Function> nextFunc = nullptr;
 
 		auto llfuncDebug = translateFunction(info->function, true);
 		LLVMSetSubprogram(llfunc, llfuncDebug);
@@ -2076,20 +2239,67 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
 		_builders.push(builder);
+
+		LLVMValueRef suspendableContext = NULL;
+
+		_suspendableContext.push(nullptr);
+
+		if (info->function->isGenerator || info->function->isAsync) {
+			suspendableContext = LLVMBuildAlloca(_builders.top().get(), llclass, "@suspendable");
+			LLVMBuildStore(_builders.top().get(), LLVMConstNull(llclass), suspendableContext);
+		}
+
 		pushStack(ScopeStack::Type::Function);
 		pushUnknownDebugLocation(info->function->scope);
+
+		std::vector<LLVMTypeRef> paramStackMembers;
+
+		if (suspendableContext) {
+			if (info->function->isMethod) {
+				paramStackMembers.push_back(co_await translateType(info->function->parentClassType));
+			}
+
+			for (size_t i = 0; i < info->parameters.size(); ++i) {
+				const auto& param = node->parameters[i];
+				const auto& paramInfo = info->parameters[i];
+				const auto& var = info->function->parameterVariables[i];
+
+				if (param->isVariable) {
+					throw std::runtime_error("TODO: support variable parameters in suspendable functions");
+				} else {
+					paramStackMembers.push_back(co_await translateType(var->type));
+				}
+			}
+		}
+
+		auto paramStackType = LLVMStructTypeInContext(_llcontext.get(), paramStackMembers.data(), paramStackMembers.size(), false);
+		auto paramStackSize = LLVMStoreSizeOfType(_targetData.get(), paramStackType);
+		size_t paramStackIndex = 0;
+
+		if (suspendableContext) {
+			buildSuspendablePushStack(_builders.top(), suspendableContext, paramStackSize);
+		}
 
 		if (info->function->isMethod) {
 			auto selfParam = LLVMGetParam(llfunc, 0);
 			LLVMSetValueName(selfParam, "@this");
 
-			auto tmpThis = co_await tmpify(selfParam, info->function->parentClassType, false, true);
+			if (suspendableContext) {
+				auto alloca = buildSuspendableAlloca(_builders.top(), suspendableContext);
+				updateSuspendableAlloca(alloca, LLVMOffsetOfElement(_targetData.get(), paramStackType, paramStackIndex++));
+			} else {
+				_thisContextValue.push(selfParam);
+			}
 
-			auto thisDebugType = LLVMDIBuilderCreateObjectPointerType(_debugBuilder.get(), translateTypeDebug(info->function->parentClassType));
-			auto thisDebugVar = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), "this", sizeof("this") - 1, 1, debugFileForScopeItem(info->function), node->position.line, thisDebugType, false, LLVMDIFlagZero);
-			auto thisDebugLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), node->position.line, node->position.column, translateScope(info->function->scope), NULL);
+			if (!suspendableContext) {
+				auto tmpThis = co_await tmpify(selfParam, info->function->parentClassType, false, true);
 
-			LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmpThis, thisDebugVar, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), thisDebugLoc, LLVMGetInsertBlock(_builders.top().get()));
+				auto thisDebugType = LLVMDIBuilderCreateObjectPointerType(_debugBuilder.get(), translateTypeDebug(info->function->parentClassType));
+				auto thisDebugVar = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), "this", sizeof("this") - 1, 1, debugFileForScopeItem(info->function), node->position.line, thisDebugType, false, LLVMDIFlagZero);
+				auto thisDebugLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), node->position.line, node->position.column, translateScope(info->function->scope), NULL);
+
+				LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmpThis, thisDebugVar, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), thisDebugLoc, LLVMGetInsertBlock(_builders.top().get()));
+			}
 		}
 
 		size_t llparamIndex = info->function->isMethod ? 1 : 0;
@@ -2114,9 +2324,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			LLVMValueRef llparamLen = NULL;
 
 			if (param->isVariable) {
-				auto tmp = co_await tmpify(llparam, std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Integer, std::vector<uint8_t> { static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long), static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long) }), false, true);
+				// TODO: support variable parameters in suspendable functions
+				assert(!suspendableContext);
 
-				LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmp, llparamDebug, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), paramLoc, entryBlock);
+				auto tmp = suspendableContext ? NULL : co_await tmpify(llparam, std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Integer, std::vector<uint8_t> { static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long), static_cast<uint8_t>(AltaCore::DET::TypeModifierFlag::Long) }), false, true);
+
+				if (!suspendableContext) {
+					LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmp, llparamDebug, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), paramLoc, entryBlock);
+				}
 
 				llparamLen = llparam;
 				llparam = LLVMGetParam(llfunc, llparamIndex);
@@ -2126,28 +2341,122 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 				paramNameDebug = std::regex_replace(param->name, std::regex("@"), "__");
 
-				auto elmDebugType = translateTypeDebug(var->type->followBlindly());
-				paramTypeDebug = LLVMDIBuilderCreateArrayType(_debugBuilder.get(), 0, LLVMDITypeGetAlignInBits(elmDebugType), elmDebugType, NULL, 0);
-				llparamDebug = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), paramNameDebug.c_str(), paramNameDebug.size(), llparamIndex, debugFileForScope(info->function->scope), param->position.line, paramTypeDebug, false, LLVMDIFlagZero);
+				if (!suspendableContext) {
+					auto elmDebugType = translateTypeDebug(var->type->followBlindly());
+					paramTypeDebug = LLVMDIBuilderCreateArrayType(_debugBuilder.get(), 0, LLVMDITypeGetAlignInBits(elmDebugType), elmDebugType, NULL, 0);
+					llparamDebug = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), paramNameDebug.c_str(), paramNameDebug.size(), llparamIndex, debugFileForScope(info->function->scope), param->position.line, paramTypeDebug, false, LLVMDIFlagZero);
+				}
 			}
 
 			if (!param->isVariable) {
-				llparam = co_await tmpify(llparam, var->type, false, true);
-				currentStack().pushItem(llparam, var->type);
-				LLVMSetValueName(llparam, (param->name + "@on_stack").c_str());
+				if (suspendableContext) {
+					auto alloca = buildSuspendableAlloca(_builders.top(), suspendableContext);
+					updateSuspendableAlloca(alloca, LLVMOffsetOfElement(_targetData.get(), paramStackType, paramStackIndex++));
+					LLVMBuildStore(_builders.top().get(), llparam, alloca);
+				} else {
+					llparam = co_await tmpify(llparam, var->type, false, true);
+					currentStack().pushItem(llparam, var->type);
+					LLVMSetValueName(llparam, (param->name + "@on_stack").c_str());
+				}
 			} else if (param->isVariable) {
+				// TODO: support variable parameters in suspendable functions
+				assert(!suspendableContext);
 				currentStack().pushRuntimeArray(llparam, llparamLen, var->type, LLVMInt64TypeInContext(_llcontext.get()));
 			}
 
-			LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), llparam, llparamDebug, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), paramLoc, entryBlock);
+			if (!suspendableContext) {
+				LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), llparam, llparamDebug, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), paramLoc, entryBlock);
+			}
 
-			_definedVariables[var->id] = llparam;
-			if (llparamLen) {
-				_definedVariables["_Alta_array_length_" + var->id] = llparamLen;
+			if (!suspendableContext) {
+				_definedVariables[var->id] = llparam;
+				if (llparamLen) {
+					_definedVariables["_Alta_array_length_" + var->id] = llparamLen;
+				}
 			}
 		}
 
-		pushDebugLocation(node->body->position, info->function->scope);
+		if (suspendableContext) {
+			auto load = LLVMBuildLoad2(_builders.top().get(), llclass, suspendableContext, "@ret_context");
+			LLVMBuildRet(_builders.top().get(), load);
+			popDebugLocation();
+			popStack();
+
+			// now build the actual suspendable function
+
+			nextFunc = std::dynamic_pointer_cast<AltaCore::DET::Function>(genClass->scope->items[info->isGenerator ? 2 : 3]);
+
+			mangled = mangleName(nextFunc);
+			auto [newllfuncType, newllfunc] = co_await declareFunction(nextFunc);
+			llfuncType = newllfuncType;
+			llfunc = newllfunc;
+
+			llfuncDebug = translateFunction(nextFunc, true);
+			LLVMSetSubprogram(llfunc, llfuncDebug);
+
+			LLVMSetLinkage(llfunc, LLVMInternalLinkage);
+
+			entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
+			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+			suspendableContext = LLVMGetParam(llfunc, 0);
+
+			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+			std::array<LLVMValueRef, 3> gepIndices {
+				LLVMConstInt(gepIndexType, 0, false), // the first element of the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_suspendable::state
+			};
+			auto stateIndexGEP = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@state_index_ref");
+			auto stateIndexLoad = LLVMBuildLoad2(_builders.top().get(), LLVMInt64TypeInContext(_llcontext.get()), stateIndexGEP, "@state_index");
+
+			buildSuspendableReload(_builders.top(), suspendableContext);
+
+			paramStackIndex = 0;
+
+			_suspendableContext.push(suspendableContext);
+			_suspendableStateIndex.push(0);
+			_suspendStateIndexValue.push(stateIndexLoad);
+
+			pushStack(ScopeStack::Type::Function);
+			pushUnknownDebugLocation(nextFunc->scope);
+
+			if (info->function->isMethod) {
+				auto selfParam = buildSuspendableAlloca(_builders.top(), suspendableContext);
+				updateSuspendableAlloca(selfParam, LLVMOffsetOfElement(_targetData.get(), paramStackType, paramStackIndex++));
+				// "this" is a pointer to the class instance; we don't want a pointer to a pointer
+				selfParam = LLVMBuildLoad2(_builders.top().get(), co_await translateType(info->function->parentClassType), selfParam, "@this");
+				_thisContextValue.push(selfParam);
+			}
+
+			for (size_t i = 0; i < info->parameters.size(); ++i) {
+				const auto& param = node->parameters[i];
+				const auto& paramInfo = info->parameters[i];
+				const auto& var = info->function->parameterVariables[i];
+
+				// TODO: support variable parameters in suspendable functions
+				assert(!param->isVariable);
+
+				auto llparam = buildSuspendableAlloca(_builders.top(), suspendableContext);
+				updateSuspendableAlloca(llparam, LLVMOffsetOfElement(_targetData.get(), paramStackType, paramStackIndex++));
+
+				currentStack().pushItem(llparam, var->type);
+				LLVMSetValueName(llparam, (param->name + "@on_stack").c_str());
+
+				_definedVariables[var->id] = llparam;
+			}
+
+			// we'll come back to the entry block after we've filled out the body of the function
+			entryBlock = LLVMGetInsertBlock(_builders.top().get());
+
+			auto initialStateBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@state0");
+			LLVMPositionBuilderAtEnd(builder.get(), initialStateBlock);
+
+			_suspendableStateBlocks.push({ initialStateBlock });
+		}
+
+		pushDebugLocation(node->body->position, nextFunc ? nextFunc->scope : info->function->scope);
 
 		co_await compileNode(node->body, info->body);
 
@@ -2164,11 +2473,39 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			} else {
 				LLVMBuildUnreachable(_builders.top().get());
 			}
+
+			std::cerr << "TODO: handle missing terminators in suspendable functions" << std::endl;
+		}
+
+		if (suspendableContext) {
+			auto badState = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@bad_state");
+			LLVMPositionBuilderAtEnd(_builders.top().get(), badState);
+			LLVMBuildUnreachable(_builders.top().get());
+
+			// alright, now let's go back to the entry block to set up the state switch
+			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+			auto switchInstr = LLVMBuildSwitch(_builders.top().get(), _suspendStateIndexValue.top(), badState, _suspendableStateBlocks.size());
+			for (size_t i = 0; i < _suspendableStateBlocks.top().size(); ++i) {
+				LLVMAddCase(switchInstr, LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), i, false), _suspendableStateBlocks.top()[i]);
+			}
 		}
 
 		popDebugLocation();
 		popStack();
 		_builders.pop();
+
+		if (info->function->isMethod) {
+			_thisContextValue.pop();
+		}
+
+		if (suspendableContext) {
+			_suspendableContext.pop();
+			_suspendableStateBlocks.pop();
+			_suspendableStateIndex.pop();
+			_suspendStateIndexValue.pop();
+		}
+
+		_suspendableContext.pop();
 
 		for (const auto& [variant, optionalValueProvided]: info->optionalVariantFunctions) {
 			std::vector<LLVMTypeRef> llparams;
@@ -2301,6 +2638,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 		}
 	}
 
+	if (inSuspendableFunction()) {
+		// make sure to pop off the parameter stack
+		buildSuspendablePopStack(_builders.top(), _suspendableContext.top());
+	}
+
 	if (node->expression) {
 		if (!expr) {
 			throw std::runtime_error("Invalid return value");
@@ -2339,7 +2681,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 			memory = LLVMAddGlobal(_llmod.get(), lltype, mangled.c_str());
 			LLVMSetLinkage(memory, LLVMInternalLinkage);
 		} else {
-			memory = LLVMBuildAlloca(_builders.top().get(), lltype, mangled.c_str());
+			memory = currentNonTemporaryStack().buildAlloca(lltype, mangled);
 		}
 
 		_definedVariables[info->variable->id] = memory;
@@ -3653,6 +3995,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 	bool isFrom = false;
 	bool isTo = false;
 
+	_suspendableContext.push(nullptr);
+
 	switch (node->type) {
 		case AltaCore::AST::SpecialClassMethod::Constructor: isCtor = true; break;
 		case AltaCore::AST::SpecialClassMethod::Destructor:  isDtor = true; break;
@@ -4185,6 +4529,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		// only constructors can have optional/default parameters
 		assert(info->optionalVariantFunctions.size() == 0);
 	}
+
+	_suspendableContext.pop();
 
 	popDebugLocation();
 	co_return NULL;
@@ -4889,8 +5235,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileCodeLiteralNode(std::shar
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBitfieldDefinitionNode(std::shared_ptr<AltaCore::AST::BitfieldDefinitionNode> node, std::shared_ptr<AltaCore::DH::BitfieldDefinitionNode> info) {
-	// TODO
-	std::cerr << "TODO: BitfieldDefinitionNode" << std::endl;
+	auto lltype = co_await defineClassType(info->bitfield);
+	// XXX: is there anything else we should define/declare for bitfields?
 	co_return NULL;
 };
 
@@ -4902,6 +5248,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 	if (info->function->isGenerator || info->function->isAsync) {
 		throw std::runtime_error("TODO: generator lambdas");
 	}
+
+	_suspendableContext.push(nullptr);
 
 	std::vector<LLVMTypeRef> lambdaStateMembers {
 		_definedTypes["_Alta_basic_lambda_state"],
@@ -5167,6 +5515,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 	lambda = LLVMBuildInsertValue(_builders.top().get(), lambda, lambdaFunc, 0, ("@lambda_init_func@" + mangled).c_str());
 	lambda = LLVMBuildInsertValue(_builders.top().get(), lambda, lambdaState, 1, ("@lambda@" + mangled).c_str());
 
+	_suspendableContext.pop();
+
 	co_return lambda;
 };
 
@@ -5194,6 +5544,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(st
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionStatement(std::shared_ptr<AltaCore::AST::ClassOperatorDefinitionStatement> node, std::shared_ptr<AltaCore::DH::ClassOperatorDefinitionStatement> info) {
 	auto [llfuncType, llfunc] = co_await declareFunction(info->method);
+
+	_suspendableContext.push(nullptr);
 
 	auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
 	auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
@@ -5255,6 +5607,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 	popDebugLocation();
 	popStack();
 	_builders.pop();
+
+	_suspendableContext.pop();
 
 	co_return NULL;
 };
@@ -5509,6 +5863,22 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		_definedTypes["_Alta_basic_lambda_state"] = LLVMStructType(members.data(), members.size(), false);
 	}
 
+	if (!_definedTypes["_Alta_basic_suspendable"]) {
+		/*
+		struct _Alta_basic_suspendable {
+			uint64_t state;
+			// TODO
+		};
+		*/
+
+		std::array<LLVMTypeRef, 1> members {
+			LLVMInt64TypeInContext(_llcontext.get()),
+			// TODO
+		};
+
+		_definedTypes["_Alta_basic_suspendable"] = LLVMStructType(members.data(), members.size(), false);
+	}
+
 	for (size_t i = 0; i < root->statements.size(); ++i) {
 		auto co = compileNode(root->statements[i], root->info->statements[i]);
 		co.coroutine.resume();
@@ -5592,6 +5962,108 @@ void AltaLL::Compiler::finalize() {
 
 		auto enumName = LLVMGetParam(llfunc, 0);
 		auto enumIndex = LLVMGetParam(llfunc, 1);
+
+		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+		if (!_definedFunctions["abort"]) {
+			_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
+		}
+
+		LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
+		LLVMBuildUnreachable(_builders.top().get());
+
+		_builders.pop();
+	}
+
+	if (_definedFunctions["_Alta_suspendable_push_stack"]) {
+		auto llfunc = _definedFunctions["_Alta_suspendable_push_stack"];
+
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+		_builders.push(builder);
+
+		// TODO
+		// for now, just abort
+
+		auto basicSuspendable = LLVMGetParam(llfunc, 0);
+		auto stackSizeBytes = LLVMGetParam(llfunc, 1);
+
+		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+		if (!_definedFunctions["abort"]) {
+			_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
+		}
+
+		LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
+		LLVMBuildUnreachable(_builders.top().get());
+
+		_builders.pop();
+	}
+
+	if (_definedFunctions["_Alta_suspendable_pop_stack"]) {
+		auto llfunc = _definedFunctions["_Alta_suspendable_pop_stack"];
+
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+		_builders.push(builder);
+
+		// TODO
+		// for now, just abort
+
+		auto basicSuspendable = LLVMGetParam(llfunc, 0);
+
+		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+		if (!_definedFunctions["abort"]) {
+			_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
+		}
+
+		LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
+		LLVMBuildUnreachable(_builders.top().get());
+
+		_builders.pop();
+	}
+
+	if (_definedFunctions["_Alta_suspendable_reload"]) {
+		auto llfunc = _definedFunctions["_Alta_suspendable_reload"];
+
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+		_builders.push(builder);
+
+		// TODO
+		// for now, just abort
+
+		auto basicSuspendable = LLVMGetParam(llfunc, 0);
+
+		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+		if (!_definedFunctions["abort"]) {
+			_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
+		}
+
+		LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
+		LLVMBuildUnreachable(_builders.top().get());
+
+		_builders.pop();
+	}
+
+	if (_definedFunctions["_Alta_suspendable_alloca"]) {
+		auto llfunc = _definedFunctions["_Alta_suspendable_alloca"];
+
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+		_builders.push(builder);
+
+		// TODO
+		// for now, just abort
+
+		auto basicSuspendable = LLVMGetParam(llfunc, 0);
+		auto stackOffset = LLVMGetParam(llfunc, 1);
 
 		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
 		if (!_definedFunctions["abort"]) {

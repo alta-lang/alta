@@ -25,3 +25,6 @@ targets:
 - name: lambda
   main: lambda.alta
   type: exe
+- name: coroutine-test
+  main: coroutine-test.alta
+  type: exe

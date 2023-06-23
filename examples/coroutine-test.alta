@@ -1,0 +1,9 @@
+async function looper(times: int): int {
+	return times * 3
+}
+
+literal function main(): int {
+	let instance = looper(7)
+	instance.next()
+	return *instance.value
+}

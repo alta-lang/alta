@@ -213,6 +213,16 @@ namespace AltaLL {
 			Compiler& compiler;
 			Type type;
 
+			LLVMValueRef suspendableStackStub = nullptr;
+			LLVMBasicBlockRef suspendableStackStubBlock = nullptr;
+			LLVMValueRef suspendableContext = nullptr;
+			std::vector<LLVMTypeRef> suspendableAllocationTypes;
+			std::vector<LLVMValueRef> suspendableAllocations;
+			LLVMBasicBlockRef suspendableReloadBlock;
+			LLBuilder suspendableReloadBuilder;
+			std::vector<std::pair<size_t, LLVMBasicBlockRef>> suspendableContinuations;
+			LLVMValueRef suspendableStateIndexValue;
+
 			ScopeStack(ScopeStack&& other):
 				items(std::move(other.items)),
 				sizesDuringBranching(std::move(other.sizesDuringBranching)),
@@ -220,10 +230,7 @@ namespace AltaLL {
 				type(std::move(other.type))
 				{};
 
-			ScopeStack(Compiler& _compiler, Type _type):
-				compiler(_compiler),
-				type(_type)
-				{};
+			ScopeStack(Compiler& compiler, Type type);
 
 			ScopeStack& operator=(ScopeStack&& other) {
 				items = std::move(other.items);
@@ -240,12 +247,15 @@ namespace AltaLL {
 			void pushRuntimeArray(LLVMValueRef array, LLVMValueRef count, std::shared_ptr<AltaCore::DET::Type> elementType, LLVMTypeRef countType, LLVMBasicBlockRef sourceBlock);
 			void pushRuntimeArray(LLVMValueRef array, LLVMValueRef count, std::shared_ptr<AltaCore::DET::Type> elementType, LLVMTypeRef countType);
 
+			LLVMValueRef buildAlloca(LLVMTypeRef type, const std::string& name = "");
+
 			void beginBranch() {
 				sizesDuringBranching.push(items.size());
 			};
 
 			Coroutine<void> endBranch(LLVMBasicBlockRef mergeBlock, std::vector<LLVMBasicBlockRef> mergingBlocks);
 			Coroutine<void> cleanup();
+			Coroutine<void> popping();
 		};
 
 		struct LoopEntry {
@@ -267,7 +277,6 @@ namespace AltaLL {
 		std::stack<LLBuilder> _builders;
 		ALTACORE_MAP<std::string, LLVMTypeRef> _definedTypes;
 		ALTACORE_MAP<std::string, LLVMMetadataRef> _definedDebugTypes;
-		bool _inGenerator = false;
 		ALTACORE_MAP<std::string, LLVMValueRef> _definedFunctions;
 		std::deque<ScopeStack> _stacks;
 		ALTACORE_MAP<std::string, LLVMValueRef> _definedVariables;
@@ -290,6 +299,11 @@ namespace AltaLL {
 		std::stack<LLVMMetadataRef> _debugLocations;
 		std::stack<LoopEntry> _loops;
 		ALTACORE_MAP<std::string, LLVMValueRef> _bitfieldAccessTargets;
+		std::stack<LLVMValueRef> _suspendableContext;
+		std::stack<size_t> _suspendableStateIndex;
+		std::stack<std::vector<LLVMBasicBlockRef>> _suspendableStateBlocks;
+		std::stack<LLVMValueRef> _suspendStateIndexValue;
+		std::stack<LLVMValueRef> _thisContextValue;
 
 		inline LLVMMetadataRef currentDebugFile() {
 			return _debugFiles[_currentFile];
@@ -301,6 +315,17 @@ namespace AltaLL {
 
 		inline LLVMMetadataRef currentRootDebugScope() {
 			return _rootDebugScopes[_currentFile];
+		};
+
+		inline bool inSuspendableFunction() {
+			if (_suspendableContext.empty()) {
+				return false;
+			}
+			return !!_suspendableContext.top();
+		}
+
+		inline LLVMValueRef currentSuspendableContext() {
+			return _suspendableContext.empty() ? NULL : _suspendableContext.top();
 		};
 
 		LLVMMetadataRef translateTypeDebug(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions = true);
@@ -468,6 +493,11 @@ namespace AltaLL {
 		};
 
 		inline LLVMMetadataRef translateParentScope(std::shared_ptr<AltaCore::DET::ScopeItem> item) {
+			if (item->nodeType() == AltaCore::DET::NodeType::Class) {
+				if (auto func = AltaCore::Util::getFunction(item->parentScope.lock()).lock()) {
+					return translateParentScope(func);
+				}
+			}
 			if (auto scope = item->parentScope.lock()) {
 				return translateScope(scope);
 			} else {
@@ -499,6 +529,8 @@ namespace AltaLL {
 			if (_stacks.back().type == ScopeStack::Type::Function) {
 				temporaryIndices.pop();
 			}
+			auto co = _stacks.back().popping();
+			co.await_resume();
 			_stacks.pop_back();
 		};
 
@@ -709,6 +741,18 @@ namespace AltaLL {
 				)
 			);
 		};
+
+		std::pair<LLVMValueRef, LLVMTypeRef> defineRuntimeFunction(const std::string& name);
+
+		// <runtime-builders>
+		void buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, LLVMValueRef stackSize);
+		void buildSuspendablePushStack(LLBuilder builder, LLVMValueRef suspendableContext, size_t stackSize);
+		void buildSuspendablePopStack(LLBuilder builder, LLVMValueRef suspendableContext);
+		LLVMValueRef buildSuspendableAlloca(LLBuilder builder, LLVMValueRef suspendableContext);
+		void buildSuspendableReload(LLBuilder builder, LLVMValueRef suspendableContext);
+
+		void updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset);
+		// </runtime-builders>
 
 		LLCoroutine returnNull();
 
