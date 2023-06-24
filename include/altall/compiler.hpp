@@ -303,6 +303,7 @@ namespace AltaLL {
 		std::stack<std::vector<LLVMBasicBlockRef>> _suspendableStateBlocks;
 		std::stack<LLVMValueRef> _suspendStateIndexValue;
 		std::stack<LLVMValueRef> _thisContextValue;
+		std::stack<std::pair<std::string, LLVMMetadataRef>> _overrideFuncScopes;
 
 		inline LLVMMetadataRef currentDebugFile() {
 			return _debugFiles[_currentFile];
@@ -352,6 +353,10 @@ namespace AltaLL {
 		};
 
 		inline LLVMMetadataRef translateFunction(std::shared_ptr<AltaCore::DET::Function> func, bool asDefinition = false) {
+			if (!_overrideFuncScopes.empty() && _overrideFuncScopes.top().first == func->id) {
+				return _overrideFuncScopes.top().second;
+			}
+
 			// if we already had a scope defined for this function, it was just a declaration, so we overwrite it unconditionally.
 			// nothing outside the function needs access to the function definition's scope, so this should be perfectly fine.
 			bool needsToBeSet = !_definedScopes[func->id] || (asDefinition && !reinterpret_cast<llvm::MDNode*>(_definedScopes[func->id])->isTemporary() && !reinterpret_cast<llvm::DISubprogram*>(_definedScopes[func->id])->isDefinition());
@@ -465,7 +470,17 @@ namespace AltaLL {
 				return _unknownRootDebugScope;
 			}
 
-			auto it = _definedScopes.find(scope->id);
+			auto scopeID = scope->id;
+
+			if (!_overrideFuncScopes.empty()) {
+				if (auto func = AltaCore::Util::getFunction(scope).lock()) {
+					if (func->id == _overrideFuncScopes.top().first) {
+						scopeID += "@override";
+					}
+				}
+			}
+
+			auto it = _definedScopes.find(scopeID);
 			if (it != _definedScopes.end()) {
 				return it->second;
 			}
@@ -487,7 +502,7 @@ namespace AltaLL {
 				llscope = LLVMDIBuilderCreateLexicalBlock(_debugBuilder.get(), translateScope(scope->parent.lock()), debugFileForModule(AltaCore::Util::getModule(scope.get()).lock()), scope->position.line, scope->position.column);
 			}
 
-			_definedScopes[scope->id] = llscope;
+			_definedScopes[scopeID] = llscope;
 			return llscope;
 		};
 
@@ -643,7 +658,7 @@ namespace AltaLL {
 				auto yield = std::dynamic_pointer_cast<AAST::YieldExpression>(node);
 				auto det = std::dynamic_pointer_cast<DH::YieldExpression>(info);
 
-				canCopy = true;
+				canCopy = false;
 				//canTempify = false;
 			}
 			if (type == ANT::SpecialFetchExpression) {
@@ -748,6 +763,7 @@ namespace AltaLL {
 		void buildSuspendablePopStack(LLBuilder builder, LLVMValueRef suspendableContext);
 		LLVMValueRef buildSuspendableAlloca(LLBuilder builder, LLVMValueRef suspendableContext);
 		void buildSuspendableReload(LLBuilder builder, LLVMValueRef suspendableContext);
+		void buildSuspendableReloadContinue(LLBuilder builder, LLVMValueRef suspendableContext);
 
 		void updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset);
 		void updateSuspendablePushStack(LLVMValueRef push, size_t stackSize);

@@ -1,0 +1,22 @@
+import printLine from "io"
+
+generator function fibonacci(): int {
+	let prevPrev = 1 # n = 1
+	let prev = 1     # n = 2
+	while true {
+		let curr = prevPrev + prev
+		yield curr
+		prevPrev = prev
+		prev = curr
+	}
+}
+
+literal function main(): int {
+	let fib = fibonacci()
+
+	for i: int in 1...100 {
+		printLine("fib(", i, ") = ", *fib.next())
+	}
+
+	return 0
+}

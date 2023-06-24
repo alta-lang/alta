@@ -28,3 +28,6 @@ targets:
 - name: coroutine-test
   main: coroutine-test.alta
   type: exe
+- name: generator-test
+  main: generator-test.alta
+  type: exe
