@@ -7,6 +7,7 @@
 #include "altacore/det/scope-item.hpp"
 #include "altacore/det/scope.hpp"
 #include "altacore/errors.hpp"
+#include "altacore/optional.hpp"
 #include "altacore/util.hpp"
 #include <altall/util.hpp>
 #include <altacore.hpp>
@@ -206,10 +207,12 @@ namespace AltaLL {
 				std::shared_ptr<AltaCore::DET::Type> type = nullptr;
 				LLVMValueRef count = nullptr;
 				LLVMTypeRef countType = nullptr;
+				bool branched = false;
 			};
 
 			std::vector<ScopeItem> items;
 			std::stack<size_t> sizesDuringBranching;
+			std::stack<ALTACORE_OPTIONAL<size_t>> suspendableStateDuringBranching;
 			Compiler& compiler;
 			Type type;
 
@@ -221,6 +224,7 @@ namespace AltaLL {
 			LLBuilder suspendableReloadBuilder;
 			std::vector<std::pair<size_t, LLVMBasicBlockRef>> suspendableContinuations;
 			LLVMValueRef suspendableStateIndexValue;
+			ALTACORE_MAP<size_t, std::vector<LLVMValueRef>> suspendableAllocationUpdateRequests;
 
 			ScopeStack(ScopeStack&& other):
 				items(std::move(other.items)),
@@ -247,13 +251,17 @@ namespace AltaLL {
 			void pushRuntimeArray(LLVMValueRef array, LLVMValueRef count, std::shared_ptr<AltaCore::DET::Type> elementType, LLVMTypeRef countType);
 
 			LLVMValueRef buildAlloca(LLVMTypeRef type, const std::string& name = "");
+			LLVMValueRef buildArrayAlloca(LLVMTypeRef type, size_t elementCount, const std::string& name = "");
 
 			void beginBranch() {
 				sizesDuringBranching.push(items.size());
+				suspendableStateDuringBranching.push(compiler._suspendableStateIndex.empty() ? ALTACORE_NULLOPT : ALTACORE_MAKE_OPTIONAL(compiler._suspendableStateIndex.top()));
 			};
 
-			Coroutine<void> endBranch(LLVMBasicBlockRef mergeBlock, std::vector<LLVMBasicBlockRef> mergingBlocks);
-			Coroutine<void> cleanup();
+			//void forkValue(ScopeItem& item, );
+
+			Coroutine<void> endBranch(LLVMBasicBlockRef mergeBlock, std::vector<LLVMBasicBlockRef> mergingBlocks, bool allowStateChange = false);
+			Coroutine<void> cleanup(bool stateChange = false);
 			Coroutine<void> popping();
 		};
 
@@ -267,6 +275,15 @@ namespace AltaLL {
 				breakBlock(_breakBlock),
 				continueBlock(_continueBlock)
 				{};
+		};
+
+		struct SuspendableDestructor {
+			LLVMValueRef function;
+			LLBuilder builder;
+			LLVMBasicBlockRef entry;
+			LLVMBasicBlockRef exit;
+			LLVMValueRef stateValue;
+			ALTACORE_MAP<size_t, LLVMBasicBlockRef> stateUnwindBlocks;
 		};
 
 		LLContext _llcontext;
@@ -300,10 +317,12 @@ namespace AltaLL {
 		ALTACORE_MAP<std::string, LLVMValueRef> _bitfieldAccessTargets;
 		std::stack<LLVMValueRef> _suspendableContext;
 		std::stack<size_t> _suspendableStateIndex;
-		std::stack<std::vector<LLVMBasicBlockRef>> _suspendableStateBlocks;
+		std::stack<ALTACORE_MAP<size_t, LLVMBasicBlockRef>> _suspendableStateBlocks;
 		std::stack<LLVMValueRef> _suspendStateIndexValue;
 		std::stack<LLVMValueRef> _thisContextValue;
 		std::stack<std::pair<std::string, LLVMMetadataRef>> _overrideFuncScopes;
+		std::stack<SuspendableDestructor> _suspendableDestructor;
+		std::stack<std::shared_ptr<AltaCore::DET::Class>> _suspendableClass;
 
 		inline LLVMMetadataRef currentDebugFile() {
 			return _debugFiles[_currentFile];
@@ -754,6 +773,19 @@ namespace AltaLL {
 				)
 			);
 		};
+
+		inline Coroutine<void> updateSuspendableStateIndex(size_t newIndex) {
+			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+			std::array<LLVMValueRef, 3> stateGEPIndices {
+				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_suspendable::state
+			};
+			auto stateGEP = LLVMBuildGEP2(_builders.top().get(), co_await defineClassType(_suspendableClass.top()), currentSuspendableContext(), stateGEPIndices.data(), stateGEPIndices.size(), "@state_update_ref");
+			LLVMBuildStore(_builders.top().get(), LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), newIndex, false), stateGEP);
+		}
 
 		std::pair<LLVMValueRef, LLVMTypeRef> defineRuntimeFunction(const std::string& name);
 
