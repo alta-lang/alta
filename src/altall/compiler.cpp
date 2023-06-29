@@ -356,7 +356,7 @@ AltaLL::Compiler::ScopeStack::ScopeStack(Compiler& _compiler, Type _type):
 
 	suspendableReloadBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), func, "@reload_stack");
 	suspendableReloadBuilder = llwrap(LLVMCreateBuilderInContext(compiler._llcontext.get()));
-	suspendableStateIndexValue = compiler._suspendStateIndexValue.top();
+	suspendableClass = compiler._suspendableClass.top();
 	LLVMPositionBuilderAtEnd(suspendableReloadBuilder.get(), suspendableReloadBlock);
 
 	compiler.buildSuspendableReloadContinue(suspendableReloadBuilder, suspendableContext);
@@ -401,7 +401,18 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::popping() {
 	LLVMBuildUnreachable(suspendableReloadBuilder.get());
 	LLVMPositionBuilderAtEnd(suspendableReloadBuilder.get(), suspendableReloadBlock);
 
-	auto switchInstr = LLVMBuildSwitch(suspendableReloadBuilder.get(), suspendableStateIndexValue, badBlock, suspendableContinuations.size());
+	auto gepIndexType = LLVMInt64TypeInContext(compiler._llcontext.get());
+	auto gepStructIndexType = LLVMInt32TypeInContext(compiler._llcontext.get());
+
+	std::array<LLVMValueRef, 3> gepIndices {
+		LLVMConstInt(gepIndexType, 0, false), // the first element of the "array"
+		LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+		LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_suspendable::state
+	};
+	auto stateIndexGEP = LLVMBuildGEP2(suspendableReloadBuilder.get(), co_await compiler.defineClassType(suspendableClass), suspendableContext, gepIndices.data(), gepIndices.size(), "@stack_reload_state_index_ref");
+	auto stateIndexLoad = LLVMBuildLoad2(suspendableReloadBuilder.get(), LLVMInt64TypeInContext(compiler._llcontext.get()), stateIndexGEP, "@stack_reload_state_index");
+
+	auto switchInstr = LLVMBuildSwitch(suspendableReloadBuilder.get(), stateIndexLoad, badBlock, suspendableContinuations.size());
 
 	for (const auto& [stateIndex, returnBlock]: suspendableContinuations) {
 		LLVMAddCase(switchInstr, LLVMConstInt(LLVMInt64TypeInContext(compiler._llcontext.get()), stateIndex, false), returnBlock);
@@ -986,7 +997,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 			auto idxType = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(exprType->unionOf.size() - 1));
 
 			result = co_await forEachUnionMember(result, exprType, llunionType, [&](LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType, size_t memberIndex) -> LLCoroutine {
-				auto copied = co_await doCopyCtor(memberRef, memberType->reference(), std::make_pair(true, true), nullptr);
+				bool didCopyMember = false;
+				auto copied = co_await doCopyCtor(memberRef, memberType->reference(), std::make_pair(true, true), &didCopyMember);
+				if (!didCopyMember) {
+					copied = LLVMBuildLoad2(_builders.top().get(), co_await translateType(memberType), copied, ("@copy_union_" + tmpIdxStr + "_member_" + std::to_string(memberIndex) + "_load").c_str());
+				}
 				auto tmp = LLVMBuildAlloca(_builders.top().get(), llunionType, ("@copy_union_" + tmpIdxStr + "_member_" + std::to_string(memberIndex) + "_tmp").c_str());
 
 				std::array<LLVMTypeRef, 2> members;
@@ -1031,7 +1046,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 			if (exprType->optionalTarget->referenceLevel() > 0) {
 				valRef = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType->optionalTarget), valRef, ("@copy_opt_" + tmpIdxStr + "_val_ref_inner").c_str());
 			}
-			auto copied = co_await doCopyCtor(valRef, exprType->optionalTarget->reference(), std::make_pair(true, true), nullptr);
+			bool didCopy = false;
+			auto copied = co_await doCopyCtor(valRef, exprType->optionalTarget->reference(), std::make_pair(true, true), &didCopy);
+			if (!didCopy) {
+				copied = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType->optionalTarget), valRef, ("@copy_opt_" + tmpIdxStr + "_val_deref").c_str());
+			}
 			std::array<LLVMValueRef, 2> members {
 				LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 1, false),
 				LLVMGetPoison(co_await translateType(exprType->optionalTarget)),
@@ -1975,7 +1994,9 @@ LLVMMetadataRef AltaLL::Compiler::translateClassDebug(std::shared_ptr<AltaCore::
 
 	std::vector<LLVMMetadataRef> members;
 
-	if (!klass->isStructure && !klass->isBitfield) {
+	bool suspendable = klass->name == "@Generator@" || klass->name == "@Coroutine@";
+
+	if (!klass->isStructure && !klass->isBitfield && !suspendable) {
 		// every class requires an instance info structure
 		auto debugInstanceInfo = _definedDebugTypes["_Alta_instance_info"];
 		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "__instance_info", sizeof("__instance_info") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugInstanceInfo), LLVMDITypeGetAlignInBits(debugInstanceInfo), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagProtected, debugInstanceInfo));
@@ -1984,6 +2005,24 @@ LLVMMetadataRef AltaLL::Compiler::translateClassDebug(std::shared_ptr<AltaCore::
 		for (const auto& parent: klass->parents) {
 			auto parentType = translateClassDebug(parent);
 			LLVMDIBuilderCreateInheritance(_debugBuilder.get(), tmpDebug, parentType, LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, 0, LLVMDIFlagPublic);
+		}
+	}
+
+	if (suspendable) {
+		// suspendable contexts require suspendable context info
+		auto basicSuspendable = _definedDebugTypes["_Alta_basic_suspendable"];
+		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "base", sizeof("base") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(basicSuspendable), LLVMDITypeGetAlignInBits(basicSuspendable), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagZero, basicSuspendable));
+
+		// suspendable functions might require an input and output variable
+
+		if (klass->suspendableInput) {
+			auto debugType = translateTypeDebug(klass->suspendableInput->makeOptional());
+			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "suspendable_input", sizeof("suspendable_input") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagZero, debugType));
+		}
+
+		if (klass->suspendableOutput) {
+			auto debugType = translateTypeDebug(klass->suspendableOutput->makeOptional());
+			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "suspendable_output", sizeof("suspendable_output") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagZero, debugType));
 		}
 	}
 
@@ -2453,6 +2492,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 		auto genClass = info->function->isGenerator ? info->generator : (info->function->isAsync ? info->coroutine : nullptr);
 		auto llclass = genClass ? co_await defineClassType(genClass) : NULL;
+		LLVMMetadataRef debugGenClass = genClass ? translateClassDebug(genClass) : nullptr;
 
 		auto mangled = mangleName(info->function);
 		auto [llfuncType, llfunc] = co_await declareFunction(info->function);
@@ -2692,23 +2732,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			_overrideFuncScopes.emplace(info->function->id, llfuncDebug);
 
-			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
-			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
-			std::array<LLVMValueRef, 3> gepIndices {
-				LLVMConstInt(gepIndexType, 0, false), // the first element of the "array"
-				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
-				LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_suspendable::state
-			};
-			auto stateIndexGEP = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@state_index_ref");
-			auto stateIndexLoad = LLVMBuildLoad2(_builders.top().get(), LLVMInt64TypeInContext(_llcontext.get()), stateIndexGEP, "@state_index");
-
 			buildSuspendableReload(_builders.top(), suspendableContext);
 
 			paramStackIndex = 1;
 
 			_suspendableContext.push(suspendableContext);
 			_suspendableStateIndex.push(0);
-			_suspendStateIndexValue.push(stateIndexLoad);
 			_suspendableClass.push(genClass);
 
 			auto dtor = (co_await declareFunction(genClass->destructor)).second;
@@ -2822,7 +2851,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			// alright, now let's go back to the entry block to set up the state switch
 			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
-			auto switchInstr = LLVMBuildSwitch(_builders.top().get(), _suspendStateIndexValue.top(), badState, _suspendableStateBlocks.size());
+
+			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+			std::array<LLVMValueRef, 3> gepIndices {
+				LLVMConstInt(gepIndexType, 0, false), // the first element of the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_suspendable::state
+			};
+			auto stateIndexGEP = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@state_index_ref");
+			auto stateIndexLoad = LLVMBuildLoad2(_builders.top().get(), LLVMInt64TypeInContext(_llcontext.get()), stateIndexGEP, "@state_index");
+
+			auto switchInstr = LLVMBuildSwitch(_builders.top().get(), stateIndexLoad, badState, _suspendableStateBlocks.size());
 			for (const auto& [idx, block]: _suspendableStateBlocks.top()) {
 				LLVMAddCase(switchInstr, LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), idx, false), block);
 			}
@@ -2850,6 +2891,26 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+			std::array<LLVMValueRef, 3> doneGEPIndices {
+				LLVMConstInt(gepIndexType, 0, false), // first element in the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 2, false), // _Alta_basic_suspendable::done
+			};
+			auto doneGEP = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, doneGEPIndices.data(), doneGEPIndices.size(), "@suspendable_done_gep");
+			auto done = LLVMBuildLoad2(_builders.top().get(), LLVMInt1TypeInContext(_llcontext.get()), doneGEP, "@suspendable_done");
+
+			auto earlyExit = LLVMAppendBasicBlockInContext(_llcontext.get(), _suspendableDestructor.top().function, "@early_exit");
+			auto continueDtor = LLVMAppendBasicBlockInContext(_llcontext.get(), _suspendableDestructor.top().function, "@continue_dtor");
+
+			LLVMBuildCondBr(_builders.top().get(), done, earlyExit, continueDtor);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), earlyExit);
+
+			LLVMBuildRetVoid(_builders.top().get());
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), continueDtor);
+
 			std::array<LLVMValueRef, 3> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // first element in the "array"
 				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
@@ -2896,7 +2957,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			_suspendableStateBlocks.pop();
 			_suspendableStateIndex.pop();
 			_suspendableClass.pop();
-			_suspendStateIndexValue.pop();
 			_suspendableDestructor.pop();
 			_overrideFuncScopes.pop();
 		}
@@ -3037,6 +3097,73 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			_builders.pop();
 		}
+
+		if (info->coroutine) {
+			// build the value getter
+			auto valueGetter = std::dynamic_pointer_cast<AltaCore::DET::Function>(info->coroutine->scope->items[2]);
+			auto [llfuncType, llfunc] = co_await declareFunction(valueGetter);
+
+			auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
+			auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+			_builders.push(builder);
+
+			suspendableContext = LLVMGetParam(llfunc, 0);
+
+			pushStack(ScopeStack::Type::Temporary);
+
+			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+			std::array<LLVMValueRef, 2> gepIndices {
+				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+				LLVMConstInt(gepStructIndexType, 1, false), // @Suspendable@::suspendable_output
+			};
+			auto gep = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@coroutine_output_ref");
+
+			bool didCopy = false;
+			auto copy = co_await doCopyCtor(gep, valueGetter->returnType->reference(), std::make_pair(true, false), &didCopy);
+			if (!didCopy) {
+				copy = LLVMBuildLoad2(_builders.top().get(), co_await translateType(valueGetter->returnType), copy, "@output_val_load");
+			}
+
+			co_await popStack();
+
+			LLVMBuildRet(_builders.top().get(), copy);
+
+			_builders.pop();
+		}
+
+		if (suspendableContext) {
+			// build the `done` getter
+			auto doneGetter = std::dynamic_pointer_cast<AltaCore::DET::Function>(genClass->scope->items[1]);
+			auto [llfuncType, llfunc] = co_await declareFunction(doneGetter);
+
+			auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
+			auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+			_builders.push(builder);
+
+			suspendableContext = LLVMGetParam(llfunc, 0);
+
+			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+			std::array<LLVMValueRef, 3> gepIndices {
+				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 2, false), // _Alta_basic_suspendable::done
+			};
+			auto gep = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@suspendable_done_ref");
+
+			auto done = LLVMBuildLoad2(_builders.top().get(), LLVMInt1TypeInContext(_llcontext.get()), gep, "@suspendable_done");
+
+			LLVMBuildRet(_builders.top().get(), done);
+
+			_builders.pop();
+		}
 	}
 
 	co_return NULL;
@@ -3096,7 +3223,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 
 		if (inCoroutine) {
 			// coroutines don't return their values directly; they store them in an instance variable
-			std::array<LLVMValueRef, 3> gepIndices {
+			std::array<LLVMValueRef, 2> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // first element in the "array"
 				LLVMConstInt(gepStructIndexType, 1, false), // @Coroutine@::suspendable_output
 			};
@@ -6475,9 +6602,10 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto instanceInfoStruct = _definedTypes["_Alta_instance_info"] = LLVMStructType(members.data(), members.size(), false);
 
 		auto debugClassInfo = _definedDebugTypes["_Alta_class_info"];
+		auto debugClassInfoPtr = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugClassInfo, _pointerBits, _pointerBits, 0, NULL, 0);
 
 		std::array<LLVMMetadataRef, 1> debugElements {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugClassInfo), LLVMDITypeGetAlignInBits(debugClassInfo), 0, LLVMDIFlagZero, debugClassInfo),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "class_info", sizeof("class_info") - 1, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugClassInfo), LLVMDITypeGetAlignInBits(debugClassInfo), 0, LLVMDIFlagZero, debugClassInfoPtr),
 		};
 
 		_definedDebugTypes["_Alta_instance_info"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_instance_info", sizeof("_Alta_instance_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), instanceInfoStruct) * 8, LLVMABIAlignmentOfType(_targetData.get(), instanceInfoStruct) * 8, LLVMDIFlagZero, NULL, debugElements.data(), debugElements.size(), 0, NULL, "", 0);
@@ -6525,8 +6653,8 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto funcType = _definedTypes["_Alta_basic_function"] = LLVMStructType(members.data(), members.size(), false);
 
 		std::array<LLVMMetadataRef, 2> debugMembers {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 0), LLVMDIFlagZero, debugVoidPointer),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 1), LLVMDIFlagZero, debugVoidPointer),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 0) * 8, LLVMDIFlagZero, debugVoidPointer),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 1) * 8, LLVMDIFlagZero, debugVoidPointer),
 		};
 
 		_definedDebugTypes["_Alta_basic_function"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_function", sizeof("_Alta_basic_function") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), funcType) * 8, LLVMABIAlignmentOfType(_targetData.get(), funcType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
@@ -6552,7 +6680,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		/*
 		struct _Alta_basic_suspendable_stack {
 			uint64_t size;
-			void* next;
+			_Alta_basic_suspendable_stack* next;
 			_Alta_basic_suspendable_stack* prev;
 		};
 		*/
@@ -6566,15 +6694,24 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 
 		auto structType = _definedTypes["_Alta_basic_suspendable_stack"] = LLVMStructType(members.data(), members.size(), false);
 
-		members[2] = LLVMPointerType(_definedTypes["_Alta_basic_suspendable_stack"], 0);
+		members[1] = LLVMPointerType(_definedTypes["_Alta_basic_suspendable_stack"], 0);
+		members[2] = members[1];
 		LLVMStructSetBody(_definedTypes["_Alta_basic_suspendable_stack"], members.data(), members.size(), false);
 
+		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
+
+		auto debugType = LLVMDIBuilderCreateReplaceableCompositeType(_debugBuilder.get(), _compositeCounter++, "_Alta_basic_suspendable_stack", sizeof("_Alta_basic_suspendable_stack") - 1, _unknownDebugFile, _unknownDebugFile, 0, 0, LLVMStoreSizeOfType(_targetData.get(), structType), LLVMABIAlignmentOfType(_targetData.get(), structType), LLVMDIFlagZero, NULL, 0);
+		auto debugTypePtr = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugType, _pointerBits, _pointerBits, 0, NULL, 0);
+
 		std::array<LLVMMetadataRef, 3> debugMembers {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "size", sizeof("size") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0), LLVMDIFlagZero, debugI64Type),
-			// TODO: working here
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "size", sizeof("size") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagZero, debugI64Type),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "next", sizeof("next") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[1]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[1]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 1) * 8, LLVMDIFlagZero, debugTypePtr),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "prev", sizeof("prev") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[2]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[2]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 2) * 8, LLVMDIFlagZero, debugTypePtr),
 		};
 
-		_definedDebugTypes["_Alta_basic_suspendable_stack"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_suspendable_stack", sizeof("_Alta_basic_suspendable_stack") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
+		auto permaDebugType = _definedDebugTypes["_Alta_basic_suspendable_stack"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_suspendable_stack", sizeof("_Alta_basic_suspendable_stack") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
+
+		LLVMMetadataReplaceAllUsesWith(debugType, permaDebugType);
 	}
 
 	if (!_definedTypes["_Alta_basic_suspendable"]) {
@@ -6594,7 +6731,20 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			LLVMPointerType(_definedTypes["_Alta_basic_suspendable_stack"], 0),
 		};
 
-		_definedTypes["_Alta_basic_suspendable"] = LLVMStructType(members.data(), members.size(), false);
+		auto structType = _definedTypes["_Alta_basic_suspendable"] = LLVMStructType(members.data(), members.size(), false);
+
+		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
+		auto debugBoolType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "bool", 4, 8, llvm::dwarf::DW_ATE_boolean, LLVMDIFlagZero);
+		auto debugStackPtr = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), _definedDebugTypes["_Alta_basic_suspendable_stack"], _pointerBits, _pointerBits, 0, NULL, 0);
+
+		std::array<LLVMMetadataRef, 4> debugMembers {
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "instance_info", sizeof("instance_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagZero, _definedDebugTypes["_Alta_instance_info"]),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "state", sizeof("state") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[1]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[1]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 1) * 8, LLVMDIFlagZero, debugI64Type),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "done", sizeof("done") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[2]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[2]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 2) * 8, LLVMDIFlagZero, debugBoolType),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "current_stack", sizeof("current_stack") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[3]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[3]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 3) * 8, LLVMDIFlagZero, debugStackPtr),
+		};
+
+		_definedDebugTypes["_Alta_basic_suspendable"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_suspendable", sizeof("_Alta_basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, NULL, 0);
 	}
 
 	for (size_t i = 0; i < root->statements.size(); ++i) {

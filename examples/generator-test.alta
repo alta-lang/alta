@@ -1,20 +1,10 @@
 import printLine from "io"
 import String from "string"
+import uint64 from "types"
 
-function bar(a: String, b: String): String {
-	return a + b
-}
-
-generator function test()(String...): String {
-	let result = new String
-	while true {
-		(result.length == 3) ? (result + "foo" == "barfoo" ? bar(*(yield result), *(yield result)) : "") : *(yield "foo")
-	}
-}
-
-generator function fibonacci(): int {
-	let prevPrev = 1 # n = 1
-	let prev = 1     # n = 2
+generator function fibonacci(): uint64 {
+	let prevPrev: uint64 = 1 # n = 1
+	let prev: uint64 = 1     # n = 2
 	while true {
 		let curr = prevPrev + prev
 		yield curr
@@ -29,13 +19,6 @@ literal function main(): int {
 	for i: int in 3...100 {
 		printLine("fib(", i, ") = ", *fib.next())
 	}
-
-	#let inst = test()
-
-	#printLine("inst#0 = ", *inst.next(3)) # -1
-	#printLine("inst#1 = ", *inst.next(4)) # 3
-	#printLine("inst#2 = ", *inst.next(5)) # 3
-	#printLine("inst#3 = ", *inst.next(0)) # -1
 
 	return 0
 }

@@ -223,7 +223,7 @@ namespace AltaLL {
 			LLVMBasicBlockRef suspendableReloadBlock;
 			LLBuilder suspendableReloadBuilder;
 			std::vector<std::pair<size_t, LLVMBasicBlockRef>> suspendableContinuations;
-			LLVMValueRef suspendableStateIndexValue;
+			std::shared_ptr<AltaCore::DET::Class> suspendableClass;
 			ALTACORE_MAP<size_t, std::vector<LLVMValueRef>> suspendableAllocationUpdateRequests;
 
 			ScopeStack(ScopeStack&& other):
@@ -318,7 +318,6 @@ namespace AltaLL {
 		std::stack<LLVMValueRef> _suspendableContext;
 		std::stack<size_t> _suspendableStateIndex;
 		std::stack<ALTACORE_MAP<size_t, LLVMBasicBlockRef>> _suspendableStateBlocks;
-		std::stack<LLVMValueRef> _suspendStateIndexValue;
 		std::stack<LLVMValueRef> _thisContextValue;
 		std::stack<std::pair<std::string, LLVMMetadataRef>> _overrideFuncScopes;
 		std::stack<SuspendableDestructor> _suspendableDestructor;
