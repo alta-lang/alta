@@ -242,7 +242,7 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::cleanup(bool sta
 		LLVMValueRef source = item.source;
 
 		if (stateChange) {
-			source = compiler.buildSuspendableAlloca(compiler._builders.top(), LLVMGetParam(compiler._suspendableDestructor.top().function, 0));
+			source = compiler.buildSuspendableAlloca(compiler._builders.top(), compiler.currentSuspendableContext());
 			suspendableAllocationUpdateRequests[allocaIndex].push_back(source);
 		}
 
@@ -317,7 +317,7 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::cleanup(bool sta
 	}
 
 	if (suspendableContext) {
-		compiler.buildSuspendablePopStack(compiler._builders.top(), suspendableContext);
+		compiler.buildSuspendablePopStack(compiler._builders.top(), compiler.currentSuspendableContext());
 	}
 
 	co_return;
@@ -404,9 +404,10 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::popping() {
 	auto gepIndexType = LLVMInt64TypeInContext(compiler._llcontext.get());
 	auto gepStructIndexType = LLVMInt32TypeInContext(compiler._llcontext.get());
 
-	std::array<LLVMValueRef, 3> gepIndices {
+	std::array<LLVMValueRef, 4> gepIndices {
 		LLVMConstInt(gepIndexType, 0, false), // the first element of the "array"
-		LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+		LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+		LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 		LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_suspendable::state
 	};
 	auto stateIndexGEP = LLVMBuildGEP2(suspendableReloadBuilder.get(), co_await compiler.defineClassType(suspendableClass), suspendableContext, gepIndices.data(), gepIndices.size(), "@stack_reload_state_index_ref");
@@ -545,12 +546,20 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::sh
 
 		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 	} else if (type->isOptional) {
-		std::array<LLVMTypeRef, 2> members;
+		if (*type->optionalTarget == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
+			std::array<LLVMTypeRef, 1> members;
 
-		members[0] = LLVMInt1TypeInContext(_llcontext.get());
-		members[1] = co_await translateType(type->optionalTarget);
+			members[0] = LLVMInt1TypeInContext(_llcontext.get());
 
-		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+			result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+		} else {
+			std::array<LLVMTypeRef, 2> members;
+
+			members[0] = LLVMInt1TypeInContext(_llcontext.get());
+			members[1] = co_await translateType(type->optionalTarget);
+
+			result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+		}
 	} else if (type->bitfield) {
 		result = co_await translateType(type->bitfield->underlyingBitfieldType.lock());
 	} else if (type->klass) {
@@ -1023,6 +1032,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 			});
 
 			didCopyInternal = true;
+		} else if (exprType->isOptional && *exprType->optionalTarget == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
+			// this is basically just a boolean
+			result = co_await loadRef(result, exprType);
+			didCopyInternal = true;
 		} else if (exprType->isOptional) {
 			auto lloptionalType = co_await translateType(exprType->destroyReferences());
 
@@ -1072,7 +1085,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 			LLVMAddIncoming(result, &wrapped, &exitBlock, 1);
 			LLVMAddIncoming(result, &constNull, &entryBlock, 1);
 
-			currentStack().endBranch(doneBlock, { entryBlock, exitBlock });
+			co_await currentStack().endBranch(doneBlock, { entryBlock, exitBlock });
 
 			didCopyInternal = true;
 		} else if (
@@ -1253,7 +1266,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 			LLVMBuildBr(_builders.top().get(), doneBlock);
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
-			currentStack().endBranch(doneBlock, {
+			co_await currentStack().endBranch(doneBlock, {
 				originBlock,
 				exitDtorBlock,
 			});
@@ -1317,7 +1330,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
 
-			currentStack().endBranch(doneBlock, { entryBlock, exitBlock });
+			co_await currentStack().endBranch(doneBlock, { entryBlock, exitBlock });
 		}
 
 		if (didDtor) {
@@ -1331,6 +1344,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, size_t finalRefLevel) {
 	for (size_t i = finalRefLevel; i < exprType->referenceLevel(); ++i) {
 		exprType = exprType->dereference();
+		expr = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType), expr, "");
+	}
+	co_return expr;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::loadIndirection(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, size_t finalIndirLevel) {
+	while (exprType->indirectionLevel() > finalIndirLevel) {
+		exprType = exprType->followBlindly();
 		expr = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType), expr, "");
 	}
 	co_return expr;
@@ -1672,33 +1693,30 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::processArgs(std::vector<ALTA
 					outputArgs.push_back(result);
 				}
 			} else {
-				std::vector<LLVMValueRef> arrayItems;
 				auto tmpIdx = nextTemp();
 				auto tmpIdxStr = std::to_string(tmpIdx);
-
-				for (auto& [arg, info]: *multi) {
-					auto compiled = co_await compileNode(arg, info);
-					auto exprType = AltaCore::DET::Type::getUnderlyingType(info.get());
-					auto result = co_await cast(compiled, exprType, targetType, true, additionalCopyInfo(arg, info), false, position);
-					arrayItems.push_back(result);
-				}
 
 				auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
 
 				auto lltype = co_await translateType(targetType);
-				auto llcount = LLVMConstInt(i64Type, arrayItems.size(), false);
-				auto result = currentStack().buildArrayAlloca(lltype, arrayItems.size(), "@arg_array_" + tmpIdxStr);
+				auto llcount = LLVMConstInt(i64Type, multi->size(), false);
+				auto result = currentStack().buildArrayAlloca(lltype, multi->size(), "@arg_array_" + tmpIdxStr);
 
-				for (size_t i = 0; i < arrayItems.size(); ++i) {
+				size_t argIdx = 0;
+				for (auto& [arg, info]: *multi) {
+					auto compiled = co_await compileNode(arg, info);
+					auto exprType = AltaCore::DET::Type::getUnderlyingType(info.get());
+					auto argResult = co_await cast(compiled, exprType, targetType, true, additionalCopyInfo(arg, info), false, position);
 					std::array<LLVMValueRef, 1> gepIndices {
-						LLVMConstInt(i64Type, i, false),
+						LLVMConstInt(i64Type, argIdx, false),
 					};
-					auto gep = LLVMBuildGEP2(_builders.top().get(), lltype, result, gepIndices.data(), gepIndices.size(), ("@arg_array_" + tmpIdxStr + "_elm_" + std::to_string(i)).c_str());
-					LLVMBuildStore(_builders.top().get(), arrayItems[i], gep);
+					auto gep = LLVMBuildGEP2(_builders.top().get(), lltype, result, gepIndices.data(), gepIndices.size(), ("@arg_array_" + tmpIdxStr + "_elm_" + std::to_string(argIdx)).c_str());
+					LLVMBuildStore(_builders.top().get(), argResult, gep);
+					++argIdx;
 				}
 
 				// unlike other argument types, we don't have to worry about having a state change.
-				// we know for a fact that we stored the array on suspendable stack and the count is a constant,
+				// we know for a fact that we stored the array on a suspendable stack and the count is a constant,
 				// so we don't have to save and restore anything.
 
 				outputArgs.push_back(llcount);
@@ -1752,7 +1770,9 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::defineClassType(std::
 
 	std::vector<LLVMTypeRef> members;
 
-	bool suspendable = klass->name == "@Generator@" || klass->name == "@Coroutine@";
+	bool isGenerator = klass->name == "@Generator@";
+	bool isCoroutine = klass->name == "@Coroutine@";
+	bool suspendable = isGenerator || isCoroutine;
 
 	if (!klass->isStructure && !klass->isBitfield && !suspendable) {
 		// every class requires an instance info structure
@@ -1766,7 +1786,7 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::defineClassType(std::
 
 	if (suspendable) {
 		// suspendable contexts require suspendable context info
-		members.push_back(_definedTypes["_Alta_basic_suspendable"]);
+		members.push_back(_definedTypes[isCoroutine ? "_Alta_basic_coroutine" : "_Alta_basic_generator"]);
 
 		// suspendable functions might require an input and output variable
 
@@ -1970,7 +1990,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef 
 		LLVMAddIncoming(retVal, phiVals.data(), phiBlocks.data(), phiVals.size());
 	}
 
-	currentStack().endBranch(doneBlock, phiBlocks);
+	co_await currentStack().endBranch(doneBlock, phiBlocks);
 
 	co_return retVal;
 };
@@ -1994,7 +2014,9 @@ LLVMMetadataRef AltaLL::Compiler::translateClassDebug(std::shared_ptr<AltaCore::
 
 	std::vector<LLVMMetadataRef> members;
 
-	bool suspendable = klass->name == "@Generator@" || klass->name == "@Coroutine@";
+	bool isGenerator = klass->name == "@Generator@";
+	bool isCoroutine = klass->name == "@Coroutine@";
+	bool suspendable = isGenerator || isCoroutine;
 
 	if (!klass->isStructure && !klass->isBitfield && !suspendable) {
 		// every class requires an instance info structure
@@ -2010,7 +2032,7 @@ LLVMMetadataRef AltaLL::Compiler::translateClassDebug(std::shared_ptr<AltaCore::
 
 	if (suspendable) {
 		// suspendable contexts require suspendable context info
-		auto basicSuspendable = _definedDebugTypes["_Alta_basic_suspendable"];
+		auto basicSuspendable = _definedDebugTypes[isCoroutine ? "_Alta_basic_coroutine" : "_Alta_basic_generator"];
 		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "base", sizeof("base") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(basicSuspendable), LLVMDITypeGetAlignInBits(basicSuspendable), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagZero, basicSuspendable));
 
 		// suspendable functions might require an input and output variable
@@ -2235,19 +2257,25 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 
 		members[0] = LLVMInt1TypeInContext(_llcontext.get());
 
-		auto co = translateType(type->optionalTarget);
-		co.coroutine.resume();
-		members[1] = co.await_resume();
+		bool isVoid = *type->optionalTarget == AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
 
-		auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+		if (!isVoid) {
+			auto co = translateType(type->optionalTarget);
+			co.coroutine.resume();
+			members[1] = co.await_resume();
+		}
+
+		auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), isVoid ? 1 : members.size(), false);
 
 		auto boolType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "bool", 4, 8, llvm::dwarf::DW_ATE_boolean, LLVMDIFlagZero);
 		debugMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__present", sizeof("__present") - 1, debugFile, type->position.line, 8, 8, 0, LLVMDIFlagArtificial, boolType);
 
-		auto targetType = translateTypeDebug(type->optionalTarget);
-		debugMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMDITypeGetSizeInBits(targetType), LLVMDITypeGetAlignInBits(targetType), LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1) * 8, LLVMDIFlagArtificial, targetType);
+		if (!isVoid) {
+			auto targetType = translateTypeDebug(type->optionalTarget);
+			debugMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMDITypeGetSizeInBits(targetType), LLVMDITypeGetAlignInBits(targetType), LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1) * 8, LLVMDIFlagArtificial, targetType);
+		}
 
-		result = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), tmpStruct) * 8, LLVMABIAlignmentOfType(_targetData.get(), tmpStruct) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
+		result = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), tmpStruct) * 8, LLVMABIAlignmentOfType(_targetData.get(), tmpStruct) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), isVoid ? 1 : debugMembers.size(), 0, NULL, "", 0);
 	} else if (type->bitfield) {
 		result = translateTypeDebug(type->bitfield->underlyingBitfieldType.lock());
 	} else if (type->klass) {
@@ -2555,14 +2583,24 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			LLVMSetInitializer(globalClassInfo, LLVMConstNamedStruct(_definedTypes["_Alta_class_info"], members.data(), members.size()));
 
 			suspendableContext = LLVMBuildAlloca(_builders.top().get(), llclass, "@suspendable");
-			LLVMBuildStore(_builders.top().get(), LLVMConstNull(llclass), suspendableContext);
+			auto initVal = LLVMConstNull(llclass);
+			if (info->coroutine) {
+				auto nextFunc = std::dynamic_pointer_cast<AltaCore::DET::Function>(genClass->scope->items[3]);
+				auto [coroNextType, coroNext] = co_await declareFunction(nextFunc);
+
+				auto initContext = LLVMConstNull(_definedTypes["_Alta_basic_coroutine"]);
+				initContext = LLVMBuildInsertValue(_builders.top().get(), initContext, coroNext, 2, "@suspendable_init_context");
+				initVal = LLVMBuildInsertValue(_builders.top().get(), initVal, initContext, 0, "@suspendable_init_val");
+			}
+			LLVMBuildStore(_builders.top().get(), initVal, suspendableContext);
 
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
-			std::array<LLVMValueRef, 3> gepIndices {
+			std::array<LLVMValueRef, 4> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // the first index in the "array"
-				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_suspendable::instance_info
 			};
 
@@ -2809,9 +2847,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
 				// mark the suspendable function as "done"
-				std::array<LLVMValueRef, 3> gepIndices {
+				std::array<LLVMValueRef, 4> gepIndices {
 					LLVMConstInt(gepIndexType, 0, false), // first element in the "array"
-					LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+					LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+					LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 					LLVMConstInt(gepStructIndexType, 2, false), // _Alta_basic_suspendable::done
 				};
 				auto gep = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@suspendable_done_ref");
@@ -2855,9 +2894,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
-			std::array<LLVMValueRef, 3> gepIndices {
+			std::array<LLVMValueRef, 4> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // the first element of the "array"
-				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 				LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_suspendable::state
 			};
 			auto stateIndexGEP = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@state_index_ref");
@@ -2892,9 +2932,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
-			std::array<LLVMValueRef, 3> doneGEPIndices {
+			std::array<LLVMValueRef, 4> doneGEPIndices {
 				LLVMConstInt(gepIndexType, 0, false), // first element in the "array"
-				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 				LLVMConstInt(gepStructIndexType, 2, false), // _Alta_basic_suspendable::done
 			};
 			auto doneGEP = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, doneGEPIndices.data(), doneGEPIndices.size(), "@suspendable_done_gep");
@@ -2911,9 +2952,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), continueDtor);
 
-			std::array<LLVMValueRef, 3> gepIndices {
+			std::array<LLVMValueRef, 4> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // first element in the "array"
-				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 				LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_suspendable::state
 			};
 			auto gep = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@suspendable_state_gep");
@@ -3046,7 +3088,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			auto call = LLVMBuildCall2(_builders.top().get(), origLLFuncType, origLLFunc, args.data(), args.size(), isVoid ? "" : "@default_call");
 
-			currentStack().cleanup();
+			co_await currentStack().cleanup();
 
 			if (isVoid) {
 				LLVMBuildRetVoid(_builders.top().get());
@@ -3151,9 +3193,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
-			std::array<LLVMValueRef, 3> gepIndices {
+			std::array<LLVMValueRef, 4> gepIndices {
 				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
-				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 				LLVMConstInt(gepStructIndexType, 2, false), // _Alta_basic_suspendable::done
 			};
 			auto gep = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@suspendable_done_ref");
@@ -3232,9 +3275,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 		}
 
 		// also mark the suspendable function as "done"
-		std::array<LLVMValueRef, 3> gepIndices {
+		std::array<LLVMValueRef, 4> gepIndices {
 			LLVMConstInt(gepIndexType, 0, false), // first element in the "array"
-			LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+			LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+			LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 			LLVMConstInt(gepStructIndexType, 2, false), // _Alta_basic_suspendable::done
 		};
 		auto gep = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->parentFunction->returnType), currentSuspendableContext(), gepIndices.data(), gepIndices.size(), "@suspendable_done_ref");
@@ -3457,8 +3501,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			throw std::runtime_error("Must know target type to compile accessor");
 		}
 
-		for (size_t i = 1; i < info->targetType->pointerLevel(); ++i) {
-			result = LLVMBuildLoad2(_builders.top().get(), co_await translateType(info->targetType->follow()), result, "");
+		if (info->targetType->indirectionLevel() > 0) {
+			result = co_await loadIndirection(result, info->targetType, 1);
 		}
 
 		auto varClass = AltaCore::Util::getClass(info->narrowedTo->parentScope.lock()).lock();
@@ -3528,8 +3572,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 				result = co_await tmpify(result, selfType);
 			}
 
-			for (size_t i = 1; i < selfType->pointerLevel(); ++i) {
-				result = LLVMBuildLoad2(_builders.top().get(), co_await translateType(selfType->follow()), result, "");
+			if (selfType->indirectionLevel() > 0) {
+				result = co_await loadIndirection(result, selfType->reference(), 1);
 			}
 
 			auto accessorClass = AltaCore::Util::getClass(info->readAccessor->parentScope.lock()).lock();
@@ -3703,7 +3747,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 
 	auto rhs = co_await compileNode(node->value, info->value);
 	auto rhsType = AltaCore::DET::Type::getUnderlyingType(info->value.get());
-	auto rhsTargetType = info->operatorMethod ? info->operatorMethod->parameterVariables.front()->type : info->targetType->destroyReferences();
+	auto rhsTargetType = info->operatorMethod ? info->operatorMethod->parameterVariables.front()->type : (info->strict ? info->targetType->dereference() : info->targetType->destroyReferences());
 	bool didRetrieval = false;
 
 	if (storedLHS) {
@@ -3744,7 +3788,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 		vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
 		vals[1] = LLVMGetPoison(co_await translateType(info->targetType->optionalTarget));
 		rhs = LLVMConstNamedStruct(co_await translateType(info->targetType), vals.data(), vals.size());
-	} else if (!info->strict) {
+	} else {
 		rhs = co_await cast(rhs, rhsType, rhsTargetType, canCopy, additionalCopyInfo(node->value, info->value), false, &node->value->position);
 	}
 
@@ -3805,8 +3849,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBooleanLiteralNode(std::s
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shared_ptr<AltaCore::AST::BinaryOperation> node, std::shared_ptr<AltaCore::DH::BinaryOperation> info) {
 	pushDebugLocation(node->position, info->inputScope);
 
+	bool shortCircuit = node->type == AltaCore::Shared::OperatorType::LogicalAnd || node->type == AltaCore::Shared::OperatorType::LogicalOr;
+
 	auto lhs = co_await compileNode(node->left, info->left);
-	auto rhs = co_await compileNode(node->right, info->right);
+	auto rhs = shortCircuit ? NULL : co_await compileNode(node->right, info->right);
 	LLVMValueRef result = NULL;
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
@@ -3839,6 +3885,51 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 		};
 
 		result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), ("@binop_call_" + tmpIdxStr).c_str());
+	} else if (shortCircuit) {
+		// these two operators are special because they short-circuit
+		lhs = co_await cast(lhs, info->leftType, info->commonOperandType->destroyReferences(), false, additionalCopyInfo(node->left, info->left), false, &node->left->position);
+
+		auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+		auto trueBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@short_circuit_true_" + tmpIdxStr).c_str());
+		auto falseBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@short_circuit_false_" + tmpIdxStr).c_str());
+		auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@short_circuit_done_" + tmpIdxStr).c_str());
+
+		// for logical AND, we only evaluate RHS if LHS is true.
+		// for logical OR, we only evaluate RHS if LHS is false.
+		auto evalRHSBlock = (node->type == AltaCore::Shared::OperatorType::LogicalAnd) ? trueBlock : falseBlock;
+		auto noEvalBlock = (evalRHSBlock == trueBlock) ? falseBlock : trueBlock;
+
+		// this is the result of the no-eval block.
+		// for logical AND, we don't evaluate RHS when LHS is false.
+		// for logical OR, we don't evaluate RHS when LHS is true.
+		auto shortCircuitResult = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), (node->type == AltaCore::Shared::OperatorType::LogicalAnd) ? 0 : 1, false);
+
+		LLVMBuildCondBr(_builders.top().get(), lhs, trueBlock, falseBlock);
+
+		currentStack().beginBranch();
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), evalRHSBlock);
+		rhs = co_await compileNode(node->right, info->right);
+		auto evalResult = co_await cast(rhs, info->rightType, info->commonOperandType->destroyReferences(), false, additionalCopyInfo(node->right, info->right), false, &node->right->position);
+		auto finalEvalBlock = LLVMGetInsertBlock(_builders.top().get());
+		LLVMBuildBr(_builders.top().get(), doneBlock);
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), noEvalBlock);
+		auto finalNoEvalBlock = LLVMGetInsertBlock(_builders.top().get());
+		LLVMBuildBr(_builders.top().get(), doneBlock);
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+
+		result = LLVMBuildPhi(_builders.top().get(), co_await translateType(info->commonOperandType), "");
+		LLVMAddIncoming(result, &evalResult, &finalEvalBlock, 1);
+		LLVMAddIncoming(result, &shortCircuitResult, &finalNoEvalBlock, 1);
+
+		co_await currentStack().endBranch(doneBlock, { finalEvalBlock, finalNoEvalBlock }, true);
+
+		// after a conditional, we have to create a new state for the merged control flow
+		if (inSuspendableFunction()) {
+			co_await updateSuspendableStateIndex(++_suspendableStateIndex.top());
+		}
 	} else {
 		lhs = co_await cast(lhs, info->leftType, info->commonOperandType->destroyReferences(), false, additionalCopyInfo(node->left, info->left), false, &node->left->position);
 		rhs = co_await cast(rhs, info->rightType, info->commonOperandType->destroyReferences(), false, additionalCopyInfo(node->right, info->right), false, &node->right->position);
@@ -3862,8 +3953,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 				arithmetic = true;
 				break;
 
-			case AltaCore::Shared::OperatorType::LogicalAnd:
-			case AltaCore::Shared::OperatorType::LogicalOr:
 			case AltaCore::Shared::OperatorType::EqualTo:
 			case AltaCore::Shared::OperatorType::NotEqualTo:
 			case AltaCore::Shared::OperatorType::GreaterThan:
@@ -3872,6 +3961,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 			case AltaCore::Shared::OperatorType::LessThanOrEqualTo:
 				arithmetic = false;
 				break;
+
+			case AltaCore::Shared::OperatorType::LogicalAnd:
+			case AltaCore::Shared::OperatorType::LogicalOr:
+				throw std::runtime_error("This should be impossible");
 		}
 
 		if (arithmetic && info->commonOperandType->pointerLevel() > 0) {
@@ -3903,14 +3996,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 				result = (info->commonOperandType->isSigned() ? LLVMBuildAShr : LLVMBuildLShr)(_builders.top().get(), lhs, rhs, ("@shr_" + tmpIdxStr).c_str());
 			} break;
 
-			case AltaCore::Shared::OperatorType::LogicalAnd:
-				// we've already cast both the operands to bool, so we can just take the bitwise AND of the results to get the logical AND
 			case AltaCore::Shared::OperatorType::BitwiseAnd: {
 				result = LLVMBuildAnd(_builders.top().get(), lhs, rhs, ("@and_" + tmpIdxStr).c_str());
 			} break;
 
-			case AltaCore::Shared::OperatorType::LogicalOr:
-				// same as for LogicalAnd
 			case AltaCore::Shared::OperatorType::BitwiseOr: {
 				result = LLVMBuildOr(_builders.top().get(), lhs, rhs, ("@orr_" + tmpIdxStr).c_str());
 			} break;
@@ -3955,6 +4044,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 					result = LLVMBuildICmp(_builders.top().get(), pred, lhs, rhs, ("@cmp_" + tmpIdxStr).c_str());
 				}
 			} break;
+
+			case AltaCore::Shared::OperatorType::LogicalAnd:
+			case AltaCore::Shared::OperatorType::LogicalOr:
+				throw std::runtime_error("This should be impossible");
 		}
 
 		if (pointerArithmetic) {
@@ -4045,7 +4138,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 
 	if (info->isSpecialScheduleMethod) {
 		std::vector<std::tuple<std::string, std::shared_ptr<AltaCore::DET::Type>, bool, std::string>> params;
-		params.push_back(std::make_tuple<std::string, std::shared_ptr<AltaCore::DET::Type>, bool, std::string>("", AltaCore::DET::Type::getUnderlyingType(info->arguments[0].get()), false, ""));
+		params.push_back(std::make_tuple<std::string, std::shared_ptr<AltaCore::DET::Type>, bool, std::string>("", AltaCore::DET::Type::getUnderlyingType(info->arguments[0].get())->destroyIndirection()->reference(), false, ""));
 		co_await processArgs(info->adjustedArguments, params, &node->position, args);
 	} else {
 		co_await processArgs(info->adjustedArguments, info->targetType->parameters, &node->position, args);
@@ -4286,7 +4379,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std
 
 	LLVMBuildCondBr(_builders.top().get(), test, trueBlock, falseBlock);
 
-	// this should be (and must be) the *only* time when we could have a suspendable state change (i.e. yield or await) during a stack branch
+	// this should and the short-circuiting logical operators should be the *only* times when we could have a suspendable state change (i.e. yield or await) during a stack branch
 
 	currentStack().beginBranch();
 
@@ -4308,7 +4401,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std
 	LLVMAddIncoming(result, &primaryResult, &finalTrueBlock, 1);
 	LLVMAddIncoming(result, &secondaryResult, &finalFalseBlock, 1);
 
-	currentStack().endBranch(doneBlock, { finalTrueBlock, finalFalseBlock }, true);
+	co_await currentStack().endBranch(doneBlock, { finalTrueBlock, finalFalseBlock }, true);
 
 	// after a conditional, we have to create a new state for the merged control flow
 	if (inSuspendableFunction()) {
@@ -5146,7 +5239,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 				auto call = LLVMBuildCall2(_builders.top().get(), llfuncTypeReturnsInstance, llfuncReturnsInstance, args.data(), args.size(), "@default_call");
 
-				currentStack().cleanup();
+				co_await currentStack().cleanup();
 
 				LLVMBuildRet(_builders.top().get(), call);
 
@@ -5194,7 +5287,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 				call = LLVMBuildCall2(_builders.top().get(), llfuncTypeReturnsRef, llfuncReturnsRef, args.data(), args.size(), "@default_call");
 
-				currentStack().cleanup();
+				co_await currentStack().cleanup();
 
 				LLVMBuildRet(_builders.top().get(), call);
 
@@ -5891,8 +5984,24 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDeclarationStatem
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDeleteStatement(std::shared_ptr<AltaCore::AST::DeleteStatement> node, std::shared_ptr<AltaCore::DH::DeleteStatement> info) {
-	// TODO
-	std::cerr << "TODO: DeleteStatement" << std::endl;
+	auto target = co_await compileNode(node->target, info->target);
+	auto targetType = info->targetType;
+
+	target = co_await loadRef(target, info->targetType, (info->persistent) ? 0 : 1);
+	targetType = targetType->destroyReferences();
+
+	if (info->persistent) {
+		targetType = targetType->follow();
+	} else if (info->targetType->referenceLevel() == 0) {
+		throw std::runtime_error("TODO: support non-referential non-persistent delete statements");
+	}
+
+	co_await doDtor(target, targetType);
+
+	if (info->persistent) {
+		LLVMBuildFree(_builders.top().get(), target);
+	}
+
 	co_return NULL;
 };
 
@@ -5907,7 +6016,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileControlDirective(std::sha
 
 	// clean up all the scopes up to and including the loop's root scope
 	for (auto rit = _stacks.rbegin(); rit != _stacks.rend(); ++rit) {
-		rit->cleanup();
+		co_await rit->cleanup();
 		if (&*rit == loop.rootScope) {
 			break;
 		}
@@ -6411,16 +6520,18 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileYieldExpression(std::shar
 	LLVMPositionBuilderAtEnd(_suspendableDestructor.top().builder.get(), dtorUnwindBlock);
 	_suspendableDestructor.top().stateUnwindBlocks[stateIndex] = dtorUnwindBlock;
 	_builders.push(_suspendableDestructor.top().builder);
+	_suspendableContext.push(LLVMGetParam(_suspendableDestructor.top().function, 0));
 	for (size_t i = _stacks.size(); i > 0; --i) {
 		auto idx = i - 1;
 
-		_stacks[idx].cleanup(true);
+		co_await _stacks[idx].cleanup(true);
 
 		if (idx == rootFuncStack) {
 			break;
 		}
 	}
 	LLVMBuildBr(_builders.top().get(), _suspendableDestructor.top().exit);
+	_suspendableContext.pop();
 	_builders.pop();
 
 	if (expr) {
@@ -6476,9 +6587,158 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssertionStatement(std::s
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAwaitExpression(std::shared_ptr<AltaCore::AST::AwaitExpression> node, std::shared_ptr<AltaCore::DH::AwaitExpression> info) {
-	// TODO
-	std::cerr << "TODO: AwaitExpression" << std::endl;
-	co_return NULL;
+	pushDebugLocation(node->position, info->inputScope);
+
+	LLVMValueRef result = NULL;
+
+	auto tmpIdx = nextTemp();
+	auto tmpIdxStr = std::to_string(tmpIdx);
+
+	auto instanceVal = co_await compileNode(node->target, info->target);
+	auto instanceType = AltaCore::DET::Type::getUnderlyingType(info->target.get());
+	auto coClass = instanceType->klass;
+
+	if (instanceType->indirectionLevel() == 0) {
+		instanceVal = co_await tmpify(instanceVal, instanceType, true, false);
+		instanceType = instanceType->reference();
+	}
+
+	while (instanceType->indirectionLevel() > 1) {
+		instanceVal = LLVMBuildLoad2(_builders.top().get(), co_await translateType(instanceType->followBlindly()), instanceVal, ("@await_deref_" + tmpIdxStr).c_str());
+	}
+
+	if (inSuspendableFunction()) {
+		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+		std::array<LLVMValueRef, 3> waitingForGEPIndices {
+			LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+			LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+			LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_coroutine::waiting_for
+		};
+		auto waitingForGEP = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->coroutine->returnType), currentSuspendableContext(), waitingForGEPIndices.data(), waitingForGEPIndices.size(), ("@await_waiting_for_gep_" + tmpIdxStr).c_str());
+
+		// store a pointer to the coroutine we need to wait for within the `waiting_for` member
+		LLVMBuildStore(_builders.top().get(), instanceVal, waitingForGEP);
+
+		auto stateIndex = ++_suspendableStateIndex.top();
+
+		co_await updateSuspendableStateIndex(stateIndex);
+
+		// find the root function stack (we'll need it more than once later)
+		size_t rootFuncStack = SIZE_MAX;
+		for (size_t i = _stacks.size(); i > 0; --i) {
+			auto idx = i - 1;
+			if (_stacks[idx].type == ScopeStack::Type::Function) {
+				rootFuncStack = idx;
+				break;
+			}
+		}
+
+		if (rootFuncStack == SIZE_MAX) {
+			throw std::runtime_error("Failed to find root function stack");
+		}
+
+		// let's interrupt the expression build to create the stack unwind block for this state in the suspendable function's destructor
+		auto dtorUnwindBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), _suspendableDestructor.top().function, ("@state" + std::to_string(stateIndex) + "_unwind").c_str());
+		LLVMPositionBuilderAtEnd(_suspendableDestructor.top().builder.get(), dtorUnwindBlock);
+		_suspendableDestructor.top().stateUnwindBlocks[stateIndex] = dtorUnwindBlock;
+		_builders.push(_suspendableDestructor.top().builder);
+		_suspendableContext.push(LLVMGetParam(_suspendableDestructor.top().function, 0));
+		for (size_t i = _stacks.size(); i > 0; --i) {
+			auto idx = i - 1;
+
+			co_await _stacks[idx].cleanup(true);
+
+			if (idx == rootFuncStack) {
+				break;
+			}
+		}
+		LLVMBuildBr(_builders.top().get(), _suspendableDestructor.top().exit);
+		_suspendableContext.pop();
+		_builders.pop();
+
+		LLVMBuildRetVoid(_builders.top().get());
+
+		auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+
+		auto continuation = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@state" + std::to_string(stateIndex)).c_str());
+		_suspendableStateBlocks.top()[stateIndex] = continuation;
+		LLVMPositionBuilderAtEnd(_builders.top().get(), continuation);
+
+		// the first thing we need to do is check if the coroutine we were waiting for is done
+		auto waitingForGEPAfterReturn = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->coroutine->returnType), currentSuspendableContext(), waitingForGEPIndices.data(), waitingForGEPIndices.size(), ("@await_waiting_for_gep_after_return_" + tmpIdxStr).c_str());
+		auto instanceAfterReturn = LLVMBuildLoad2(_builders.top().get(), LLVMPointerTypeInContext(_llcontext.get(), 0), waitingForGEPAfterReturn, ("@await_waiting_for_after_return_" + tmpIdxStr).c_str());
+		instanceAfterReturn = LLVMBuildPointerCast(_builders.top().get(), instanceAfterReturn, co_await translateType(instanceType), ("@await_instance_" + tmpIdxStr).c_str());
+
+		std::array<LLVMValueRef, 4> doneGEPIndices {
+			LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+			LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+			LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_coroutine::basic_state
+			LLVMConstInt(gepStructIndexType, 2, false), // _Alta_basic_suspendable::done
+		};
+
+		auto doneGEP = LLVMBuildGEP2(_builders.top().get(), co_await defineClassType(coClass), instanceAfterReturn, doneGEPIndices.data(), doneGEPIndices.size(), ("@await_instance_done_ref_" + tmpIdxStr).c_str());
+		auto done = LLVMBuildLoad2(_builders.top().get(), LLVMInt1TypeInContext(_llcontext.get()), doneGEP, ("@await_instance_done_" + tmpIdxStr).c_str());
+
+		auto ifDone = _stacks[rootFuncStack].suspendableReloadBlock;
+		auto ifNotDone = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@state" + std::to_string(stateIndex) + "@not_done").c_str());
+
+		LLVMBuildCondBr(_builders.top().get(), done, ifDone, ifNotDone);
+
+		// if we're not done, let's just return until we are
+		LLVMPositionBuilderAtEnd(_builders.top().get(), ifNotDone);
+
+		// before we do that, however, we have to partially reload every stack until we reach the topmost stack.
+		// by "partially", i mean we just need to execute `reload_continue`.
+		// this is done so that if the coroutine instance is destroyed before we're done,
+		// it sees the valid topmost stack.
+		for (size_t i = rootFuncStack; i < _stacks.size(); ++i) {
+			buildSuspendableReloadContinue(_builders.top(), currentSuspendableContext());
+		}
+
+		LLVMBuildRetVoid(_builders.top().get());
+
+		// if we're done, we first need to reload every stack
+		// (we already started this above by branching to the root stack's reload block)
+
+		auto theRealContinuation = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@state" + std::to_string(stateIndex) + "@continue").c_str());
+
+		for (size_t i = rootFuncStack; i < _stacks.size(); ++i) {
+			auto nextBlock = (i + 1 == _stacks.size()) ? theRealContinuation : _stacks[i + 1].suspendableReloadBlock;
+			_stacks[i].suspendableContinuations.emplace_back(stateIndex, nextBlock);
+		}
+
+		LLVMPositionBuilderAtEnd(_builders.top().get(), theRealContinuation);
+
+		bool returnsVal = *coClass->suspendableOutput != AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
+
+		waitingForGEPAfterReturn = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->coroutine->returnType), currentSuspendableContext(), waitingForGEPIndices.data(), waitingForGEPIndices.size(), ("@await_waiting_for_gep_after_return_" + tmpIdxStr).c_str());
+
+		if (returnsVal) {
+			instanceAfterReturn = LLVMBuildLoad2(_builders.top().get(), LLVMPointerTypeInContext(_llcontext.get(), 0), waitingForGEPAfterReturn, ("@await_waiting_for_after_return_" + tmpIdxStr).c_str());
+			instanceAfterReturn = LLVMBuildPointerCast(_builders.top().get(), instanceAfterReturn, co_await translateType(instanceType), ("@await_instance_" + tmpIdxStr).c_str());
+		}
+
+		LLVMBuildStore(_builders.top().get(), LLVMConstNull(LLVMPointerTypeInContext(_llcontext.get(), 0)), waitingForGEPAfterReturn);
+
+		if (returnsVal) {
+			auto valAccessorFunc = std::dynamic_pointer_cast<AltaCore::DET::Function>(coClass->scope->items[2]);
+			auto [accFuncType, accFunc] = co_await declareFunction(valAccessorFunc);
+
+			std::array<LLVMValueRef, 1> accArgs {
+				instanceAfterReturn,
+			};
+
+			auto wrapped = LLVMBuildCall2(_builders.top().get(), accFuncType, accFunc, accArgs.data(), accArgs.size(), ("@await_fetch_val_" + tmpIdxStr).c_str());
+			result = LLVMBuildExtractValue(_builders.top().get(), wrapped, 1, ("@await_opt_unwrap_" + tmpIdxStr).c_str());
+		}
+	} else {
+		throw std::runtime_error("TODO: support `await` outside of coroutines");
+	}
+
+	popDebugLocation();
+	co_return result;
 };
 
 void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
@@ -6588,7 +6848,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			debugMembers[i] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, memberNames[i], strlen(memberNames[i]), _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), classInfoType, i) * 8, LLVMDIFlagZero, debugType);
 		}
 
-		_definedDebugTypes["_Alta_class_info"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_class_info", sizeof("_Alta_class_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), classInfoType), LLVMABIAlignmentOfType(_targetData.get(), classInfoType), LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
+		_definedDebugTypes["_Alta_class_info"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_class_info", sizeof("_Alta_class_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), classInfoType) * 8, LLVMABIAlignmentOfType(_targetData.get(), classInfoType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
 	}
 
 	if (!_definedTypes["_Alta_instance_info"]) {
@@ -6653,8 +6913,8 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto funcType = _definedTypes["_Alta_basic_function"] = LLVMStructType(members.data(), members.size(), false);
 
 		std::array<LLVMMetadataRef, 2> debugMembers {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 0) * 8, LLVMDIFlagZero, debugVoidPointer),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "", 0, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 1) * 8, LLVMDIFlagZero, debugVoidPointer),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "function", sizeof("function") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 0) * 8, LLVMDIFlagZero, debugVoidPointer),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "lambda_state", sizeof("lambda_state") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 1) * 8, LLVMDIFlagZero, debugVoidPointer),
 		};
 
 		_definedDebugTypes["_Alta_basic_function"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_function", sizeof("_Alta_basic_function") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), funcType) * 8, LLVMABIAlignmentOfType(_targetData.get(), funcType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
@@ -6745,6 +7005,79 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		};
 
 		_definedDebugTypes["_Alta_basic_suspendable"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_suspendable", sizeof("_Alta_basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, NULL, 0);
+	}
+
+	if (!_definedTypes["_Alta_basic_generator"]) {
+		/*
+		struct _Alta_basic_generator {
+			struct _Alta_basic_suspendable basic_suspendable;
+		};
+		*/
+
+		std::array<LLVMTypeRef, 1> members {
+			_definedTypes["_Alta_basic_suspendable"],
+		};
+
+		auto structType = _definedTypes["_Alta_basic_generator"] = LLVMStructType(members.data(), members.size(), false);
+
+		std::array<LLVMMetadataRef, 1> debugMembers {
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "basic_suspendable", sizeof("basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagZero, _definedDebugTypes["_Alta_basic_suspendable"]),
+		};
+
+		_definedDebugTypes["_Alta_basic_generator"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_generator", sizeof("_Alta_basic_generator") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, NULL, 0);
+	}
+
+	if (!_definedTypes["_Alta_basic_coroutine_next"]) {
+		std::array<LLVMTypeRef, 1> params {
+			LLVMPointerTypeInContext(_llcontext.get(), 0),
+		};
+		_definedTypes["_Alta_basic_coroutine_next"] = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), params.data(), params.size(), false);
+
+		auto debugVoidType = LLVMDIBuilderCreateUnspecifiedType(_debugBuilder.get(), "void", 4);
+
+		std::array<LLVMMetadataRef, 2> debugParams {
+			debugVoidType,
+			LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugVoidType, _pointerBits, _pointerBits, 0, "", 0),
+		};
+
+		_definedDebugTypes["_Alta_basic_coroutine_next"] = LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), _unknownDebugFile, debugParams.data(), debugParams.size(), LLVMDIFlagZero);
+	}
+
+	if (!_definedTypes["_Alta_basic_coroutine"]) {
+		/*
+		struct _Alta_basic_coroutine {
+			struct _Alta_basic_suspendable basic_suspendable;
+			struct _Alta_basic_coroutine* waiting_for;
+			_Alta_basic_coroutine_next next;
+			uint64_t id;
+		};
+		*/
+
+		auto ptrType = LLVMPointerTypeInContext(_llcontext.get(), 0);
+		std::array<LLVMTypeRef, 4> members {
+			_definedTypes["_Alta_basic_suspendable"],
+			ptrType,
+			LLVMPointerType(_definedTypes["_Alta_basic_coroutine_next"], 0),
+			LLVMInt64TypeInContext(_llcontext.get()),
+		};
+
+		auto structType = _definedTypes["_Alta_basic_coroutine"] = LLVMStructType(members.data(), members.size(), false);
+
+		auto fwd = LLVMDIBuilderCreateReplaceableCompositeType(_debugBuilder.get(), _compositeCounter++, "_Alta_basic_coroutine", sizeof("_Alta_basic_coroutine") - 1, _unknownDebugFile, _unknownDebugFile, 0, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, 0);
+		auto fwdPtr = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), fwd, _pointerBits, _pointerBits, 0, NULL, 0);
+		auto debugCoroutineNext = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), _definedDebugTypes["_Alta_basic_coroutine_next"], _pointerBits, _pointerBits, 0, NULL, 0);
+		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
+
+		std::array<LLVMMetadataRef, 4> debugMembers {
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "basic_suspendable", sizeof("basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagZero, _definedDebugTypes["_Alta_basic_suspendable"]),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "waiting_for", sizeof("waiting_for") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), structType, 1) * 8, LLVMDIFlagZero, fwdPtr),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "next", sizeof("next") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), structType, 2) * 8, LLVMDIFlagZero, debugCoroutineNext),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "id", sizeof("id") - 1, _unknownDebugFile, 0, 64, 64, LLVMOffsetOfElement(_targetData.get(), structType, 3) * 8, LLVMDIFlagZero, debugI64Type),
+		};
+
+		auto debugType = _definedDebugTypes["_Alta_basic_coroutine"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_coroutine", sizeof("_Alta_basic_coroutine") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, NULL, 0);
+
+		LLVMMetadataReplaceAllUsesWith(fwd, debugType);
 	}
 
 	for (size_t i = 0; i < root->statements.size(); ++i) {

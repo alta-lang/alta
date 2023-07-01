@@ -714,6 +714,7 @@ namespace AltaLL {
 		LLCoroutine doDtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didDtor = nullptr, bool force = false);
 
 		LLCoroutine loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, size_t finalRefLevel = 0);
+		LLCoroutine loadIndirection(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, size_t finalIndirLevel = 0);
 
 		LLCoroutine getRealInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
 		LLCoroutine getRootInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
@@ -742,7 +743,7 @@ namespace AltaLL {
 						!exprType->isNative &&
 						(
 							exprType->isUnion() ||
-							exprType->isOptional ||
+							(exprType->isOptional && *exprType->optionalTarget != AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) ||
 							exprType->klass->destructor
 						)
 					) ||
@@ -777,9 +778,10 @@ namespace AltaLL {
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
-			std::array<LLVMValueRef, 3> stateGEPIndices {
+			std::array<LLVMValueRef, 4> stateGEPIndices {
 				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
-				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 				LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_suspendable::state
 			};
 			auto stateGEP = LLVMBuildGEP2(_builders.top().get(), co_await defineClassType(_suspendableClass.top()), currentSuspendableContext(), stateGEPIndices.data(), stateGEPIndices.size(), "@state_update_ref");
