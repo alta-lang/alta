@@ -14,9 +14,7 @@ import Size, uint64, UInt64Maximum from "types"
 
 export arch.HandleType
 
-export type ID = uint64
-
-type Coro = ptr native._Alta_basic_coroutine_state
+type Coro = ptr native._Alta_basic_coroutine
 
 #
 # TODO: don't use regular old Queue for our workqueue
@@ -28,7 +26,6 @@ type Coro = ptr native._Alta_basic_coroutine_state
 #
 
 export class Scheduler {
-	private var owned = new List<native._Alta_basic_coroutine_state>
 	private var work = new Queue<Coro>
 	private var sleeping = new Queue<Coro>
 
@@ -38,7 +35,7 @@ export class Scheduler {
 	# the counter wraps back around (again: `2**64 - 1` is a **really** big value)
 	#
 	# `0` is the value that is off-limits (since all coroutines are initialized with it)
-	private var counter: ID = 0
+	private var counter: uint64 = 0
 
 	# used by us internally and by the compiler
 	private function _schedule(coroutine: Coro): Coro {
@@ -47,30 +44,24 @@ export class Scheduler {
 		#       for now, we have it commented out which has the result of making the semantics effectively
 		#       be that the coroutine will run whenever the scheduler decides (which at the moment means it
 		#       depends on how long the workqueue is)
-		#if !coroutine.done
+		#if !coroutine.basic_suspendable.done
 		#	coroutine.next(coroutine)
-		#if coroutine.done
+		#if coroutine.basic_suspendable.done
 		#	return coroutine
+
+		coroutine.id = ++this.counter
 
 		return this.work.push(coroutine)
 	}
 
 	# @brief Schedules a coroutine to run independently
-	# @param coroutine The coroutine to schedule
+	# @param co The coroutine to schedule
 	# @desc This method schedules a given coroutine to run on this Scheduler whenever it gets a chance.
-	#       Coroutines scheduled in this manner will have their return values discarded, and as such, this method cannot
-	#       be used if you want to get a return value from it. For that, you *must* use `await`, instead.
-	# @returns An identifier for the coroutine that can be used to retrieve status information using this Scheduler
-	# @note You **must not** use the coroutine passed in after scheduling it. It is currently not-so-undefined behavior to do so,
-	#       and doing so will lead to certain death. The compiler will check for and stop this behavior soon, but for now,
-	#       make sure you don't blow anything up.
-	#       Once you pass a coroutine to this method, assume it is null and void for all intents and purposes.
-	public function schedule(coroutine: native._Alta_basic_coroutine_state): ID {
-		if this.counter == UInt64Maximum {
-			++this.counter # wrap over to `0`, so that our coroutine will skip to `1`
-			# remember, `0` is the no-no value
-		}
-		return (this.work.push(&this.owned.pushBack(coroutine)).id = ++this.counter)
+	# @note You **must not** execute the coroutine passed in after scheduling it. The *only* thing you may do with
+	#       the coroutine is check whether it is done. Once it is done, you are then free to use it as you please
+	#       once again (since the scheduler will have given up control over it).
+	public function schedule(co: Coro): void {
+		this._schedule(co)
 	}
 
 	# @brief Completes one iteration of a scheduled coroutine
@@ -79,20 +70,14 @@ export class Scheduler {
 		if this.work.length == 0
 			return false
 		let co = this.work.pop()
-		if co.waitingFor && co.waitingFor.generator.done
-			co.waitingFor = nullptr
-		if !co.waitingFor
+		if !co.waiting_for || co.waiting_for.basic_suspendable.done {
 			co.next(co)
-		if co.generator.done {
-			for i: Size in 0..this.owned.length {
-				let item: ref native._Alta_basic_coroutine_state = this.owned[i]
-				if &item == co {
-					free<void>(item.value)
-					this.owned.remove(i)
-					break
-				}
+			if co.waiting_for && co.waiting_for.id == 0 {
+				# we're now waiting for a new coroutine; schedule it!
+				this._schedule(co.waiting_for)
 			}
-		} else {
+		}
+		if !co.basic_suspendable.done {
 			this.work.push(co)
 		}
 		return true
@@ -115,13 +100,13 @@ export class Scheduler {
 	#       and as such, those iterations will also be waited for
 	public function runToCompletion(coroutine: Coro): Coro {
 		# NOTE: same note as in `_schedule`; i'm not sure if we want this quick-exit behavior
-		#if !coroutine.generator.done
+		#if !coroutine.basic_suspendable.done
 		#	coroutine.next(coroutine)
-		#if coroutine.generator.done
+		#if coroutine.basic_suspendable.done
 		#	return;
 
 		this.work.push(coroutine)
-		while !coroutine.generator.done
+		while !coroutine.basic_suspendable.done
 			this.tick()
 		return coroutine
 	}
@@ -131,47 +116,47 @@ export class Scheduler {
 		while this.tick() {}
 	}
 
-	# @brief Tells you whether a coroutine with the given ID is scheduled to run
-	# @param id The ID to check for
-	# @returns A value indicating whether a coroutine with the given ID is scheduled to run
-	# @note This method can only tell you if a coroutine with the given ID is *currently* scheduled to run. Thats means that
-	#       the ID might not be valid by the time you use it or it might never have been valid. There is no way
-	#       to ask the scheduler whether the ID was previously scheduled; the only way to know that is if you scheduled
+	# @brief Tells you whether the given coroutine is scheduled to run
+	# @param co The coroutine to check for
+	# @returns A value indicating whether the coroutine is scheduled to run
+	# @note This method can only tell you if the coroutine is *currently* scheduled to run. Thats means that
+	#       the coroutine might not be valid by the time you use it or it might never have been valid. There is no way
+	#       to ask the scheduler whether the coroutine was previously scheduled; the only way to know that is if you scheduled
 	#       it yourself or know that someone else did.
 	# @note This method will tell you if the coroutine is *scheduled to run*. To know if it's sleeping, use `isSleeping`,
 	#       and if you want to know if it's either scheduled to run or sleeping, use `isManaged`.
-	public function isScheduled(id: ID): bool {
+	public function isScheduled(co: Coro): bool {
 		for item: Coro in this.work.items {
-			if item.id == id
+			if item == co
 				return true
 		}
 		return false
 	}
 
-	# @brief Tells you whether a coroutine with the given ID is currently sleeping
-	# @param id The ID to check for
-	# @returns A value indicating whether a coroutine with the given ID is sleeping
-	# @note Please refer to the first note on `isScheduled`. Like `isScheduled`, this method can only tell you if a coroutine
-	#       with the given ID is *currently* sleeping, not whether it has been previously.
+	# @brief Tells you whether the given coroutine is currently sleeping
+	# @param co The coroutine to check for
+	# @returns A value indicating whether the coroutine is sleeping
+	# @note Please refer to the first note on `isScheduled`. Like `isScheduled`, this method can only tell you if the coroutine
+	#       is *currently* sleeping, not whether it has been previously.
 	# @note This method will tell you if the coroutine is *sleeping*. To know if it's scheduled to run, use `isScheduled`,
 	#       and if you want to know if it's either scheduled to run or sleeping, use `isManaged`.
-	public function isSleeping(id: ID): bool {
+	public function isSleeping(co: Coro): bool {
 		for item: Coro in this.sleeping.items {
-			if item.id == id
+			if item == co
 				return true
 		}
 		return false
 	}
 
-	# @brief Tells you whether a coroutine with the given ID is being managed by this Scheduler
-	# @param id The ID to check for
-	# @returns A value indicating whether a coroutine with the given ID is being managed by this Scheduler
-	# @note Please refer to the first note on `isScheduled`. Like `isScheduled`, this method can only tell you if a coroutine
-	#       with the given ID is *currently* being managed by this Scheduler, not whether is has been previously.
+	# @brief Tells you whether the given coroutine is being managed by this Scheduler
+	# @param co The coroutine to check for
+	# @returns A value indicating whether the coroutine is being managed by this Scheduler
+	# @note Please refer to the first note on `isScheduled`. Like `isScheduled`, this method can only tell you if the coroutine
+	#       is *currently* being managed by this Scheduler, not whether is has been previously.
 	# @note This method will tell you if the coroutine is *being managed by this Scheduler*, which includes either
 	#       currently running or sleeping. To know specifically if it's scheduled to run, use `isScheduled`,
 	#       and to know specifically if it's sleeping, use `isSleeping`.
-	public function isManaged(id: ID): bool {
-		return this.isScheduled(id) || this.isSleeping(id)
+	public function isManaged(co: Coro): bool {
+		return this.isScheduled(co) || this.isSleeping(co)
 	}
 }
