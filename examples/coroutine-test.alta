@@ -1,9 +1,29 @@
-async function looper(times: int): int {
-	return times * 3
+import printLine from "io"
+import String from "string"
+
+async function iLikeToYield(times: int): int {
+	for i: int in 0..times {
+		printLine("iLikeToYield: yielding...")
+		yield;
+		printLine("iLikeToYield: yielded")
+	}
+	return times * 2
+}
+
+async function callMe(): void {
+	for i: int in 0..2 {
+		printLine("callMe: doing iter #", i)
+		printLine("callMe: iLikeToYield returned ", await iLikeToYield(i + 1))
+	}
 }
 
 literal function main(): int {
-	let instance = looper(7)
-	instance.next()
-	return *instance.value
+	let instance = callMe()
+	let scheduler = new $Scheduler
+
+	scheduler.schedule(instance)
+
+	scheduler.finishAll()
+
+	return 0
 }
