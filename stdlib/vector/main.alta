@@ -151,7 +151,7 @@ export generic class Vector<T> {
     for i: Size in this._length - 1::0 {
       this._data[i] = this._data[i - 1]
     }
-    return this.first
+    return this._data[0]
   }
   public function unshift(value: T): ref T {
     let elm: ref T = this.unshift()
@@ -160,33 +160,33 @@ export generic class Vector<T> {
   }
 
   public function shift(): T {
-    let value: T = this.first
-    delete this.first
+    let value: T = this._data[0]
     ;--this._length
     for i: Size in 0..this._length {
-      this._data[i] @strict = this._data[i + 1]
+      this._data[i] = this._data[i + 1]
     }
+    delete this._data[this._length]
     return value
   }
 
   public function remove(index: Size): T {
-    let value: T = this[index]
-    for i: Size in index..this._length - 1 {
-      this._data[index + i] = this._data[index + i + 1]
+    let value: T = this._data[index]
+    ;--this._length
+    for i: Size in index..this._length {
+      this._data[i] = this._data[i + 1]
     }
-    delete this[this._length - 1]
-    --this._length
+    delete this._data[this._length]
     return value
   }
 
   public function remove(from: Size, length: Size): ref Vector<T> {
-    for i: Size in from..this._length - length {
-      this._data[from + i] = this._data[from + i + length]
+    this._length -= length
+    for i: Size in from..this._length {
+      this._data[i] = this._data[i + length]
     }
     for i: Size in 0..length {
-      delete this[this._length - length]
+      delete this._data[this._length + i]
     }
-    this._length -= length
     return this
   }
   public function remove(from: Size, to: Size): ref Vector<T> {
