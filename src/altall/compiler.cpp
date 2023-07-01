@@ -2652,6 +2652,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			if (suspendableContext) {
 				auto alloca = buildSuspendableAlloca(_builders.top(), suspendableContext);
 				updateSuspendableAlloca(alloca, LLVMOffsetOfElement(_targetData.get(), paramStackType, paramStackIndex++));
+				LLVMBuildStore(_builders.top().get(), selfParam, alloca);
 			} else {
 				_thisContextValue.push(selfParam);
 			}
@@ -2769,6 +2770,38 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			pushUnknownDebugLocation(nextFunc->scope);
 
 			_overrideFuncScopes.emplace(info->function->id, llfuncDebug);
+
+			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+			// check if suspendable function is done
+			std::array<LLVMValueRef, 4> doneGEPIndices {
+				LLVMConstInt(gepIndexType, 0, false), // first element in the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 2, false), // _Alta_basic_suspendable::done
+			};
+			auto doneGEP = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, doneGEPIndices.data(), doneGEPIndices.size(), "@suspendable_is_done_ref");
+			auto done = LLVMBuildLoad2(_builders.top().get(), LLVMInt1TypeInContext(_llcontext.get()), doneGEP, "@suspendable_is_done");
+
+			auto exitNow = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@done_exit");
+			entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry@continue");
+
+			LLVMBuildCondBr(_builders.top().get(), done, exitNow, entryBlock);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), exitNow);
+
+			if (info->coroutine) {
+				LLVMBuildRetVoid(_builders.top().get());
+			} else {
+				std::array<LLVMValueRef, 2> vals;
+				vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
+				vals[1] = LLVMGetPoison(co_await translateType(info->function->generatorReturnType));
+				auto expr = LLVMConstNamedStruct(co_await translateType(info->function->generatorReturnType->makeOptional()), vals.data(), vals.size());
+				LLVMBuildRet(_builders.top().get(), expr);
+			}
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), entryBlock);
 
 			buildSuspendableReload(_builders.top(), suspendableContext);
 
@@ -3742,7 +3775,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 	}
 
 	bool isNullopt = info->targetType->isOptional && info->targetType->pointerLevel() < 1 && node->value->nodeType() == AltaCore::AST::NodeType::NullptrExpression;
-	bool canCopy = !isNullopt && (!info->targetType->isNative || !info->targetType->isRawFunction) && info->targetType->pointerLevel() < 1 && (!info->strict || info->targetType->indirectionLevel() < 1) && (!info->targetType->klass || info->targetType->klass->copyConstructor);
+	bool canCopy = !isNullopt && (!info->targetType->isNative || !info->targetType->isRawFunction) && info->targetType->pointerLevel() < 1 && (!info->strict || info->targetType->dereference()->indirectionLevel() < 1) && (!info->targetType->klass || info->targetType->klass->copyConstructor);
 	bool canDestroyVar = !info->operatorMethod && !info->strict && canDestroy(info->targetType, true);
 
 	auto rhs = co_await compileNode(node->value, info->value);
@@ -5750,18 +5783,23 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
 
+	auto condBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_cond_" + tmpIdxStr).c_str());
+	auto nextBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_" + std::string(info->end ? "incdec" : "next") + "_" + tmpIdxStr).c_str());
+	auto bodyBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_body_" + tmpIdxStr).c_str());
+	auto endBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_end_" + tmpIdxStr).c_str());
+	auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_done_" + tmpIdxStr).c_str());
+
+	pushStack(ScopeStack::Type::Other);
+
+	LLVMValueRef startVar = NULL;
+	LLVMValueRef generator = NULL;
+
+	std::shared_ptr<AltaCore::DET::Type> genType = nullptr;
+
 	if (node->end) {
-		auto condBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_cond_" + tmpIdxStr).c_str());
-		auto incdecBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_incdec_" + tmpIdxStr).c_str());
-		auto bodyBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_body_" + tmpIdxStr).c_str());
-		auto endBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_end_" + tmpIdxStr).c_str());
-		auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ranged_for_done_" + tmpIdxStr).c_str());
-
-		pushStack(ScopeStack::Type::Other);
-
 		auto llstart = co_await compileNode(node->start, info->start);
 		auto castedStart = co_await cast(llstart, AltaCore::DET::Type::getUnderlyingType(info->start.get()), info->counterType->type, true, additionalCopyInfo(node->start, info->start), false, &node->start->position);
-		auto startVar = co_await tmpify(castedStart, info->counterType->type, true);
+		startVar = co_await tmpify(castedStart, info->counterType->type, true);
 		_definedVariables[info->counter->id] = startVar;
 
 		auto debugCounter = LLVMDIBuilderCreateAutoVariable(_debugBuilder.get(), translateScope(info->wrapperScope), info->counter->name.c_str(), info->counter->name.size(), debugFileForScopeItem(info->counter), node->position.line, translateTypeDebug(info->counter->type), false, LLVMDIFlagZero, 0);
@@ -5769,28 +5807,43 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 		LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), startVar, debugCounter, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), debugLoc, LLVMGetInsertBlock(_builders.top().get()));
 
 		LLVMSetValueName(startVar, ("@ranged_for_counter_" + tmpIdxStr).c_str());
-
-		auto entryState = inSuspendableFunction() ? _suspendableStateIndex.top() : SIZE_MAX;
-
-		LLVMBuildBr(_builders.top().get(), condBlock);
-
-		LLVMPositionBuilderAtEnd(_builders.top().get(), condBlock);
-
-		// before we go for another iteration, reset the state to what it was when we created the loop.
-		if (inSuspendableFunction()) {
-			co_await updateSuspendableStateIndex(entryState);
+	} else {
+		generator = co_await compileNode(node->start, info->start);
+		if (info->generatorType->referenceLevel() > 0) {
+			generator = co_await loadRef(generator, info->generatorType, 1);
+		} else {
+			generator = co_await tmpify(generator, info->generatorType, true);
 		}
+		genType = info->generatorType->destroyReferences();
 
-		pushStack(ScopeStack::Type::Other);
-		pushLoop(doneBlock, incdecBlock);
+		LLVMSetValueName(generator, ("@ranged_for_iterator_" + tmpIdxStr).c_str());
+	}
 
+	auto entryState = inSuspendableFunction() ? _suspendableStateIndex.top() : SIZE_MAX;
+
+	LLVMBuildBr(_builders.top().get(), condBlock);
+
+	LLVMPositionBuilderAtEnd(_builders.top().get(), condBlock);
+
+	// before we go for another iteration, reset the state to what it was when we created the loop.
+	if (inSuspendableFunction()) {
+		co_await updateSuspendableStateIndex(entryState);
+	}
+
+	pushStack(ScopeStack::Type::Other);
+	pushLoop(doneBlock, nextBlock);
+
+	LLVMValueRef cmp = NULL;
+
+	LLVMValueRef iteratorCall = NULL;
+
+	// build the condition
+	if (info->end) {
 		auto llend = co_await compileNode(node->end, info->end);
 		auto castedEnd = co_await cast(llend, AltaCore::DET::Type::getUnderlyingType(info->end.get()), info->counterType->type, true, additionalCopyInfo(node->end, info->end), false, &node->end->position);
 		auto endVal = co_await loadRef(castedEnd, info->counterType->type);
 
 		auto startVal = co_await loadRef(startVar, info->counterType->type->reference());
-
-		LLVMValueRef cmp = NULL;
 
 		if (info->counterType->type->isFloatingPoint()) {
 			LLVMRealPredicate pred;
@@ -5830,45 +5883,83 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 
 			cmp = LLVMBuildICmp(_builders.top().get(), pred, startVal, endVal, ("@ranged_for_cmp_" + tmpIdxStr).c_str());
 		}
+	} else {
+		auto [nextFuncType, nextFunc] = co_await declareFunction(info->next);
 
-		LLVMBuildCondBr(_builders.top().get(), cmp, bodyBlock, endBlock);
+		std::array<LLVMValueRef, 1> args {
+			generator,
+		};
 
-		// build the end block now so we can cleanup the scope without having to use `startBranch` and `endBranch`
-		LLVMPositionBuilderAtEnd(_builders.top().get(), endBlock);
-		co_await currentStack().cleanup();
-		LLVMBuildBr(_builders.top().get(), doneBlock);
+		iteratorCall = LLVMBuildCall2(_builders.top().get(), nextFuncType, nextFunc, args.data(), args.size(), ("@ranged_for_iterator_next_" + tmpIdxStr).c_str());
+		cmp = LLVMBuildExtractValue(_builders.top().get(), iteratorCall, 0, ("@ranged_for_iterator_val_present_" + tmpIdxStr).c_str());
+	}
 
-		LLVMPositionBuilderAtEnd(_builders.top().get(), incdecBlock);
+	LLVMBuildCondBr(_builders.top().get(), cmp, bodyBlock, endBlock);
+
+	// build the end block now so we can cleanup the scope without having to use `startBranch` and `endBranch`
+	LLVMPositionBuilderAtEnd(_builders.top().get(), endBlock);
+	co_await currentStack().cleanup();
+	LLVMBuildBr(_builders.top().get(), doneBlock);
+
+	LLVMPositionBuilderAtEnd(_builders.top().get(), nextBlock);
+
+	if (info->end) {
 		auto counterType = co_await translateType(info->counterType->type);
 		auto llcounter = LLVMBuildLoad2(_builders.top().get(), co_await translateType(info->counterType->type), startVar, ("@ranged_for_" + tmpIdxStr + "_counter_load").c_str());
 		bool isFP = info->counterType->type->isFloatingPoint();
 		auto llone = isFP ? LLVMConstReal(counterType, 1) : LLVMConstInt(counterType, 1, false);
 		auto llop = LLVMBuildBinOp(_builders.top().get(), node->decrement ? (isFP ? LLVMFSub : LLVMSub) : (isFP ? LLVMFAdd : LLVMAdd), llcounter, llone, ("@ranged_for_" + tmpIdxStr + (node->decrement ? "_dec" : "_inc")).c_str());
 		LLVMBuildStore(_builders.top().get(), llop, startVar);
-		LLVMBuildBr(_builders.top().get(), condBlock);
+	} else {
+		// for iterator-based ranged-for loops, we just go to the condition;
+		// it will take care of advancing the iterator.
+	}
 
-		// now build the body
-		LLVMPositionBuilderAtEnd(_builders.top().get(), bodyBlock);
-		co_await compileNode(node->body, info->body);
-		co_await currentStack().cleanup();
-		LLVMBuildBr(_builders.top().get(), incdecBlock);
+	LLVMBuildBr(_builders.top().get(), condBlock);
 
-		popLoop();
-		co_await popStack();
+	// now build the body
+	LLVMPositionBuilderAtEnd(_builders.top().get(), bodyBlock);
 
-		// now build the done block
-		LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
-		co_await currentStack().cleanup();
+	if (!info->end) {
+		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
 
-		// after a loop, we have to create a new state for the merged control flow (just like we do for conditionals)
-		if (inSuspendableFunction()) {
-			co_await updateSuspendableStateIndex(++_suspendableStateIndex.top());
+		auto tmpified = co_await tmpify(iteratorCall, info->next->returnType, true);
+
+		std::array<LLVMValueRef, 2> valGEPIndices {
+			LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+			LLVMConstInt(gepStructIndexType, 1, false), // @Optional@::value
+		};
+
+		auto valGEP = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->next->returnType), tmpified, valGEPIndices.data(), valGEPIndices.size(), ("@ranged_for_iterator_val_" + tmpIdxStr).c_str());
+		auto val = co_await cast(valGEP, info->next->returnType->optionalTarget->reference(true), info->next->returnType->optionalTarget, true, std::make_pair(true, false), false, &node->position);
+		auto valVar = co_await tmpify(val, info->next->returnType->optionalTarget, true, true);
+
+		if (!info->counterType->type->isExactlyCompatibleWith(*info->next->returnType->optionalTarget)) {
+			auto casted = co_await cast(valVar, info->next->returnType->optionalTarget->reference(true), info->counterType->type, true, std::make_pair(true, false), false, &node->position);
+			valVar = co_await tmpify(casted, info->counterType->type, true, true);
 		}
 
-		co_await popStack();
-	} else {
-		std::cerr << "TODO: support generator-based for-loops" << std::endl;
+		_definedVariables[info->counter->id] = valVar;
 	}
+
+	co_await compileNode(node->body, info->body);
+	co_await currentStack().cleanup();
+	LLVMBuildBr(_builders.top().get(), nextBlock);
+
+	popLoop();
+	co_await popStack();
+
+	// now build the done block
+	LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+	co_await currentStack().cleanup();
+
+	// after a loop, we have to create a new state for the merged control flow (just like we do for conditionals)
+	if (inSuspendableFunction()) {
+		co_await updateSuspendableStateIndex(++_suspendableStateIndex.top());
+	}
+
+	co_await popStack();
 
 	popDebugLocation();
 	co_return NULL;
