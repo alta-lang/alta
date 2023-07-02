@@ -1,7 +1,6 @@
 import "libc/lib/stdio" as stdio
 import String, rawstringLength from "string"
 import rawstring, rawconststring, Size, uint8 from "types"
-import Exception, InvalidArgument from "exceptions"
 import numberToString, floatingPointToString, BucketList from "util"
 import INT_MAX from "libc/lib/limits"
 import Path from "fs"
@@ -29,10 +28,11 @@ function ensureUTF8Output(): void {
 ##end if
 }
 
-export class OpenFailure extends Exception {}
-export class CloseFailure extends Exception {}
-export class ReadFailure extends Exception {}
-export class EndOfFile extends Exception {}
+export enum Error: int {
+  None = 0,
+  Unknown = 1,
+  PathNotFound = 2,
+}
 
 export enum Mode: int {
   Read = 1,
@@ -64,21 +64,23 @@ export class File {
     this.open(path, mode, overwrite)
   }
 
-  public function open(path: Path, mode: Mode = Mode.Read, overwrite: bool = false): void {
+  public function open(path: Path, mode: Mode = Mode.Read, overwrite: bool = false): Result<void, Error> {
     # also assign it to a local variable so we can copy it into the lambda below
     let handle: ptr stdio.FILE = this.handle = stdio.fopen(path, translateMode(mode, overwrite))
     if !this.handle {
-      this.handle = nullptr
-      throw new OpenFailure
+      return new Result<void, Error>(error: Error.Unknown)
     }
+
     this.path = path
     this.mode = mode
 
     this.dtor = new BucketList(@copy(handle) () => void {
       if stdio.fclose(handle) {
-        throw new CloseFailure
+        # TODO: what should we do with close failure now that we don't have exceptions?
       }
     })
+
+    return new Result<void, Error>(ok: void)
   }
 
   public function close(foo: String): void {
@@ -90,24 +92,34 @@ export class File {
     }
   }
 
-  public function read(): byte {
+  public function read(): byte? {
     let char = stdio.fgetc(this.handle)
     if char == stdio.EOF
-      throw new EndOfFile
+      return null
     return char as byte
   }
 
-  public function read(count: Size): String {
+  public function read(count: Size): String? {
     let str = new String(length: count)
+    let readSome = false
     while count > INT_MAX {
       if !stdio.fgets(str, INT_MAX, this.handle) {
-        throw new ReadFailure
+        if readSome {
+          return str.substring(0, length: str.length)
+        } else {
+          return null
+        }
       }
       count -= INT_MAX
+      readSome = true
     }
     # `as int` isn't necessary, but it's used to silence a compiler warning
     if !stdio.fgets(str, count as int, this.handle) {
-      throw new ReadFailure
+      if readSome {
+        return str.substring(0, length: str.length)
+      } else {
+        return null
+      }
     }
     return str.substring(0, length: str.length)
   }
@@ -149,7 +161,7 @@ function toString(data: ConsoleData): String {
     return (data as bool) ? "true" : "false"
   }
   # this is literally impossible, but just in case...
-  throw new InvalidArgument
+  assert false
 }
 
 export function print(data: ConsoleData...): void {
