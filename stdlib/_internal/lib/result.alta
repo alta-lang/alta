@@ -1,0 +1,60 @@
+# TODO: support variant enums
+#
+# this would allow us to implement a union between T and E
+# even if they're the same type
+export generic class Result<T, E> {
+	private var res: T? = null
+	private var err: E? = null
+
+	public constructor(ok: T) {
+		this.res = ok
+	}
+	public constructor(error: E) {
+		this.err = error
+	}
+
+	public @read function isOk(): bool {
+		return this.res
+	}
+	public @read function isError(): bool {
+		return this.err
+	}
+
+	public @read function value(): ref T {
+		assert this.res && !this.err
+		return *this.res
+	}
+
+	public @read function error(): ref E {
+		assert !this.res && this.err
+		return *this.err
+	}
+
+	public generic function morph<F>(): Result<T, F> {
+		assert this.res
+		return new Result<T, F>(ok: *this.res)
+	}
+
+	public generic function morphError<U>(): Result<U, E> {
+		assert this.err
+		return new Result<U, E>(error: *this.err)
+	}
+
+	public generic function map<U>(func: (ref T) => U): Result<U, E> {
+		if this.res {
+			return new Result<U, E>(ok: func(*this.res))
+		} else {
+			assert this.err
+			return new Result<U, E>(error: *this.err)
+		}
+	}
+
+	public generic function mapError<F>(func: (ref E) => F): Result<T, F> {
+		if this.res {
+			return new Result<U, E>(ok: *this.res)
+		} else {
+			assert this.err
+			return new Result<U, E>(error: func(*this.err))
+		}
+	}
+}
