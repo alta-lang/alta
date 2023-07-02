@@ -19,7 +19,7 @@ async function callMe(): void {
 
 literal function main(): int {
 	let instance = callMe()
-	let scheduler = new $Scheduler
+	let scheduler = new Scheduler
 
 	scheduler.schedule(instance)
 

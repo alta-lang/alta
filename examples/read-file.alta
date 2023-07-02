@@ -15,7 +15,7 @@ literal function main(argc: int, argv: ptr rawstring): int {
     return 2
   }
 
-  while var char = file.read?() {
+  while var char = file.read() {
     print(*char)
   }
 
