@@ -61,7 +61,14 @@ export class File {
 
   public constructor() {}
   public constructor(path: Path, mode: Mode = Mode.Read, overwrite: bool = false) {
-    this.open(path, mode, overwrite)
+    let res = this.open(path, mode, overwrite)
+    assert res.isOk
+  }
+
+  public static function tryOpen(path: Path, mode: Mode = Mode.Read, overwrite: bool = false): Result<File, Error> {
+    let file = new File
+    let res = file.open(path, mode, overwrite)
+    return res.map<File>((dummy: void) => File { return file })
   }
 
   public function open(path: Path, mode: Mode = Mode.Read, overwrite: bool = false): Result<void, Error> {

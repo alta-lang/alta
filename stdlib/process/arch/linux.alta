@@ -1,14 +1,18 @@
 import Vector from "vector"
 import String from "string"
-import File from "io"
+import File, Mode from "io"
+import Error from "./posix.alta"
 
-export function rawArgs(): Vector<String> {
-  let cmdline = new File("/proc/self/cmdline", "rb")
+export function rawArgs(): Result<Vector<String>, Error> {
+  let maybeCmdline = File.tryOpen("/proc/self/cmdline", Mode.Read)
+  if maybeCmdline.isError {
+    return new Result<Vector<String>, Error>(error: Error.Unknown)
+  }
+  let cmdline = maybeCmdline.value
   let foundNull = true
   let result = new Vector<String>()
-  while !cmdline.ended {
-    let char = cmdline.read()
-    if char == '\0' {
+  while let char = cmdline.read() {
+    if *char == '\0' {
       if foundNull {
         break
       } else {
@@ -19,10 +23,10 @@ export function rawArgs(): Vector<String> {
         result.push(new String)
       }
       foundNull = false
-      result.last.append(char)
+      result.last.append(*char)
     }
   }
-  return result
+  return new Result<Vector<String>, Error>(ok: result)
 }
 
 export * from "./posix.alta"

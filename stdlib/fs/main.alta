@@ -2,7 +2,6 @@ import String from "string"
 import Vector from "vector"
 import Size, SizeMaximum from "types"
 import allocate, free from "memory"
-import Exception from "exceptions"
 
 ##if platform == "windows"
 	@@CTranspiler.include("windows.h");
@@ -185,9 +184,6 @@ import Exception from "exceptions"
 	export var defaultPathSeparator: const ptr const char = ":"
 ##end if
 
-export class WindowsAPIError extends Exception {}
-export class InvalidOperationTarget extends Exception {}
-
 # this is internal because it returns a String since our Path implementation depends on it
 #
 # it only needs to be this way until the Alta compiler supports automatic class/export hoisting
@@ -197,12 +193,12 @@ export class InvalidOperationTarget extends Exception {}
 function internalCurrentWorkingDirectory(): String {
 ##if platform == "windows"
 	let requiredBufferLength = GetCurrentDirectory(0, nullptr)
-	let buf = allocate<byte>(requiredBufferLength)
+	let buf = *allocate<byte>(requiredBufferLength)
 	GetCurrentDirectory(requiredBufferLength, buf)
 	# FIXME: we shouldn't need to explicitly name the constructor parameter here
 	let str = new String(data: buf)
 ##else
-	let buf = allocate<byte>(MAXPATHLEN)
+	let buf = *allocate<byte>(MAXPATHLEN)
 	# FIXME: we shouldn't need to explicitly name the constructor parameter here
 	let str = getcwd(buf, MAXPATHLEN) ? new String(data: buf) : new String
 ##end if
@@ -513,8 +509,7 @@ export class Path {
 	}
 
 	public @read generator function children(): Path {
-		if !this.isDirectory
-			throw new InvalidOperationTarget
+		assert this.isDirectory
 
 		##if platform == "windows"
 			let str: String = this.resolve() + "\\*"
@@ -525,8 +520,13 @@ export class Path {
 				if FindNextFileA(hFind, &ffd) == 0
 					break
 			}
-			if GetLastError() != ERROR_NO_MORE_FILES
-				throw new WindowsAPIError
+			if GetLastError() != ERROR_NO_MORE_FILES {
+				# TODO: what should we do about this error?
+				#
+				# we don't really want to turn this entire thing into returning a Result
+				# since we're in a generator, but we also don't want to do nothing.
+				# we certainly shouldn't assert/abort.
+			}
 			FindClose(hFind)
 			return;
 		##else

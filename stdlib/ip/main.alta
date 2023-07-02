@@ -1,39 +1,7 @@
 import Vector from "vector"
 import uint8, uint16, uint32, Size, SizeMaximum, UInt32ToUInt8, UInt16ToUInt8 from "types"
-import Exception from "exceptions"
 import parseNumber, numberToString from "util"
 import String from "string"
-
-# @brief An invalid address component index was provided
-# @desc An exception thrown by Address's subscript operator
-#       when the provided subscript index exceeds the maximum
-#       for the Address:
-#         * 3 (base-0) for IPv4
-#         * 7 (base-0) for IPv6
-export class InvalidComponentIndex extends Exception {}
-
-# @brief An invalid address string was provided
-# @desc An exception thrown by Address's String cast constructor
-#       when the provided string is invalid for either IPv4 or IPv6.
-#
-#       For IPv4:
-#         * If less than 3 dots are found
-#         * If more than 3 dots are found
-#
-#       For IPv6:
-#         * If less than 8 components are found (and no consecutive shorthand is found)
-#         * If multiple consecutive shorthands are found
-#         * If more than 8 components are found
-export class InvalidAddress extends Exception {}
-
-# @brief An invalid operation was performed on the given address
-# @desc An exception thrown when trying to perform an operation
-#       on an Address that doesn't support that operation. This
-#       usually means you've tried to use an IPv4 Address like
-#       an IPv6 one or vice versa (for example, trying to coerce
-#       an IPv6 Address to a uint32, something only IPv4 Addresses
-#       can do).
-export class InvalidAddressType extends Exception {}
 
 export class Address {
   private var _isV6 = false
@@ -58,27 +26,40 @@ export class Address {
   # @brief Constructs an `Address` by parsing the given string as an IPv4 or IPv6 address
   #
   # @param address The string to parse as an address
+  #
+  # @note This constructor asserts if the parsing fails.
   public @from constructor(address: String) {
+    let parsed = this.tryFrom(address)
+    assert parsed
+    *this = *parsed
+  }
+
+  # @brief Tries to constructs an `Address` by parsing the given string as an IPv4 or IPv6 address
+  #
+  # @param address The string to parse as an address
+  public static function tryFrom(address: String): Address? {
+    let addr = new Address
+
     let found = false
     for i: Size in 0..address.length {
       if address[i] == ':' {
-        this._isV6 = true
+        addr._isV6 = true
         break
       }
     }
-    for i: uint8 in 0..(this._isV6 ? 8 : 4) {
-      this._components.push(0)
+    for i: uint8 in 0..(addr._isV6 ? 8 : 4) {
+      addr._components.push(0)
     }
 
     if address.length == 2 && address[0] == ':' && address[1] == ':' {
       # do nothing
-    } else if this._isV6 {
+    } else if addr._isV6 {
       let lastIdx: Size? = SizeMaximum # start with SizeMaximum so it'll wrap around to 0 when we do `from: *lastIdx + 1`
       let doubleIndex: uint8? = null
       let componentIdx: uint8 = 0
       while lastIdx {
         if componentIdx > 7
-          throw new InvalidAddress
+          return null
 
         let nextIdx = address.indexOf(':', after: *lastIdx)
 
@@ -86,13 +67,17 @@ export class Address {
 
         if substr.length == 0 {
           if doubleIndex
-            throw new InvalidAddress
+            return null
           doubleIndex = componentIdx
           if *lastIdx == SizeMaximum {
             nextIdx = address.indexOf(':', after: nextIdx)
           }
         } else {
-          this._components[componentIdx++] = parseNumber<uint16>(substr, 16)
+          let maybe = parseNumber<uint16>(substr, 16)
+          if maybe.isError {
+            return null
+          }
+          addr._components[componentIdx++] = maybe.value
         }
 
         if nextIdx == SizeMaximum {
@@ -102,18 +87,18 @@ export class Address {
         }
 
         if lastIdx && *lastIdx + 1 >= address.length {
-          throw new InvalidAddress
+          return null
         }
       }
       if !doubleIndex && componentIdx < 8
-        throw new InvalidAddress
+        return null
       if doubleIndex {
-        let diff = this._components.length - componentIdx
+        let diff = addr._components.length - componentIdx
         for i: uint8 in *doubleIndex..componentIdx {
-          this._components[i + diff] = this._components[i]
+          addr._components[i + diff] = addr._components[i]
         }
         for i: uint8 in *doubleIndex..*doubleIndex + diff {
-          this._components[i] = 0
+          addr._components[i] = 0
         }
       }
     } else {
@@ -122,42 +107,84 @@ export class Address {
       let third = address.indexOf('.', after: second)
 
       if first != SizeMaximum && second != SizeMaximum && third != SizeMaximum && address.indexOf('.', after: third) != SizeMaximum {
-        throw new InvalidAddress
+        return null
       }
 
       if first == SizeMaximum {
         # a (uint32)
-        let num: UInt32ToUInt8 = parseNumber<uint32>(address)
-        this._components[0] = num.part4
-        this._components[1] = num.part3
-        this._components[2] = num.part2
-        this._components[3] = num.part1
+        let maybe = parseNumber<uint32>(address)
+        if maybe.isError {
+          return null
+        }
+        let num: UInt32ToUInt8 = maybe.value
+        addr._components[0] = num.part4
+        addr._components[1] = num.part3
+        addr._components[2] = num.part2
+        addr._components[3] = num.part1
       } else if second == SizeMaximum {
         # a.b (uint8.uint24)
         # no 24-bit integer type so just upgrade it to uint32
-        let num: UInt32ToUInt8 = parseNumber<uint32>(address.substring(from: first + 1, to: address.length))
-        this._components[0] = parseNumber<uint8>(address.substring(from: 0, to: first))
-        this._components[1] = num.part3
-        this._components[2] = num.part2
-        this._components[3] = num.part1
+        let maybe = parseNumber<uint32>(address.substring(from: first + 1, to: address.length))
+        if maybe.isError {
+          return null
+        }
+        let num: UInt32ToUInt8 = maybe.value
+        let maybe2 = parseNumber<uint8>(address.substring(from: 0, to: first))
+        if maybe2.isError {
+          return null
+        }
+        addr._components[0] = maybe2.value
+        addr._components[1] = num.part3
+        addr._components[2] = num.part2
+        addr._components[3] = num.part1
       } else if third == SizeMaximum {
         # a.b.c (uint8.uint8.uint16)
-        let num: UInt16ToUInt8 = parseNumber<uint16>(address.substring(from: second + 1, to: address.length))
-        this._components[0] = parseNumber<uint8>(address.substring(from: 0, to: first))
-        this._components[1] = parseNumber<uint8>(address.substring(from: first + 1, to: second))
-        this._components[2] = num.part2
-        this._components[3] = num.part1
+        let maybe = parseNumber<uint16>(address.substring(from: second + 1, to: address.length))
+        if maybe.isError {
+          return null
+        }
+        let num: UInt16ToUInt8 = maybe.value
+        let maybe2 = parseNumber<uint8>(address.substring(from: 0, to: first))
+        if maybe2.isError {
+          return null
+        }
+        addr._components[0] = maybe2.value
+        maybe2 = parseNumber<uint8>(address.substring(from: first + 1, to: second))
+        if maybe2.isError {
+          return null
+        }
+        addr._components[1] = maybe2.value
+        addr._components[2] = num.part2
+        addr._components[3] = num.part1
       } else {
         # a.b.c.d (uint8.uint8.uint.uint8)
         # this is the standard notation for IPv4 addresses
         # the others have just been added for compatibility with conventions
         # established by IP parsing functions in other languages (such as `inet_aton`)
-        this._components[0] = parseNumber<uint16>(address.substring(from: 0, to: first))
-        this._components[1] = parseNumber<uint16>(address.substring(from: first + 1, to: second))
-        this._components[2] = parseNumber<uint16>(address.substring(from: second + 1, to: third))
-        this._components[3] = parseNumber<uint16>(address.substring(from: third + 1, to: address.length))
+        let maybe = parseNumber<uint16>(address.substring(from: 0, to: first))
+        if maybe.isError {
+          return null
+        }
+        addr._components[0] = maybe.value
+        maybe = parseNumber<uint16>(address.substring(from: first + 1, to: second))
+        if maybe.isError {
+          return null
+        }
+        addr._components[1] = maybe.value
+        maybe = parseNumber<uint16>(address.substring(from: second + 1, to: third))
+        if maybe.isError {
+          return null
+        }
+        addr._components[2] = maybe.value
+        maybe = parseNumber<uint16>(address.substring(from: third + 1, to: address.length))
+        if maybe.isError {
+          return null
+        }
+        addr._components[3] = maybe.value
       }
     }
+
+    return addr
   }
 
   public @from constructor(address: uint32) {
@@ -178,17 +205,17 @@ export class Address {
   # @brief Accesses a component at the specified index
   # @returns A reference to the component at the index
   # @param $ The index of the desired component
-  # @note Throws an InvalidComponentIndex error when trying to access past the:
+  # @note Asserts when trying to access past the:
   #         * 3rd index (base-0) for IPv4
   #         * 7th index (base-0) for IPv6
   public this[uint8]: ref uint16 {
     # limit index to uint8 since we can only have up to 8 components
     # limit return value to uint16 since we components can have a maximum of 16 bits
 
-    if this._isV6 && $ > 7 {
-      throw new InvalidComponentIndex
-    } else if !this._isV6 && $ > 3 {
-      throw new InvalidComponentIndex
+    if this._isV6 {
+      assert $ < 8
+    } else if !this._isV6 {
+      assert $ < 4
     }
     return this._components[$]
   }
@@ -264,8 +291,7 @@ export class Address {
   }
 
   public to uint32 {
-    if this._isV6
-      throw new InvalidAddressType
+    assert !this._isV6
 
     let num: UInt32ToUInt8 = 0
     num.part1 = this._components[3]

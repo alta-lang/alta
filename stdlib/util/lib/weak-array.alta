@@ -1,5 +1,4 @@
 import Size from "types"
-import IndexOutOfBounds from "exceptions"
 
 export generic class WeakArray<T> {
   private var handle: ptr T = nullptr
@@ -19,8 +18,7 @@ export generic class WeakArray<T> {
   }
 
   public this[Size]: ref T {
-    if $ >= this._length
-      throw new IndexOutOfBounds
+    assert $ < this._length
     return this.handle[$]
   }
 }

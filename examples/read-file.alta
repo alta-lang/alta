@@ -8,12 +8,12 @@ literal function main(argc: int, argv: ptr rawstring): int {
     return 1
   }
 
-  let file = new File(argv[1])
-
-  if !file {
+  let maybeFile = File.tryOpen(argv[1])
+  if maybeFile.isError {
     printError("Failed to open the file")
     return 2
   }
+  let file = maybeFile.value
 
   while var char = file.read() {
     print(*char)

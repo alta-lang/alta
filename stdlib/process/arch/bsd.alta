@@ -1,11 +1,9 @@
 import rawstring, Size from "types"
 import allocate, free from "memory"
-import Exception from "exceptions"
 import memcpy from "libc/lib/string"
 import String from "string"
 import Vector from "Vector"
-
-export class SysctlError extends Exception {}
+import Error from "./posix.alta"
 
 ##if platform == "darwin"
   var CTL_KERN: const int = 1
@@ -15,9 +13,9 @@ export class SysctlError extends Exception {}
 declare literal function sysctl(name: ptr int, nameLength: unsigned int, oldBuffer: ptr void, oldLength: ptr Size, newBuffer: ptr void, newLength: ptr Size): int
 declare literal function getpid(): int
 
-export function rawArgs(): Vector<String> {
+export function rawArgs(): Result<Vector<String>, Error> {
   # mib = Management Information Base
-  let mib = allocate<int>(3)
+  let mib = *allocate<int>(3)
 
   mib[0] = CTL_KERN
   mib[1] = KERN_ARGMAX
@@ -26,17 +24,17 @@ export function rawArgs(): Vector<String> {
   let inputSize: Size = sizeof int
 
   if sysctl(mib, 2, &maxArgSize as ptr void, &inputSize, nullptr, 0) == -1
-    throw new SysctlError
+    return new Result<Vector<String>, Error>(error: Error.Unknown)
 
   mib[0] = CTL_KERN
   mib[1] = KERN_PROCARGS2
   mib[2] = getpid()
 
-  let processArguments = allocate<byte>(maxArgSize)
+  let processArguments = *allocate<byte>(maxArgSize)
   inputSize = maxArgSize
 
   if sysctl(mib, 3, &processArguments as ptr void, &inputSize, nullptr, 0) == -1
-    throw new SysctlError
+    return new Result<Vector<String>, Error>(error: Error.Unknown)
 
   memcpy(&argc as ptr void, processArguments as ptr void, sizeof int)
   let argPtr: ptr byte = processArguments + sizeof int
@@ -45,7 +43,7 @@ export function rawArgs(): Vector<String> {
   argPtr += exe.length
 
   if argPtr == &processArguments[inputSize]
-    throw new SysctlError
+    return new Result<Vector<String>, Error>(error: Error.Unknown)
 
   # skip null terminators
   while argPtr < &processArguments[inputSize] {
@@ -64,7 +62,7 @@ export function rawArgs(): Vector<String> {
   free<byte>(processArguments)
   free<int>(mib)
 
-  return argv
+  return new Result<Vector<String>, Error>(ok: argv)
 }
 
 export * from "./posix.alta"

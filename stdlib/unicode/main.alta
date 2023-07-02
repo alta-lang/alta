@@ -1,8 +1,5 @@
 import uint8, uint16, uint32, Size from "types"
-import Exception from "exceptions"
 import Vector from "vector"
-
-export class UnpairedSurrogate extends Exception {}
 
 #
 # @section utilities
@@ -88,15 +85,15 @@ export function split(utf32: uint32, littleEndian: bool): Vector<uint8> {
 # @end section
 #
 
-export function utf16ToUTF32(utf16: Vector<uint16>): uint32 {
+export function utf16ToUTF32(utf16: Vector<uint16>): uint32? {
   let code: uint32 = 0
 
   if isSurrogateLeadingUnit(utf16[0]) {
     if utf16.length < 2
-      throw new UnpairedSurrogate
+      return null
     code = ((utf16[0] - 0xd800) << 10 | (utf16[1] - 0xdc00)) + 0x10000
   } else if isSurrogateTrailingUnit(utf16[0]) {
-    throw new UnpairedSurrogate
+    return null
   } else {
     code = utf16[0]
   }
@@ -139,8 +136,12 @@ export function utf32ToUTF8(utf32: uint32): Vector<uint8> {
   return result
 }
 
-export function utf16ToUTF8(utf16: Vector<uint16>): Vector<uint8> {
-  return utf32ToUTF8(utf16ToUTF32(utf16))
+export function utf16ToUTF8(utf16: Vector<uint16>): Vector<uint8>? {
+  let maybe = utf16ToUTF32(utf16)
+  if maybe {
+    return utf32ToUTF8(*maybe)
+  }
+  return null
 }
 
 export function utf32ToUTF16(utf32: uint32): Vector<uint16> {

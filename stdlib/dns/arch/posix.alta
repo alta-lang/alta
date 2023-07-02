@@ -2,11 +2,14 @@ import native as posix from "posix"
 import Address from "ip"
 #import URI from "uri"
 import uint16 from "types"
-import Exception from "exceptions"
 import String from "string"
 import Vector from "vector"
 
-export class GetaddrinfoFailure extends Exception {}
+export enum Error: int {
+	None = 0,
+	Unknown = 1,
+	GetaddrinfoFailure = 2,
+}
 
 export class AddressInfo {
 	public var address: Address
@@ -22,13 +25,13 @@ export class AddressInfo {
 	}
 }
 
-export function lookup(hostname: String): Vector<AddressInfo> {
+export function lookup(hostname: String): Result<Vector<AddressInfo>, Error> {
 	let result = new Vector<AddressInfo>
 	let orig: ptr posix.addrinfo
 	let info: ptr posix.addrinfo
 
 	if posix.getaddrinfo(hostname.data, nullptr, nullptr, &orig) != 0
-		throw new GetaddrinfoFailure
+		return new Result<Vector<AddressInfo>, Error>(error: Error.GetaddrinfoFailure)
 
 	info = orig
 
@@ -42,5 +45,5 @@ export function lookup(hostname: String): Vector<AddressInfo> {
 
 	posix.freeaddrinfo(orig)
 
-	return result
+	return new Result<Vector<AddressInfo>, Error>(ok: result)
 }

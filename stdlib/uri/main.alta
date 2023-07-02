@@ -1,26 +1,10 @@
 import String, CodePoint from "string"
 import Address from "ip"
-import Exception from "exceptions"
 import Size, SizeMaximum, uint16, uint8 from "types"
 import Vector from "vector"
 import Pair, parseNumber, numberToString from "util"
 import detectRequiredUTF8Bytes, utf8ToUTF32 from "unicode"
 import Map from "map"
-
-# @brief Indicates that container was invalid for the desired operation
-# @desc This is thrown by the Host class when an attempt is made
-#       to perform an operation on Host that doesn't have the necessary
-#       properties for the operation. For example, if no address
-#       is present in the Host but an attempt is made to cast the Host
-#       to an `[ip].Address`, this exception will be thrown
-export class InvalidContainer extends Exception {}
-
-# @brief Indicates that the given hostname was malformed
-# @desc This is thrown by the Host class when parsing a string provided to
-#       the `[string].String` cast constructor and an opening brace (such
-#       as one that would need to be provided to indicate an IPv6 address)
-#       is present but no closing brace is found
-export class InvalidHostname extends Exception {}
 
 # @brief Encodes the given string using percent-encoding
 # @param data A string to encode
@@ -56,20 +40,28 @@ export function encode(data: String): String {
 # @param data A percent-encoded string to decode
 # @returns A regular, non-percent-encoded string equivalent
 #          to the input string `data`
-export function decode(data: String): String {
+export function decode(data: String): String? {
   let result: String
 
   for i: Size in 0..data.length {
     let char = data[i]
 
     if char == '%' {
-      let lead = parseNumber<uint8>(data.substring(from: i + 1, length: 2), radix: 16)
+      let maybeLead = parseNumber<uint8>(data.substring(from: i + 1, length: 2), radix: 16)
+      if maybeLead.isError {
+        return null
+      }
+      let lead = maybeLead.value
       let req = detectRequiredUTF8Bytes(lead)
       let bytes = new Vector<uint8>(req)
       bytes.push(lead)
       i += 3
       for j: Size in 1..req {
-        bytes.push(parseNumber<uint8>(data.substring(from: i + 1, length: 2), radix: 16))
+        let maybe = parseNumber<uint8>(data.substring(from: i + 1, length: 2), radix: 16)
+        if maybe.isError {
+          return null
+        }
+        bytes.push(maybe.value)
         i += 3
       }
       result += utf8ToUTF32(bytes)
@@ -106,7 +98,7 @@ export class Host {
     if data.indexOf(':') != SizeMaximum {
       let trim = data[0] == '['
       if trim && data[data.length - 1] != ']'
-        throw new InvalidHostname
+        assert false
       this.address = new Address(trim ? data.substring(from: 1, length: data.length - 2) : data)
     } else {
       let first = data.indexOf('.')
@@ -138,7 +130,7 @@ export class Host {
 
   # @returns A string representation of this host
   # @note If neither an address nor hostname is present,
-  #       this method will throw an `InvalidContainer` exception
+  #       this method will assert
   public to String {
     if this.address {
       if (*this.address).isIPv6 {
@@ -149,16 +141,16 @@ export class Host {
     if this.hostname {
       return *this.hostname
     }
-    throw new InvalidContainer
+    assert false
   }
 
   # @returns An Address representing the address of this Host
   # @note If an address is not present for this Host, this method
-  #       will throw an `InvalidContainer` exception
+  #       will assert
   public to Address {
     if this.address
       return *this.address
-    throw new InvalidContainer
+    assert false
   }
 
   # @brief If true, this Host contains a hostname
@@ -186,10 +178,10 @@ export class UserInformation {
   public @from constructor(data: String) {
     if data.indexOf(':') != SizeMaximum {
       let idx = data.indexOf(':')
-      this.username = decode(data.substring(from: 0, to: idx))
-      this.password = decode(data.substring(from: idx + 1, to: data.length))
+      this.username = *decode(data.substring(from: 0, to: idx))
+      this.password = *decode(data.substring(from: idx + 1, to: data.length))
     } else {
-      this.username = decode(data)
+      this.username = *decode(data)
     }
   }
 
@@ -227,7 +219,7 @@ export class Authority {
     if colonIdx != SizeMaximum && endBracketIdx != SizeMaximum && colonIdx < endBracketIdx
       colonIdx = rest.indexOf(':', after: endBracketIdx)
     if colonIdx != SizeMaximum
-      this.port = parseNumber<uint16>(rest.substring(from: colonIdx + 1, to: rest.length))
+      this.port = parseNumber<uint16>(rest.substring(from: colonIdx + 1, to: rest.length)).value
     this.host = rest.substring(from: 0, to: colonIdx == SizeMaximum ? rest.length : colonIdx)
   }
 
@@ -263,13 +255,13 @@ export class Path extends Vector<String> {
     while (let next = data.indexOf('/', after: idx)) != SizeMaximum {
       let sub = data.substring(from: idx + 1, to: next)
       if sub.length > 0
-        this.push(decode(sub))
+        this.push(*decode(sub))
       idx = next
     }
     if idx != SizeMaximum || (idx == SizeMaximum && data.length > 0) {
       let sub = data.substring(from: idx + 1, to: data.length)
       if sub.length > 0
-        this.push(decode(sub))
+        this.push(*decode(sub))
     }
   }
 
@@ -325,12 +317,12 @@ export class QueryValue extends Vector<String> {
   }
 
   # @returns The first entry in this container
-  # @note This will throw an `InvalidContainer` exception if there is
+  # @note This will assert if there is
   #       not *exactly* one entry in this container
   public to String {
     if this.length == 1
       return this.first
-    throw new InvalidContainer
+    assert false
   }
 }
 
@@ -360,11 +352,11 @@ export class Query extends Map<String, QueryValue> {
       let key: String
       let value: String
       if (let idx = entry.indexOf('=')) != SizeMaximum
-        key = decode(entry.substring(from: 0, to: idx))
+        key = *decode(entry.substring(from: 0, to: idx))
       else
-        key = decode(entry)
+        key = *decode(entry)
       if (let idx = entry.indexOf('=')) != SizeMaximum
-        value = decode(entry.substring(from: idx + 1, to: entry.length))
+        value = *decode(entry.substring(from: idx + 1, to: entry.length))
       if this.has(key) && value
         this[key].push(value)
       else
@@ -462,7 +454,7 @@ export class URI {
     if firstPathSlash != SizeMaximum || !this.authority
       this.path = data.substring(from: firstPathSlash == SizeMaximum ? first + 1 : firstPathSlash, to: pathEnd)
     if hashtag != SizeMaximum
-      this.fragment = decode(data.substring(from: hashtag + 1, to: data.length))
+      this.fragment = *decode(data.substring(from: hashtag + 1, to: data.length))
     if (let questionMark = data.indexOf('?')) != SizeMaximum
       this.query = data.substring(from: questionMark, to: hashtag == SizeMaximum ? data.length : hashtag)
   }

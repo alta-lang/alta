@@ -3,7 +3,6 @@ import Size, rawstring, rawconststring, uint32, uint8, SizeMaximum from "types"
 import printf from "libc/lib/stdio"
 import strlen from "libc/lib/string"
 import tolower from "libc/lib/ctype"
-import Exception, IndexOutOfBounds from "exceptions"
 import "unicode" as unicode
 import Vector from "vector"
 
@@ -12,9 +11,6 @@ import Vector from "vector"
 ##if STRING_DEBUG
 let stringUUID: Size = 0
 ##end if
-
-export class ResizeFailure extends Exception {}
-export class InvalidCodePoint extends Exception {}
 
 # Determines the length of a null-terminated rawstring
 #
@@ -52,13 +48,13 @@ export class CodePoint {
 
   public @from constructor(data: uint32) {
     let bytes = unicode.utf32ToUTF8(data)
-    this.selfData = allocate<byte>(this.dataLength = bytes.length)
+    this.selfData = *allocate<byte>(this.dataLength = bytes.length)
     for i: Size in 0..bytes.length {
       this.selfData[i] = bytes[i]
     }
   }
   public @from constructor(data: byte) {
-    this.selfData = allocate<byte>(this.dataLength = 1)
+    this.selfData = *allocate<byte>(this.dataLength = 1)
     this.selfData[0] = data
   }
   module constructor(data: ref rawstring, length: ref Size, index: Size) {
@@ -68,13 +64,13 @@ export class CodePoint {
   }
   public @copy constructor(other: ref CodePoint) {
     if other.data {
-      this.selfData = allocate<byte>(this.dataLength = other.byteLength)
+      this.selfData = *allocate<byte>(this.dataLength = other.byteLength)
       let offset = other.byteIndex
       for i: Size in 0..this.dataLength {
         this.selfData[i] = other.bytes[offset + i]
       }
     } else {
-      this.selfData = allocate<byte>(this.dataLength = other.dataLength)
+      this.selfData = *allocate<byte>(this.dataLength = other.dataLength)
       for i: Size in 0..this.dataLength {
         this.selfData[i] = other.selfData[i]
       }
@@ -104,11 +100,11 @@ export class CodePoint {
       for i: Size in idx + current..(*this.length) {
         (*this.data)[i - diff] = (*this.data)[i]
       }
-      ;(*this.data) = reallocate<byte>(*this.data, *this.length, *this.length - diff)
+      ;(*this.data) = *reallocate<byte>(*this.data, *this.length, *this.length - diff)
       ;(*this.length) -= diff
     } else if needed > current {
       let diff = needed - current
-      ;(*this.data) = reallocate<byte>(*this.data, *this.length, *this.length + diff)
+      ;(*this.data) = *reallocate<byte>(*this.data, *this.length, *this.length + diff)
       for i: Size in (*this.length) + diff - 1:::idx + current {
         ;(*this.data)[i] = (*this.data)[i - diff]
       }
@@ -140,13 +136,11 @@ export class CodePoint {
   public this = rawconststring: ref CodePoint {
     let strLen = rawstringLength($)
 
-    if strLen == 0
-      throw new InvalidCodePoint
+    assert strLen != 0
 
     let required = unicode.detectRequiredUTF8Bytes($[0])
 
-    if strLen != required
-      throw new InvalidCodePoint
+    assert strLen >= required
 
     if this.data {
       let idx = this.findByteIndex()
@@ -188,17 +182,14 @@ export class CodePoint {
 
   public to byte {
     if !this.data {
-      if this.dataLength > 1
-        throw new InvalidCodePoint
-
+      assert this.dataLength == 1
       return this.selfData[0]
     }
 
     let idx = this.findByteIndex()
     let required = unicode.detectRequiredUTF8Bytes((*this.data)[idx])
 
-    if required > 1
-      throw new InvalidCodePoint
+    assert required == 1
 
     return (*this.data)[idx]
   }
@@ -236,6 +227,12 @@ export class CodePoint {
   public CodePoint == this: bool {
     return $ == this
   }
+  public this == byte: bool {
+    return this == new CodePoint($)
+  }
+  public byte == this: bool {
+    return new CodePoint($) == this
+  }
 
   # TODO: automatically create operator methods when corresponding operator methods are provided
   #       e.g. automatically create `!=` if `==` is provided
@@ -248,12 +245,24 @@ export class CodePoint {
   public CodePoint != this: bool {
     return $ != this
   }
+  public this != byte: bool {
+    return !(this == $)
+  }
+  public byte != this: bool {
+    return this != $
+  }
 
   public this > CodePoint: bool {
     return this as uint32 > $ as uint32
   }
   public CodePoint > this: bool {
     return $ > this
+  }
+  public this > byte: bool {
+    return this as uint32 > $ as uint32
+  }
+  public byte > this: bool {
+    return $ as uint32 > this as uint32
   }
 
   public this < CodePoint: bool {
@@ -262,6 +271,12 @@ export class CodePoint {
   public CodePoint < this: bool {
     return $ > this
   }
+  public this < byte: bool {
+    return this as uint32 < $ as uint32
+  }
+  public byte < this: bool {
+    return $ as uint32 < this as uint32
+  }
 
   public this <= CodePoint: bool {
     return !(this > $)
@@ -269,12 +284,24 @@ export class CodePoint {
   public CodePoint <= this: bool {
     return $ <= this
   }
+  public this <= byte: bool {
+    return this as uint32 <= $ as uint32
+  }
+  public byte <= this: bool {
+    return $ as uint32 <= this as uint32
+  }
 
   public this >= CodePoint: bool {
     return !(this < $)
   }
   public CodePoint >= this: bool {
     return $ >= this
+  }
+  public this >= byte: bool {
+    return this as uint32 >= $ as uint32
+  }
+  public byte >= this: bool {
+    return $ as uint32 >= this as uint32
   }
 }
 
@@ -289,7 +316,7 @@ export class String {
 
   # Constructs a new, empty String
   public constructor() {
-    this._data = allocate<byte>(1)
+    this._data = *allocate<byte>(1)
     this._data[0] = '\0'
 
 ##if STRING_DEBUG
@@ -304,7 +331,7 @@ export class String {
   #       using `rawstringLength(data)`
   public @from constructor(data: rawconststring) {
     this._length = rawstringLength(data)
-    this._data = allocate<byte>(this._length + 1)
+    this._data = *allocate<byte>(this._length + 1)
 
     for i: Size in 0..this._length {
       this._data[i] = data[i]
@@ -324,7 +351,7 @@ export class String {
   #               terminator (i.e. length of "hi" equals 2, not 3)
   public constructor(data: rawconststring, length: Size) {
     this._length = length
-    this._data = allocate<byte>(this._length + 1)
+    this._data = *allocate<byte>(this._length + 1)
 
     for i: Size in 0..this._length {
       this._data[i] = data[i]
@@ -347,7 +374,7 @@ export class String {
   #       string from a rawstring, but it eliminates the need to manually cast the pointer.
   public constructor(data: ptr const uint8, length: Size) {
     this._length = length
-    this._data = allocate<byte>(this._length + 1)
+    this._data = *allocate<byte>(this._length + 1)
 
     for i: Size in 0..this._length {
       this._data[i] = data[i] as byte
@@ -362,7 +389,7 @@ export class String {
 
   public constructor(length: Size) {
     this._length = length
-    this._data = allocate<byte>(this._length + 1)
+    this._data = *allocate<byte>(this._length + 1)
 
     for i: Size in 0...this._length {
       this._data[i] = '\0'
@@ -375,7 +402,7 @@ export class String {
 
   public @from constructor(data: ref CodePoint) {
     this._length = data.byteLength
-    this._data = allocate<byte>(this._length + 1)
+    this._data = *allocate<byte>(this._length + 1)
 
     let thatByteIndex = data.byteIndex
 
@@ -395,7 +422,7 @@ export class String {
   # @param other The String to copy
   public @copy constructor(other: ref String) {
     this._length = other._length
-    this._data = allocate<byte>(this._length + 1)
+    this._data = *allocate<byte>(this._length + 1)
 
     for i: Size in 0..this._length {
       this._data[i] = other._data[i]
@@ -424,16 +451,16 @@ export class String {
   #
   # @param i The index of the character to retrieve
   # @returns A CodePoint for the code point at the given index
-  public function charAt(i: Size): CodePoint {
+  public function charAt(i: Size): CodePoint? {
     if i >= this.length {
-      throw new IndexOutOfBounds
+      return null
     }
     return new CodePoint(this._data, this._length, i)
   }
 
-  public function byteAt(i: Size): ref byte {
+  public function byteAt(i: Size): (ref byte)? {
     if i >= this._length {
-      throw new IndexOutOfBounds
+      return null
     }
 
     return this._data[i]
@@ -483,13 +510,10 @@ export class String {
   }
 
   private function resize(length: Size): ref String {
-    let tmp = reallocate<byte>(this._data, this._length, length + 1)
+    let maybe = reallocate<byte>(this._data, this._length, length + 1)
+    assert maybe
 
-    if tmp == nullptr {
-      throw new ResizeFailure
-    }
-
-    this._data = tmp as rawstring
+    this._data = *maybe as rawstring
     this._length = length
     
     return this
@@ -549,7 +573,7 @@ export class String {
     let sub = new String
     for i: Size in from..to {
       if i >= this.length break
-      sub.append(this.charAt(i))
+      sub.append(*this.charAt(i))
     }
     return sub
   }
@@ -794,7 +818,7 @@ export class String {
   }
 
   public this[Size]: CodePoint {
-    return this.charAt($)
+    return *this.charAt($)
   }
 
   public this == String: bool {

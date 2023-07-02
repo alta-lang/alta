@@ -1,8 +1,5 @@
 import allocate, free, reallocate from "memory"
 import Size from "types"
-import Exception, IndexOutOfBounds from "exceptions"
-
-export class ResizeFailure extends Exception {}
 
 export generic class Vector<T> {
   private var _data: ptr T = nullptr
@@ -10,15 +7,15 @@ export generic class Vector<T> {
   private var _size: Size = 0
 
   public constructor() {
-    this._data = allocate<T>(0)
+    this._data = *allocate<T>(0)
   }
   public constructor(length: Size) {
     this._size = length
-    this._data = allocate<T>(length)
+    this._data = *allocate<T>(length)
   }
   public constructor(length: Size, initializer: T) {
     this._size = this._length = length
-    this._data = allocate<T>(length)
+    this._data = *allocate<T>(length)
 
     for i: Size in 0..this._length {
       this._data[i] @strict = initializer
@@ -26,7 +23,7 @@ export generic class Vector<T> {
   }
   public constructor(items: T...) {
     this._size = this._length = items.length
-    this._data = allocate<T>(this._length)
+    this._data = *allocate<T>(this._length)
 
     for i: Size in 0..this._length {
       this._data[i] @strict = items[i]
@@ -34,7 +31,7 @@ export generic class Vector<T> {
   }
   public constructor(pointer: ptr const T, length: Size) {
     this._size = this._length = length
-    this._data = allocate<T>(this._length)
+    this._data = *allocate<T>(this._length)
 
     for i: Size in 0..length {
       this._data[i] @strict = pointer[i]
@@ -43,7 +40,7 @@ export generic class Vector<T> {
   public @copy constructor(other: ref Vector<T>) {
     this._size = other._size
     this._length = other._length
-    this._data = allocate<T>(other._size)
+    this._data = *allocate<T>(other._size)
 
     for i: Size in 0..this._length {
       this._data[i] @strict = other._data[i]
@@ -75,14 +72,12 @@ export generic class Vector<T> {
   }
 
   public @read function first(): ref T {
-    if this.length < 1
-      throw new IndexOutOfBounds
+    assert this.length >= 1
     return this._data[0]
   }
 
   public @read function last(): ref T {
-    if this.length < 1
-      throw new IndexOutOfBounds
+    assert this.length >= 1
     return this._data[this._length - 1]
   }
 
@@ -90,21 +85,17 @@ export generic class Vector<T> {
     return this._data
   }
 
-  public function get(index: Size): ref T {
+  public function get(index: Size): (ref T)? {
     if index >= this._length
-      throw new IndexOutOfBounds
+      return null
     return this._data[index]
   }
 
   private function ensureSize(desiredSize: Size): void {
     if this._size < desiredSize {
-      let tmp = reallocate<T>(this._data, this._size, desiredSize)
-
-      if tmp == 0 {
-        throw new ResizeFailure
-      }
-
-      this._data = tmp
+      let maybe = reallocate<T>(this._data, this._size, desiredSize)
+      assert maybe
+      this._data = *maybe
       this._size = desiredSize
     }
   }
@@ -254,7 +245,7 @@ export generic class Vector<T> {
   }
 
   public this[Size]: ref T {
-    return this.get($)
+    return *this.get($)
   }
 
   public @read generator function items(): ref T {

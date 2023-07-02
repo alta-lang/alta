@@ -14,6 +14,8 @@ import Size, uint64, UInt64Maximum from "types"
 
 export arch.HandleType
 
+export type ID = uint64
+
 type Coro = ptr native._Alta_basic_coroutine
 
 #
@@ -38,7 +40,7 @@ export class Scheduler {
 	private var counter: uint64 = 0
 
 	# used by us internally and by the compiler
-	private function _schedule(coroutine: Coro): Coro {
+	private function _schedule(coroutine: Coro): ID {
 		# NOTE: this commented-out code is for if we want to guarantee that the given coroutine will run
 		#       immediately after being scheduled. i'm not sure if we want those semantics or not.
 		#       for now, we have it commented out which has the result of making the semantics effectively
@@ -49,9 +51,9 @@ export class Scheduler {
 		#if coroutine.basic_suspendable.done
 		#	return coroutine
 
-		coroutine.id = ++this.counter
-
-		return this.work.push(coroutine)
+		let id = coroutine.id = ++this.counter
+		this.work.push(coroutine)
+		return id
 	}
 
 	# @brief Schedules a coroutine to run independently
@@ -60,8 +62,8 @@ export class Scheduler {
 	# @note You **must not** execute the coroutine passed in after scheduling it. The *only* thing you may do with
 	#       the coroutine is check whether it is done. Once it is done, you are then free to use it as you please
 	#       once again (since the scheduler will have given up control over it).
-	public function schedule(co: Coro): void {
-		this._schedule(co)
+	public function schedule(co: Coro): ID {
+		return this._schedule(co)
 	}
 
 	# @brief Completes one iteration of a scheduled coroutine
@@ -125,9 +127,9 @@ export class Scheduler {
 	#       it yourself or know that someone else did.
 	# @note This method will tell you if the coroutine is *scheduled to run*. To know if it's sleeping, use `isSleeping`,
 	#       and if you want to know if it's either scheduled to run or sleeping, use `isManaged`.
-	public function isScheduled(co: Coro): bool {
+	public function isScheduled(co: ID): bool {
 		for item: Coro in this.work.items {
-			if item == co
+			if item.id == co
 				return true
 		}
 		return false
@@ -140,9 +142,9 @@ export class Scheduler {
 	#       is *currently* sleeping, not whether it has been previously.
 	# @note This method will tell you if the coroutine is *sleeping*. To know if it's scheduled to run, use `isScheduled`,
 	#       and if you want to know if it's either scheduled to run or sleeping, use `isManaged`.
-	public function isSleeping(co: Coro): bool {
+	public function isSleeping(co: ID): bool {
 		for item: Coro in this.sleeping.items {
-			if item == co
+			if item.id == co
 				return true
 		}
 		return false
@@ -156,7 +158,7 @@ export class Scheduler {
 	# @note This method will tell you if the coroutine is *being managed by this Scheduler*, which includes either
 	#       currently running or sleeping. To know specifically if it's scheduled to run, use `isScheduled`,
 	#       and to know specifically if it's sleeping, use `isSleeping`.
-	public function isManaged(co: Coro): bool {
+	public function isManaged(co: ID): bool {
 		return this.isScheduled(co) || this.isSleeping(co)
 	}
 }

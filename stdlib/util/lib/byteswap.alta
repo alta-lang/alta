@@ -1,5 +1,3 @@
-import InvalidArgument from "exceptions"
-
 export generic function byteswap<T>(value: T): T {
 	if sizeof T == 1
 		return value
@@ -29,5 +27,5 @@ export generic function byteswap<T>(value: T): T {
 
 	# anything else is unsupported
 	# TODO: should be a compile-time error
-	throw new InvalidArgument
+	assert false
 }

@@ -37,6 +37,7 @@ import "./arch/linux.alta" as native
 ##if not defined(UNSUPPORTED_PLATFORM__PROCESS)
 export native.Stream
 export native.Process
+export native.Error
 using Stream = native.Stream
 using Process = native.Process
 ##else
@@ -52,9 +53,13 @@ export class Process {
     assert false
   }
 }
+export enum Error: int {
+  None = 0,
+  Unknown = 1,
+}
 ##end if
 
-export function arguments(): Vector<String> {
+export function arguments(): Result<Vector<String>, native.Error> {
 ##if not defined(UNSUPPORTED_PLATFORM__PROCESS)
   return native.rawArgs()
 ##else
@@ -62,7 +67,7 @@ export function arguments(): Vector<String> {
 ##end if
 }
 
-export function spawn(program: String, args: Vector<String>): Process {
+export function spawn(program: String, args: Vector<String>): Result<Process, native.Error> {
 ##if not defined(UNSUPPORTED_PLATFORM__PROCESS)
   return native.spawn(program, args)
 ##else

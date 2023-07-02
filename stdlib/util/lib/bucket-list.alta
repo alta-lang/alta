@@ -14,7 +14,7 @@ export class BucketList {
 	public constructor(callback: () => void) {
 		# Alta really needs `new int` so we can do `new* int`
 		# (it's so easy to implement, too!)
-		this.refs = allocate<int>(1)
+		this.refs = *allocate<int>(1)
 		;*this.refs = 1
 		this.callback = callback
 	}

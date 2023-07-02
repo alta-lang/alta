@@ -20,7 +20,7 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 	let port: uint16 = 8080
 
 	if args.length > 2
-		port = parseNumber<uint16>(args[2])
+		port = parseNumber<uint16>(args[2]).value
 
 	let req = await request(args[1], port)
 

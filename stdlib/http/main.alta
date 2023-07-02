@@ -3,20 +3,21 @@ import uint8, SizeMaximum, uint16, Size from "types"
 import String, CodePoint from "string"
 import Path from "uri"
 import parseNumber, Pair, numberToString from "util"
-import Exception from "exceptions"
 import TCPSocket from "net"
 import Address from "ip"
 import List from "list"
 import Map from "map"
 import Coroutines from "@internal@"
 
-export class ConnectionFailure extends Exception {}
-export class MessageParsingException extends Exception {}
-
-export class InvalidMessage extends MessageParsingException {}
-export class InvalidStatus extends MessageParsingException {}
-export class InvalidMethod extends MessageParsingException {}
-export class InvalidField extends MessageParsingException {}
+export enum Error: int {
+	None = 0,
+	Unknown = 1,
+	ConnectionFailure,
+	InvalidMessage,
+	InvalidStatus,
+	InvalidMethod,
+	InvalidField,
+}
 
 export enum Field: String {
 	# these are prefixed such that they're never supposed to occur in actual HTTP data
@@ -192,10 +193,10 @@ export class Message {
 	public var headers: Map<Field, String>
 	public var body: Vector<uint8>
 
-	public function process(data: Vector<uint8>): void {
+	module function process(data: Vector<uint8>): Result<void, Error> {
 		if this.inBody {
 			this.body += data
-			return;
+			return new Result<void, Error>(ok: void);
 		}
 
 		while data.length > 0 {
@@ -216,7 +217,7 @@ export class Message {
 				break
 			} else if idx != SizeMaximum || idx2 != SizeMaximum {
 				# this is no longer an HTTP message
-				throw new InvalidMessage
+				return new Result<void, Error>(error: Error.InvalidMessage)
 			} else {
 				this.backlog += data
 				#data.clear() # again, we don't need to clear it because we're breaking
@@ -240,7 +241,7 @@ export class Message {
 			if this.inHeaders {
 				let firstColon = line.indexOf(':')
 				if firstColon == SizeMaximum
-					throw new InvalidMessage
+					return new Result<void, Error>(error: Error.InvalidMessage)
 
 				let fieldName = line.substring(from: 0, to: firstColon).toLowerCase()
 
@@ -259,14 +260,14 @@ export class Message {
 			} else {
 				let firstSpace = line.indexOf(' ')
 				if firstSpace == SizeMaximum
-					throw new InvalidMessage
+					return new Result<void, Error>(error: Error.InvalidMessage)
 
 				# both requests and responses require a second space
 				# requests need it for `<method> <path> HTTP/<version>`
 				# responses need it for `HTTP/<version> <code> <message>`
 				let secondSpace = line.indexOf(' ', after: firstSpace)
 				if secondSpace == SizeMaximum
-					throw new InvalidMessage
+					return new Result<void, Error>(error: Error.InvalidMessage)
 
 				if isSupportedHTTPVersion(line.substring(from: 0, to: firstSpace)) {
 					# we're dealing with a response
@@ -274,14 +275,18 @@ export class Message {
 					let code = line.substring(from: firstSpace + 1, to: secondSpace)
 
 					if code.includes((i: CodePoint) => bool { return i < '0' || i > '9' })
-						throw new InvalidMessage
+						return new Result<void, Error>(error: Error.InvalidMessage)
 
-					this.status = parseNumber<Status>(code)
+					let maybeStatus = parseNumber<Status>(code)
+					if maybeStatus.isError {
+						return new Result<void, Error>(error: Error.InvalidStatus)
+					}
+					this.status = maybeStatus.value
 
 					# sanity check
 					# make sure the status is known
 					if !(@reverse Status[*this.status])
-						throw new InvalidStatus
+						return new Result<void, Error>(error: Error.InvalidStatus)
 
 					# TODO: check the status message as well
 				} else {
@@ -292,15 +297,15 @@ export class Message {
 					# sanity check
 					# make sure the method is known
 					if !(@reverse Method[*this.method])
-						throw new InvalidMethod
+						return new Result<void, Error>(error: Error.InvalidMethod)
 
 					let finalSpace = line.lastIndexOf(' ')
 
 					if finalSpace == SizeMaximum || finalSpace < firstSpace + 1
-						throw new InvalidMessage
+						return new Result<void, Error>(error: Error.InvalidMessage)
 
 					if !isSupportedHTTPVersion(line.substring(from: finalSpace + 1))
-						throw new InvalidMessage
+						return new Result<void, Error>(error: Error.InvalidMessage)
 
 					this.path = line.substring(from: firstSpace + 1, to: finalSpace)
 				}
@@ -487,35 +492,31 @@ export class Server {
 		this.socket.listen(10)
 	}
 
-	private function doTryCatch(req: ref IncomingRequest, res: ref OutgoingResponse, data: ref Vector<uint8>): bool {
+	private function tryParse(req: ref IncomingRequest, res: ref OutgoingResponse, data: ref Vector<uint8>): Result<bool, Error> {
 		# try to parse the data
-		try {
-			req.message.process(data)
-			# if we've reached the body, we're done waiting and we can hand off the request to the handler
-			# if they want the message body, they can ask for it later
-			if req.message.inBody {
-				# if we don't have a method, it's not a request
-				# throw an error so that our exception handler tells the client that they made a bad request
-				if !req.message.method
-					throw new MessageParsingException
+		let result = req.message.process(data)
+		if result.isError {
+			return result.morphError<bool>()
+		}
+		# if we've reached the body, we're done waiting and we can hand off the request to the handler
+		# if they want the message body, they can ask for it later
+		if req.message.inBody {
+			# if we don't have a method, it's not a request
+			# return an error so that our caller tells the client that they made a bad request
+			if !req.message.method
+				return new Result<bool, Error>(error: Error.InvalidMethod)
 
-				# same here: no path = not a request
-				if !req.message.path
-					throw new MessageParsingException
+			# same here: no path = not a request
+			if !req.message.path
+				return new Result<bool, Error>(error: Error.InvalidMessage)
 
-				# TODO: this should be an async lambda (when Alta gets those)
-				#       or an event emitter call (once we get those; also after Alta gets async lambdas)
-				this.requestHandler(req, res)
-				return true
-			}
-		} catch e: MessageParsingException {
-			# if we failed to parse it, tell the client they made a bad request
-			res.status = Status.BadRequest
-			res.end()
-			return true
+			# TODO: this should be an async lambda (when Alta gets those)
+			#       or an event emitter call (once we get those; also after Alta gets async lambdas)
+			this.requestHandler(req, res)
+			return new Result<bool, Error>(ok: true)
 		}
 
-		return false
+		return new Result<bool, Error>(ok: false)
 	}
 
 	private async function handleConnection(client: TCPSocket, location: Pair<Address, uint16>): void {
@@ -525,13 +526,16 @@ export class Server {
 		while true {
 			let maybeData = req.socket.receive()
 			if maybeData {
-				# `break`ing inside `try ... catch` is a little broken right now
-				# (it won't unset the `catch` handler)
-				#
-				# also, `try ... catch` is broken inside async and generator functions,
-				# so we need to delegate it over to `doTryCatch` for now
-				if this.doTryCatch(req, res, *maybeData)
+				let data = *maybeData
+				let result = this.tryParse(req, res, *maybeData)
+				if result.isError {
+					# if we failed to parse it, tell the client they made a bad request
+					res.status = Status.BadRequest
+					res.end()
 					break
+				} else if result.value {
+					break
+				}
 			}
 
 			yield;
@@ -713,7 +717,7 @@ export class OutgoingRequest {
 		}
 	}
 
-	public async function waitForResponse(): IncomingResponse {
+	public async function waitForResponse(): Result<IncomingResponse, Error> {
 		await this.finishSending()
 
 		let res = new IncomingResponse(this.socket)
@@ -725,11 +729,11 @@ export class OutgoingRequest {
 				# they can get the body themselves
 				if res.message.inBody {
 					# if we don't have a status, it's not a response
-					# throw an error so that the user knows the server did something naughty
+					# return an error so that the user knows the server did something naughty
 					if !res.message.status
-						throw new MessageParsingException
+						return new Result<IncomingResponse, Error>(error: Error.InvalidStatus)
 
-					return res
+					return new Result<IncomingResponse, Error>(ok: res)
 				}
 			}
 
@@ -738,7 +742,7 @@ export class OutgoingRequest {
 	}
 }
 
-export async function request(address: Address, port: uint16 = 80): OutgoingRequest {
+export async function request(address: Address, port: uint16 = 80): Result<OutgoingRequest, Error> {
 	let socket = new TCPSocket
 
 	socket.connect(address, port)
@@ -747,7 +751,7 @@ export async function request(address: Address, port: uint16 = 80): OutgoingRequ
 		yield;
 
 	if socket.connectionFailure
-		throw new ConnectionFailure
+		return new Result<OutgoingRequest, Error>(error: Error.ConnectionFailure)
 
-	return new OutgoingRequest(socket)
+	return new Result<OutgoingRequest, Error>(ok: new OutgoingRequest(socket))
 }

@@ -83,7 +83,7 @@ declare literal function MultiByteToWideChar(CodePage: UINT, dwFlags: DWORD, lpM
 declare literal function WideCharToMultiByte(CodePage: UINT, dwFlags: DWORD, lpWideCharStr: LPCWCH, cchWideChar: int, lpMultiByteStr: LPSTR, cbMultiByte: int, lpDefaultChar: LPCCH, lpUsedDefaultChar: LPBOOL): int
 declare literal function LocalFree(hMem: HLOCAL): HLOCAL
 
-export function rawArgs(): Vector<String> {
+export function rawArgs(): Result<Vector<String>, Error> {
   # translated into Alta and adapted from https://stackoverflow.com/a/4023686
   let lpCmdLine = GetCommandLineA()
   let requiredStringSize = MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, lpCmdLine, -1, nullptr, 0)
@@ -111,7 +111,7 @@ export function rawArgs(): Vector<String> {
 
   LocalFree(args as HLOCAL)
 
-  return result
+  return new Result<Vector<String>, Error>(ok: result)
 }
 
 declare literal function CreatePipe(hReadPipe: ptr HANDLE, hWritePipe: ptr HANDLE, lpPipeAttributes: ptr SECURITY_ATTRIBUTES, nSize: DWORD): BOOL
@@ -227,7 +227,7 @@ export class Stream {
       return new Result<String, Error>(error: Error.WrongStreamType)
     }
 
-    let buffer = allocate<byte>(count)
+    let buffer = *allocate<byte>(count)
     let bytesRead = 0 as DWORD
 
     if !ReadFile(this.handle, buffer as LPVOID, count as DWORD, &bytesRead, nullptr) {
@@ -304,7 +304,7 @@ function escapeForCommandLine(arg: String): String {
   for i: Size in 0..arg.length {
     let backlashes: Size = 0
 
-    while i < arg.length && arg.charAt(i) == '\\' {
+    while i < arg.length && arg[i] == '\\' {
       ++i
       ;++backlashes
     }
@@ -315,7 +315,7 @@ function escapeForCommandLine(arg: String): String {
       }
       break
     } else {
-      if arg.charAt(i) == '"' {
+      if arg[i] == '"' {
         for j: Size in 0..backlashes * 2 + 1 {
           result.append('\\')
         }
@@ -324,7 +324,7 @@ function escapeForCommandLine(arg: String): String {
           result.append('\\')
         }
       }
-      result.append(arg.charAt(i))
+      result.append(arg[i])
     }
   }
   result.append('"')

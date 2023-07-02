@@ -21,11 +21,11 @@ generic class Node<T> {
   public var next: ptr Node<T> = nullptr
 
   public constructor(data: T) {
-    this.data = allocate<T>(1)
+    this.data = *allocate<T>(1)
     ;*this.data @strict = data
   }
   public @copy constructor(other: ref Node<T>) {
-    this.data = allocate<T>(1)
+    this.data = *allocate<T>(1)
     ;*this.data @strict = *other.data
   }
   public destructor() {
