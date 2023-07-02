@@ -99,7 +99,7 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	}
 
 	// for debugging
-	LLVMDumpModule(llmod.get());
+	//LLVMDumpModule(llmod.get());
 	LLVMPrintModuleToFile(llmod.get(), outputDisassemblyPathStr.c_str(), NULL);
 
 	// make sure our module is good

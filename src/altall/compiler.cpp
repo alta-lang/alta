@@ -6688,8 +6688,36 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileYieldExpression(std::shar
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssertionStatement(std::shared_ptr<AltaCore::AST::AssertionStatement> node, std::shared_ptr<AltaCore::DH::AssertionStatement> info) {
-	// TODO
-	std::cerr << "TODO: AssertionStatement" << std::endl;
+	auto tmpIdx = nextTemp();
+	auto tmpIdxStr = std::to_string(tmpIdx);
+
+	pushStack(ScopeStack::Type::Temporary);
+
+	auto val = co_await compileNode(node->test, info->test);
+	auto asBool = co_await cast(val, AltaCore::DET::Type::getUnderlyingType(info->test.get()), std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Bool), false, additionalCopyInfo(node->test, info->test), false, &node->position);
+
+	auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+
+	auto trueBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@assert_true_" + tmpIdxStr).c_str());
+	auto falseBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@assert_false_" + tmpIdxStr).c_str());
+
+	LLVMBuildCondBr(_builders.top().get(), asBool, trueBlock, falseBlock);
+
+	LLVMPositionBuilderAtEnd(_builders.top().get(), falseBlock);
+
+	auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+	if (!_definedFunctions["abort"]) {
+		_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
+	}
+
+	LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
+	LLVMBuildUnreachable(_builders.top().get());
+
+	LLVMPositionBuilderAtEnd(_builders.top().get(), trueBlock);
+
+	co_await currentStack().cleanup();
+	co_await popStack();
+
 	co_return NULL;
 };
 
