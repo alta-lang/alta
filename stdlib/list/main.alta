@@ -1,5 +1,4 @@
 import allocate, free from "memory"
-import IndexOutOfBounds from "exceptions"
 import Size from "types"
 
 generic class Node<T> {
@@ -121,8 +120,8 @@ export generic class List<T> {
       return this.pushFront(data)
     if at == this.count
       return this.pushBack(data)
-    if at > this.count
-      throw new IndexOutOfBounds
+
+    assert at <= this.count
 
     let ptr = this.start
     let i: Size = 0
@@ -145,8 +144,8 @@ export generic class List<T> {
       return this.popFront()
     if index == this.count - 1
       return this.popBack()
-    if index >= this.count
-      throw new IndexOutOfBounds
+
+    assert index < this.count
 
     let ptr = this.start
     let i: Size = 0
@@ -179,13 +178,11 @@ export generic class List<T> {
   }
 
   public @read function first(): ref T {
-    if this.count == 0
-      throw new IndexOutOfBounds
+    assert this.count != 0
     return *this.start.data
   }
   public @read function last(): ref T {
-    if this.count == 0
-      throw new IndexOutOfBounds
+    assert this.count != 0
     return *this.end.data
   }
   public @read function length(): Size {
@@ -193,8 +190,7 @@ export generic class List<T> {
   }
 
   public this[Size]: ref T {
-    if $ >= this.count
-      throw new IndexOutOfBounds
+    assert $ < this.count
 
     let ptr = this.start
     let i: Size = 0
