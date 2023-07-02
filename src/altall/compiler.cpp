@@ -442,11 +442,15 @@ LLVMValueRef AltaLL::Compiler::ScopeStack::buildArrayAlloca(LLVMTypeRef lltype, 
 	}
 };
 
-AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions) {
+AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions, bool useStructForVoid) {
 	auto mangled = "_non_native_" + mangleType(type);
 
 	if (usePointersToFunctions && type->isFunction && type->isRawFunction) {
 		mangled = "_ptr_" + mangled;
+	}
+
+	if (!useStructForVoid) {
+		mangled = "_real_void_" + mangled;
 	}
 
 	if (_definedTypes[mangled.c_str()]) {
@@ -482,14 +486,20 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::sh
 			} break;
 			case AltaCore::DET::NativeType::Byte:        result = LLVMInt8TypeInContext(_llcontext.get()); break;
 			case AltaCore::DET::NativeType::Bool:        result = LLVMInt1TypeInContext(_llcontext.get()); break;
-			case AltaCore::DET::NativeType::Void:        result = LLVMVoidTypeInContext(_llcontext.get()); break;
+			case AltaCore::DET::NativeType::Void:
+				if (useStructForVoid) {
+					result = LLVMStructTypeInContext(_llcontext.get(), NULL, 0, false);
+				} else {
+					result = LLVMVoidTypeInContext(_llcontext.get());
+				}
+				break;
 			case AltaCore::DET::NativeType::Double:      result = LLVMDoubleTypeInContext(_llcontext.get()); break;
 			case AltaCore::DET::NativeType::Float:       result = LLVMFloatTypeInContext(_llcontext.get()); break;
 			case AltaCore::DET::NativeType::UserDefined: result = NULL; break;
 		}
 	} else if (type->isFunction) {
 		if (type->isRawFunction) {
-			auto retType = co_await translateType(type->returnType);
+			auto retType = co_await translateType(type->returnType, true, false);
 			std::vector<LLVMTypeRef> params;
 			bool isVararg = false;
 
@@ -546,20 +556,19 @@ AltaLL::Compiler::Coroutine<LLVMTypeRef> AltaLL::Compiler::translateType(std::sh
 
 		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 	} else if (type->isOptional) {
-		if (*type->optionalTarget == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
-			std::array<LLVMTypeRef, 1> members;
+		std::array<LLVMTypeRef, 2> members;
 
-			members[0] = LLVMInt1TypeInContext(_llcontext.get());
+		bool isVoid = *type->optionalTarget == AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
 
-			result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+		members[0] = LLVMInt1TypeInContext(_llcontext.get());
+
+		if (isVoid) {
+			members[1] = LLVMStructTypeInContext(_llcontext.get(), NULL, 0, false);
 		} else {
-			std::array<LLVMTypeRef, 2> members;
-
-			members[0] = LLVMInt1TypeInContext(_llcontext.get());
 			members[1] = co_await translateType(type->optionalTarget);
-
-			result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 		}
+
+		result = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 	} else if (type->bitfield) {
 		result = co_await translateType(type->bitfield->underlyingBitfieldType.lock());
 	} else if (type->klass) {
@@ -2259,23 +2268,23 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 
 		bool isVoid = *type->optionalTarget == AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
 
-		if (!isVoid) {
+		if (isVoid) {
+			members[1] = LLVMStructTypeInContext(_llcontext.get(), NULL, 0, false);
+		} else {
 			auto co = translateType(type->optionalTarget);
 			co.coroutine.resume();
 			members[1] = co.await_resume();
 		}
 
-		auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), isVoid ? 1 : members.size(), false);
+		auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		auto boolType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "bool", 4, 8, llvm::dwarf::DW_ATE_boolean, LLVMDIFlagZero);
 		debugMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__present", sizeof("__present") - 1, debugFile, type->position.line, 8, 8, 0, LLVMDIFlagArtificial, boolType);
 
-		if (!isVoid) {
-			auto targetType = translateTypeDebug(type->optionalTarget);
-			debugMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMDITypeGetSizeInBits(targetType), LLVMDITypeGetAlignInBits(targetType), LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1) * 8, LLVMDIFlagArtificial, targetType);
-		}
+		auto targetType = translateTypeDebug(type->optionalTarget);
+		debugMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMDITypeGetSizeInBits(targetType), LLVMDITypeGetAlignInBits(targetType), LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1) * 8, LLVMDIFlagArtificial, targetType);
 
-		result = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), tmpStruct) * 8, LLVMABIAlignmentOfType(_targetData.get(), tmpStruct) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), isVoid ? 1 : debugMembers.size(), 0, NULL, "", 0);
+		result = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), tmpStruct) * 8, LLVMABIAlignmentOfType(_targetData.get(), tmpStruct) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
 	} else if (type->bitfield) {
 		result = translateTypeDebug(type->bitfield->underlyingBitfieldType.lock());
 	} else if (type->klass) {
@@ -2462,6 +2471,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileNode(std::shared_ptr<Alta
 		case AltaCore::AST::NodeType::YieldExpression: return compileYieldExpression(std::dynamic_pointer_cast<AltaCore::AST::YieldExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::YieldExpression>(info));
 		case AltaCore::AST::NodeType::AssertionStatement: return compileAssertionStatement(std::dynamic_pointer_cast<AltaCore::AST::AssertionStatement>(node), std::dynamic_pointer_cast<AltaCore::DH::AssertionStatement>(info));
 		case AltaCore::AST::NodeType::AwaitExpression: return compileAwaitExpression(std::dynamic_pointer_cast<AltaCore::AST::AwaitExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::AwaitExpression>(info));
+		case AltaCore::AST::NodeType::VoidExpression: return compileVoidExpression(std::dynamic_pointer_cast<AltaCore::AST::VoidExpression>(node), std::dynamic_pointer_cast<AltaCore::DH::VoidExpression>(info));
 	}
 
 	throw std::runtime_error("Impossible");
@@ -2516,7 +2526,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 	for (size_t i = 0; i < iterationCount; ++i) {
 		auto info = isGeneric ? mainInfo->genericInstantiations[i] : mainInfo;
 
-		auto retType = co_await translateType(info->function->returnType);
+		auto retType = co_await translateType(info->function->returnType, true, false);
 
 		auto genClass = info->function->isGenerator ? info->generator : (info->function->isAsync ? info->coroutine : nullptr);
 		auto llclass = genClass ? co_await defineClassType(genClass) : NULL;
@@ -3200,7 +3210,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			bool didCopy = false;
 			auto copy = co_await doCopyCtor(gep, valueGetter->returnType->reference(), std::make_pair(true, false), &didCopy);
 			if (!didCopy) {
-				copy = LLVMBuildLoad2(_builders.top().get(), co_await translateType(valueGetter->returnType), copy, "@output_val_load");
+				copy = LLVMBuildLoad2(_builders.top().get(), co_await translateType(valueGetter->returnType, true, false), copy, "@output_val_load");
 			}
 
 			co_await popStack();
@@ -3303,7 +3313,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 				LLVMConstInt(gepIndexType, 0, false), // first element in the "array"
 				LLVMConstInt(gepStructIndexType, 1, false), // @Coroutine@::suspendable_output
 			};
-			auto gep = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->parentFunction->returnType), currentSuspendableContext(), gepIndices.data(), gepIndices.size(), "@suspendable_output_ref");
+			auto gep = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->parentFunction->returnType, true, false), currentSuspendableContext(), gepIndices.data(), gepIndices.size(), "@suspendable_output_ref");
 			LLVMBuildStore(_builders.top().get(), expr, gep);
 		}
 
@@ -3314,7 +3324,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 			LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
 			LLVMConstInt(gepStructIndexType, 2, false), // _Alta_basic_suspendable::done
 		};
-		auto gep = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->parentFunction->returnType), currentSuspendableContext(), gepIndices.data(), gepIndices.size(), "@suspendable_done_ref");
+		auto gep = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->parentFunction->returnType, true, false), currentSuspendableContext(), gepIndices.data(), gepIndices.size(), "@suspendable_done_ref");
 		LLVMBuildStore(_builders.top().get(), LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 1, false), gep);
 	}
 
@@ -4815,7 +4825,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 	} else if (isFrom) {
 		llretType = llclassType;
 	} else if (isTo) {
-		llretType = co_await translateType(info->specialType->type);
+		llretType = co_await translateType(info->specialType->type, true, false);
 	} else {
 		throw std::runtime_error("impossible");
 	}
@@ -5467,7 +5477,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpress
 			retType = retType->reference();
 		}
 
-		auto llret = co_await translateType(retType);
+		auto llret = co_await translateType(retType, true, false);
 
 		for (const auto& param: info->constructor->parameterVariables) {
 			auto lltype = co_await translateType(param->type);
@@ -5931,7 +5941,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileRangedForLoopStatement(st
 			LLVMConstInt(gepStructIndexType, 1, false), // @Optional@::value
 		};
 
-		auto valGEP = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->next->returnType), tmpified, valGEPIndices.data(), valGEPIndices.size(), ("@ranged_for_iterator_val_" + tmpIdxStr).c_str());
+		auto valGEP = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->next->returnType, true, false), tmpified, valGEPIndices.data(), valGEPIndices.size(), ("@ranged_for_iterator_val_" + tmpIdxStr).c_str());
 		auto val = co_await cast(valGEP, info->next->returnType->optionalTarget->reference(true), info->next->returnType->optionalTarget, true, std::make_pair(true, false), false, &node->position);
 		auto valVar = co_await tmpify(val, info->next->returnType->optionalTarget, true, true);
 
@@ -6160,7 +6170,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBitfieldDefinitionNode(st
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::shared_ptr<AltaCore::AST::LambdaExpression> node, std::shared_ptr<AltaCore::DH::LambdaExpression> info) {
 	auto lllambdaType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(info.get()));
 
-	auto retType = co_await translateType(info->function->returnType);
+	auto retType = co_await translateType(info->function->returnType, true, false);
 
 	if (info->function->isGenerator || info->function->isAsync) {
 		throw std::runtime_error("TODO: generator lambdas");
@@ -6654,7 +6664,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileYieldExpression(std::shar
 			LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
 			LLVMConstInt(gepStructIndexType, 1, false), // @Suspendable@::suspendable_input
 		};
-		auto inputGEP = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->generator->returnType), currentSuspendableContext(), inputGEPIndices.data(), inputGEPIndices.size(), "@generator_input_ref");
+		auto inputGEP = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->generator->returnType, true, false), currentSuspendableContext(), inputGEPIndices.data(), inputGEPIndices.size(), "@generator_input_ref");
 
 		auto lloptionalParamType = co_await translateType(info->generator->generatorParameterType->makeOptional());
 
@@ -6707,7 +6717,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAwaitExpression(std::shar
 			LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
 			LLVMConstInt(gepStructIndexType, 1, false), // _Alta_basic_coroutine::waiting_for
 		};
-		auto waitingForGEP = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->coroutine->returnType), currentSuspendableContext(), waitingForGEPIndices.data(), waitingForGEPIndices.size(), ("@await_waiting_for_gep_" + tmpIdxStr).c_str());
+		auto waitingForGEP = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->coroutine->returnType, true, false), currentSuspendableContext(), waitingForGEPIndices.data(), waitingForGEPIndices.size(), ("@await_waiting_for_gep_" + tmpIdxStr).c_str());
 
 		// store a pointer to the coroutine we need to wait for within the `waiting_for` member
 		LLVMBuildStore(_builders.top().get(), instanceVal, waitingForGEP);
@@ -6758,7 +6768,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAwaitExpression(std::shar
 		LLVMPositionBuilderAtEnd(_builders.top().get(), continuation);
 
 		// the first thing we need to do is check if the coroutine we were waiting for is done
-		auto waitingForGEPAfterReturn = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->coroutine->returnType), currentSuspendableContext(), waitingForGEPIndices.data(), waitingForGEPIndices.size(), ("@await_waiting_for_gep_after_return_" + tmpIdxStr).c_str());
+		auto waitingForGEPAfterReturn = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->coroutine->returnType, true, false), currentSuspendableContext(), waitingForGEPIndices.data(), waitingForGEPIndices.size(), ("@await_waiting_for_gep_after_return_" + tmpIdxStr).c_str());
 		auto instanceAfterReturn = LLVMBuildLoad2(_builders.top().get(), LLVMPointerTypeInContext(_llcontext.get(), 0), waitingForGEPAfterReturn, ("@await_waiting_for_after_return_" + tmpIdxStr).c_str());
 		instanceAfterReturn = LLVMBuildPointerCast(_builders.top().get(), instanceAfterReturn, co_await translateType(instanceType), ("@await_instance_" + tmpIdxStr).c_str());
 
@@ -6804,7 +6814,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAwaitExpression(std::shar
 
 		bool returnsVal = *coClass->suspendableOutput != AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
 
-		waitingForGEPAfterReturn = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->coroutine->returnType), currentSuspendableContext(), waitingForGEPIndices.data(), waitingForGEPIndices.size(), ("@await_waiting_for_gep_after_return_" + tmpIdxStr).c_str());
+		waitingForGEPAfterReturn = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->coroutine->returnType, true, false), currentSuspendableContext(), waitingForGEPIndices.data(), waitingForGEPIndices.size(), ("@await_waiting_for_gep_after_return_" + tmpIdxStr).c_str());
 
 		if (returnsVal) {
 			instanceAfterReturn = LLVMBuildLoad2(_builders.top().get(), LLVMPointerTypeInContext(_llcontext.get(), 0), waitingForGEPAfterReturn, ("@await_waiting_for_after_return_" + tmpIdxStr).c_str());
@@ -6830,6 +6840,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAwaitExpression(std::shar
 
 	popDebugLocation();
 	co_return result;
+};
+
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVoidExpression(std::shared_ptr<AltaCore::AST::VoidExpression> node, std::shared_ptr<AltaCore::DH::VoidExpression> info) {
+	auto lltype = LLVMStructTypeInContext(_llcontext.get(), NULL, 0, false);
+	co_return LLVMConstNamedStruct(lltype, NULL, 0);
 };
 
 void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {

@@ -621,7 +621,7 @@ namespace AltaLL {
 			}
 		};
 
-		Coroutine<LLVMTypeRef> translateType(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions = true);
+		Coroutine<LLVMTypeRef> translateType(std::shared_ptr<AltaCore::DET::Type> type, bool usePointersToFunctions = true, bool useStructForVoid = true);
 
 		/**
 		 * whether it requires copying
@@ -744,7 +744,7 @@ namespace AltaLL {
 						(
 							exprType->isUnion() ||
 							(exprType->isOptional && *exprType->optionalTarget != AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) ||
-							exprType->klass->destructor
+							(exprType->klass && exprType->klass->destructor)
 						)
 					) ||
 					(
@@ -858,6 +858,7 @@ namespace AltaLL {
 		LLCoroutine compileYieldExpression(std::shared_ptr<AltaCore::AST::YieldExpression> node, std::shared_ptr<AltaCore::DH::YieldExpression> info);
 		LLCoroutine compileAssertionStatement(std::shared_ptr<AltaCore::AST::AssertionStatement> node, std::shared_ptr<AltaCore::DH::AssertionStatement> info);
 		LLCoroutine compileAwaitExpression(std::shared_ptr<AltaCore::AST::AwaitExpression> node, std::shared_ptr<AltaCore::DH::AwaitExpression> info);
+		LLCoroutine compileVoidExpression(std::shared_ptr<AltaCore::AST::VoidExpression> node, std::shared_ptr<AltaCore::DH::VoidExpression> info);
 
 	public:
 		Compiler(LLContext llcontext, LLModule llmod, LLTargetMachine targetMachine, LLTargetData targetData):
