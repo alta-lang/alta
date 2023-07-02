@@ -82,7 +82,12 @@ namespace AltaLL {
 					return {};
 				};
 				void unhandled_exception() {
-					std::terminate();
+					try {
+						throw;
+					} catch (AltaCore::Errors::ValidationError& e) {
+						validationErrorHandler(e);
+						std::exit(11);
+					}
 				};
 				void return_value(PromiseResult returnValue) {
 					value = returnValue;

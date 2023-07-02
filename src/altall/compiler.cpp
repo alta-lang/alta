@@ -47,6 +47,12 @@ ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> AltaLL::Compiler
 #define AC_GENERAL_ATTRIBUTE(...) AltaCore::Attributes::registerAttribute({ __VA_ARGS__ }, {}, AC_ATTRIBUTE_FUNC {
 #define AC_END_ATTRIBUTE }, modulePath.toString())
 
+static void dieOnError(AltaCore::Errors::ValidationError&) {
+	std::terminate();
+};
+
+AltaLL::ValidationErrorHandler AltaLL::validationErrorHandler = dieOnError;
+
 void AltaLL::registerAttributes(AltaCore::Filesystem::Path modulePath) {
 	AC_ATTRIBUTE(Parameter, "native", "vararg");
 		varargTable[target->id] = true;
@@ -3444,7 +3450,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 		popDebugLocation();
 		co_return _definedVariables["_Alta_array_length_" + targetInfo->narrowedTo->id];
 	} else if (info->narrowedTo) {
-		if (info->accessesNamespace) {
+		if (info->accessesNamespace || (info->narrowedTo->nodeType() == AltaCore::DET::NodeType::Function && !std::dynamic_pointer_cast<AltaCore::DET::Function>(info->narrowedTo)->isMethod)) {
 			result = _definedVariables[info->narrowedTo->id] ? _definedVariables[info->narrowedTo->id] : _definedFunctions[info->narrowedTo->id];
 
 			if (info->narrowedTo->nodeType() == AltaCore::DET::NodeType::Function) {
@@ -3513,7 +3519,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			result = co_await tmpify(node->target, info->target);
 		}
 	} else if (info->readAccessor) {
-		if (!info->accessesNamespace) {
+		if (!info->accessesNamespace && info->readAccessor->isMethod) {
 			result = co_await tmpify(node->target, info->target);
 		}
 	} else {
@@ -3607,7 +3613,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 
 		std::vector<LLVMValueRef> args;
 
-		if (!info->accessesNamespace) {
+		if (!info->accessesNamespace && info->readAccessor->isMethod) {
 			auto selfCopyInfo = additionalCopyInfo(node->target, info->target);
 			auto selfType = AltaCore::DET::Type::getUnderlyingType(info->target.get());
 

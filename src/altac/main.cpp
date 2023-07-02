@@ -867,12 +867,17 @@ int main(int argc, char** argv) {
       try {
         AltaCore::Validator::validate(root);
       } catch (AltaCore::Errors::ValidationError& e) {
-        std::cerr << CLI::COLOR_RED << "AST failed semantic validation" << CLI::COLOR_NORMAL << std::endl;
+        std::cerr << CLI::COLOR_RED << "Failed semantic validation" << CLI::COLOR_NORMAL << std::endl;
         logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
         return 11;
       }
 
       AltaCore::Filesystem::mkdirp(outDir); // ensure the output directory has been created
+
+      AltaLL::validationErrorHandler = [](AltaCore::Errors::ValidationError& e) {
+        std::cerr << CLI::COLOR_RED << "Failed to compile" << CLI::COLOR_NORMAL << std::endl;
+        logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));
+      };
 
       try {
         AltaLL::compile(root, outDir / target.name, buildForDebug);

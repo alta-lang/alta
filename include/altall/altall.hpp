@@ -7,6 +7,9 @@ namespace AltaLL {
 	bool init();
 	void finit();
 
+	typedef std::function<void(AltaCore::Errors::ValidationError&)> ValidationErrorHandler;
+	extern ValidationErrorHandler validationErrorHandler;
+
 	void registerAttributes(AltaCore::Filesystem::Path modulePath);
 
 	void compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Filesystem::Path binaryOutputPath, bool debug);
