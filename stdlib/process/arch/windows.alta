@@ -5,18 +5,21 @@ import Vector from "vector"
 import String from "string"
 import unsafeAllocate, unsafeFree, allocate, free from "memory"
 import Size from "types"
-import Exception from "exceptions"
 import Map from "map"
 
-export class PipeCreationFailure extends Exception {}
-export class StreamAttributeAssignmentFailure extends Exception {}
-export class ProcessCreationFailure extends Exception {}
-export class HandleDestructionFailure extends Exception {}
-export class WrongStreamType extends Exception {}
-export class StreamFlushFailure extends Exception {}
-export class ReadFailure extends Exception {}
-export class WriteFailure extends Exception {}
-export class InvalidHandle extends Exception {}
+export enum Error: int {
+  None = 0,
+  Unknown = 1,
+  PipeCreationFailure,
+  StreamAttributeAssignmentFailure,
+  ProcessCreationFailure,
+  HandleDestructionFailure,
+  WrongStreamType,
+  StreamFlushFailure,
+  ReadFailure,
+  WriteFailure,
+  InvalidHandle,
+}
 
 type LPWSTR = any
 type LPCWSTR = any
@@ -184,72 +187,74 @@ export class Stream {
   }
 
   private function ensureHandle(): void {
-    if this.handle == nullptr as HANDLE {
-      throw new InvalidHandle
-    }
+    assert this.handle != nullptr as HANDLE
   }
 
-  public function flush(): void {
+  public function flush(): Result<void, Error> {
     this.ensureHandle()
 
     if this.isRead {
-      throw new WrongStreamType
+      return new Result<void, Error>(error: Error.WrongStreamType)
     }
 
     if !FlushFileBuffers(this.handle) {
-      throw new StreamFlushFailure
+      return new Result<void, Error>(error: Error.StreamFlushFailure)
     }
+
+    return new Result<void, Error>(ok: void)
   }
 
-  public function bytesAvailable(): Size {
+  public function bytesAvailable(): Result<Size, Error> {
     this.ensureHandle()
 
     if !this.isRead {
-      throw new WrongStreamType
+      return new Result<Size, Error>(error: Error.WrongStreamType)
     }
 
     let bytesAvailable = 0 as DWORD
 
     if !PeekNamedPipe(this.handle, nullptr as LPVOID, 0, nullptr, &bytesAvailable, nullptr) {
-      throw new ReadFailure
+      return new Result<Size, Error>(error: Error.ReadFailure)
     }
 
-    return bytesAvailable as Size
+    return new Result<Size, Error>(ok: bytesAvailable as Size)
   }
 
-  public function read(count: Size): String {
+  public function read(count: Size): Result<String, Error> {
     this.ensureHandle()
 
     if !this.isRead {
-      throw new WrongStreamType
+      return new Result<String, Error>(error: Error.WrongStreamType)
     }
 
     let buffer = allocate<byte>(count)
     let bytesRead = 0 as DWORD
 
     if !ReadFile(this.handle, buffer as LPVOID, count as DWORD, &bytesRead, nullptr) {
-      throw new ReadFailure
+      return new Result<String, Error>(error: Error.ReadFailure)
     }
 
     let str = new String(buffer, bytesRead as Size)
 
     free<byte>(buffer)
 
-    return str
+    return new Result<String, Error>(ok: str)
   }
 
-  public function write(input: String): void {
+  public function write(input: String): Result<void, Error> {
     this.ensureHandle()
 
     if this.isRead {
-      throw new WrongStreamType
+      return new Result<void, Error>(error: Error.WrongStreamType)
     }
 
     let bytesWritten = 0 as DWORD
 
     if !WriteFile(this.handle, input.data as LPVOID, input.length as DWORD, &bytesWritten, nullptr) {
-      throw new WriteFailure
+      return new Result<void, Error>(error: Error.WriteFailure)
     }
+
+    return new Result<void, Error>(ok: void)
   }
 
   public function close(): void {
@@ -259,33 +264,37 @@ export class Stream {
 
     if streamTable.get(this.handle as ptr void) == 0 {
       if !CloseHandle(this.handle) {
-        throw new HandleDestructionFailure
+        # TODO: what should we do if we fail to close a handle?
       }
 
       if this.uselessHandle {
         if !CloseHandle(this.uselessHandle) {
-          throw new HandleDestructionFailure
+          # TODO: same as above
         }
       }
     }
   }
 }
 
-function createPipe(read: ref HANDLE, write: ref HANDLE): void {
+function createPipe(read: ref HANDLE, write: ref HANDLE): Result<void, Error> {
   let securityAttrs = new SECURITY_ATTRIBUTES
   securityAttrs.nLength = sizeof SECURITY_ATTRIBUTES
   securityAttrs.bInheritHandle = true as BOOL
   securityAttrs.lpSecurityDescriptor = nullptr as LPVOID
 
   if !CreatePipe(&read, &write, &securityAttrs, 0 as DWORD) {
-    throw new PipeCreationFailure
+    return new Result<void, Error>(error: Error.PipeCreationFailure)
   }
+
+  return new Result<void, Error>(ok: void)
 }
 
-function makeUninheritable(stream: ref HANDLE): void {
+function makeUninheritable(stream: ref HANDLE): Result<void, Error> {
   if !SetHandleInformation(stream, HANDLE_FLAG_INHERIT, 0 as DWORD) {
-    throw new StreamAttributeAssignmentFailure
+    return new Result<void, Error>(error: Error.StreamAttributeAssignmentFailure)
   }
+
+  return new Result<void, Error>(ok: void)
 }
 
 function escapeForCommandLine(arg: String): String {
@@ -349,10 +358,10 @@ export class Process {
 
     if processTable.get(this.processInformation.hProcess as ptr void) == 0 {
       if !CloseHandle(this.processInformation.hProcess) {
-        throw new HandleDestructionFailure
+        # TODO: what should we do if handle destruction fails?
       }
       if !CloseHandle(this.processInformation.hThread) {
-        throw new HandleDestructionFailure
+        # TODO: same as above
       }
     }
   }
@@ -372,7 +381,7 @@ export class Process {
   }
 }
 
-export function spawn(programPath: String, args: Vector<String>): Process {
+export function spawn(programPath: String, args: Vector<String>): Result<Process, Error> {
   let stdinRead = nullptr as HANDLE
   let stdinWrite = nullptr as HANDLE
 
@@ -382,13 +391,25 @@ export function spawn(programPath: String, args: Vector<String>): Process {
   let stderrRead = nullptr as HANDLE
   let stderrWrite = nullptr as HANDLE
 
-  createPipe(stdinRead, stdinWrite)
-  createPipe(stdoutRead, stdoutWrite)
-  createPipe(stderrRead, stderrWrite)
+  if (let res = createPipe(stdinRead, stdinWrite)).isError {
+    return res.morphError<Process>()
+  }
+  if (let res = createPipe(stdoutRead, stdoutWrite)).isError {
+    return res.morphError<Process>()
+  }
+  if (let res = createPipe(stderrRead, stderrWrite)).isError {
+    return res.morphError<Process>()
+  }
 
-  makeUninheritable(stdinWrite)
-  makeUninheritable(stdoutRead)
-  makeUninheritable(stderrRead)
+  if (let res = makeUninheritable(stdinWrite)).isError) {
+    return res.morphError<Process>()
+  }
+  if (let res = makeUninheritable(stdoutRead)).isError) {
+    return res.morphError<Process>()
+  }
+  if (let res = makeUninheritable(stderrRead)).isError) {
+    return res.morphError<Process>()
+  }
 
   let cmdline = new String
 
@@ -409,8 +430,8 @@ export function spawn(programPath: String, args: Vector<String>): Process {
   startInfo.dwFlags |= STARTF_USESTDHANDLES
 
   if !CreateProcessA(programPath.data as LPCSTR, cmdline.data as LPSTR, nullptr, nullptr, true as BOOL, 0 as DWORD, nullptr, nullptr, &startInfo, &procInfo) {
-    throw new ProcessCreationFailure
+    return new Result<Process, Error>(error: Error.ProcessCreationFailure)
   }
 
-  return new Process(procInfo, new Stream(stdinRead, stdinWrite, false), new Stream(stdoutRead, stdoutWrite, true), new Stream(stderrRead, stderrWrite, true))
+  return new Result<Process, Error>(ok: new Process(procInfo, new Stream(stdinRead, stdinWrite, false), new Stream(stdoutRead, stdoutWrite, true), new Stream(stderrRead, stderrWrite, true)))
 }

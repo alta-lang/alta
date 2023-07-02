@@ -1,20 +1,23 @@
 import Size, rawstring from "types"
 import String from "string"
 import allocate from "memory"
-import Exception from "exceptions"
 import Vector from "vector"
 import Map from "map"
 import ssize_t from "posix/decl/sys/types"
 import FIONREAD from "posix/decl/sys/ioctl"
 
-export class PipeCreationFailure extends Exception {}
-export class ProcessCreationFailure extends Exception {}
-export class InvalidHandle extends Exception {}
-export class WrongStreamType extends Exception {}
-export class IOCTLFailure extends Exception {}
-export class ReadFailure extends Exception {}
-export class WriteFailure extends Exception {}
-export class HandleDestructionFailure extends Exception {}
+export enum Error: int {
+  None = 0,
+  Unknown = 1,
+  PipeCreationFailure,
+  ProcessCreationFailure,
+  InvalidHandle,
+  WrongStreamType,
+  IOCTLFailure,
+  ReadFailure,
+  WriteFailure,
+  HandleDestructionFailure,
+}
 
 type pid_t = int
 
@@ -158,58 +161,66 @@ export class Stream {
   }
 
   private function ensureHandle(): void {
-    if this.handle == -1 {
-      throw new InvalidHandle
-    }
+    assert this.handle != -1
   }
 
-  private function ensureRead(): void {
+  private function ensureRead(): Result<void, Error> {
     if !this.isRead {
-      throw new WrongStreamType
+      return new Result<void, Error>(error: Error.WrongStreamType)
     }
+    return new Result<void, Error>(ok: void)
   }
-  private function ensureWrite(): void {
+  private function ensureWrite(): ProcessResult<void> {
     if this.isRead {
-      throw new WrongStreamType
+      return new Result<void, Error>(error: Error.WrongStreamType)
     }
+    return new Result<void, Error>(ok: void)
   }
 
-  public function flush(): void {
+  public function flush(): Result<void, Error> {
     this.ensureHandle()
-    this.ensureWrite()
+    return this.ensureWrite()
   }
-  public function bytesAvailable(): Size {
+  public function bytesAvailable(): Result<Size, Error> {
     this.ensureHandle()
-    this.ensureRead()
+    if (let res = this.ensureRead()).isError {
+      return res.morphError<Size>()
+    }
 
     let bytes: int = 0
 
     if ioctl(this.handle, FIONREAD, &bytes)
-      throw new IOCTLFailure
+      return new Result<Size, Error>(error: Error.IOCTLFailure)
 
-    return bytes
+    return new Result<Size, Error>(ok: bytes)
   }
-  public function read(count: Size): String {
+  public function read(count: Size): Result<String, Error> {
     this.ensureHandle()
-    this.ensureRead()
+    if (let res = this.ensureRead()).isError {
+      return res.morphError<String>()
+    }
 
     let buffer = new Vector<byte>(count)
 
     let bytesRead = posixRead(this.handle, buffer.data as ptr void, count)
 
     if bytesRead < 0
-      throw new ReadFailure
+      return new Result<String, Error>(error: Error.ReadFailure)
 
-    return new String(buffer.data, bytesRead)
+    return new Result<String, Error>(ok: new String(buffer.data, bytesRead))
   }
-  public function write(input: String): void {
+  public function write(input: String): Result<void, Error> {
     this.ensureHandle()
-    this.ensureWrite()
+    if (let res = this.ensureWrite()).isError {
+      return res
+    }
 
     let bytesWritten = posixWrite(this.handle, input.data as ptr void, input.length)
 
     if bytesWritten < 0
-      throw new WriteFailure
+      return new Result<void, Error>(error: Error.WriteFailure)
+
+    return new Result<void, Error>(ok: void)
   }
   public function close(): void {
     this.ensureHandle()
@@ -218,7 +229,7 @@ export class Stream {
 
     if streamTable.get(this.handle) == 0 {
       if posixClose(this.handle) {
-        throw new HandleDestructionFailure
+        # TODO: what should we do when we fail to close the handle?
       }
     }
   }
@@ -252,14 +263,14 @@ export class Process {
   }
 }
 
-export function spawn(programPath: String, args: Vector<String>): Process {
+export function spawn(programPath: String, args: Vector<String>): Result<Process, Error> {
   let inPipe = new Vector<int>(2)
   let outPipe = new Vector<int>(2)
   let errPipe = new Vector<int>(2)
   let spawnActions: posix_spawn_file_actions_t
 
   if pipe(inPipe.data) || pipe(outPipe.data) || pipe(errPipe.data)
-    throw new PipeCreationFailure
+    return new Result<Process, Error>(error: Error.PipeCreationFailure)
 
   posix_spawn_file_actions_init(&spawnActions)
 
@@ -295,12 +306,12 @@ export function spawn(programPath: String, args: Vector<String>): Process {
   let pid: pid_t
 
   if posix_spawn(&pid, programPath.data, &spawnActions, nullptr, argArray.data, envArray.data)
-    throw new ProcessCreationFailure
+    return new Result<Process, Error>(error: Error.ProcessCreationFailure)
 
   # close child-facing pipe ends
   close(inPipe.data[0])
   close(outPipe.data[1])
   close(errPipe.data[1])
 
-  return new Process(pid, new Stream(inPipe.data[1], false), new Stream(outPipe.data[0], true), new Stream(errPipe.data[0], true))
+  return new Result<Process, Error>(ok: new Process(pid, new Stream(inPipe.data[1], false), new Stream(outPipe.data[0], true), new Stream(errPipe.data[0], true)))
 }
