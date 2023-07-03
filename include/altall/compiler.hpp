@@ -822,6 +822,8 @@ namespace AltaLL {
 		void buildSuspendableReload(LLBuilder builder, LLVMValueRef suspendableContext);
 		void buildSuspendableReloadContinue(LLBuilder builder, LLVMValueRef suspendableContext);
 		LLVMValueRef buildGetChild(LLBuilder builder, LLVMValueRef instance, const std::vector<std::string>& parentContainerPath);
+		void buildBadCast(LLBuilder builder, const std::string& from, const std::string& to);
+		void buildBadEnum(LLBuilder builder, const std::string& enumType, LLVMValueRef badEnumValue);
 
 		void updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset);
 		void updateSuspendablePushStack(LLVMValueRef push, size_t stackSize);

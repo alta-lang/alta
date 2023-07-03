@@ -913,18 +913,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 				copy = false;
 			}
 
-			auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
-			std::array<LLVMTypeRef, 2> params {
-				strType,
-				strType,
-			};
-			auto funcType_Alta_bad_cast = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), params.data(), params.size(), false);
-
-			if (!_definedFunctions["_Alta_bad_cast"]) {
-				_definedFunctions["_Alta_bad_cast"] = LLVMAddFunction(_llmod.get(), "_Alta_bad_cast", funcType_Alta_bad_cast);
-			}
-
-			auto func_Alta_bad_cast = _definedFunctions["_Alta_bad_cast"];
 			auto entryBlock = LLVMGetInsertBlock(_builders.top().get());
 			auto parentFunc = LLVMGetBasicBlockParent(entryBlock);
 
@@ -933,14 +921,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 
 			// now move the builder to the bad cast block and build it
 			LLVMPositionBuilderAtEnd(_builders.top().get(), badCastBlock);
-			auto currStr = currentType->toString();
-			auto destStr = component.target->toString();
-			std::array<LLVMValueRef, 2> args {
-				LLVMBuildGlobalStringPtr(_builders.top().get(), currStr.c_str(), ""),
-				LLVMBuildGlobalStringPtr(_builders.top().get(), destStr.c_str(), ""),
-			};
-			LLVMBuildCall2(_builders.top().get(), funcType_Alta_bad_cast, func_Alta_bad_cast, args.data(), args.size(), "");
-			LLVMBuildUnreachable(_builders.top().get());
+			buildBadCast(_builders.top(), currentType->toString(), component.target->toString());
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), entryBlock);
 
@@ -1915,18 +1896,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef 
 	auto tmpIdxStr = std::to_string(tmpIdx);
 
 	auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
-	auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
-	std::array<LLVMTypeRef, 2> params {
-		strType,
-		i64Type,
-	};
-	auto funcType_Alta_bad_enum = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), params.data(), params.size(), false);
 
-	if (!_definedFunctions["_Alta_bad_enum"]) {
-		_definedFunctions["_Alta_bad_enum"] = LLVMAddFunction(_llmod.get(), "_Alta_bad_enum", funcType_Alta_bad_enum);
-	}
-
-	auto func_Alta_bad_enum = _definedFunctions["_Alta_bad_enum"];
 	auto parentFunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
 	std::vector<LLVMBasicBlockRef> phiBlocks;
 	std::vector<LLVMValueRef> phiVals;
@@ -1943,13 +1913,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef 
 
 	// now move the builder to the bad enum block and build it
 	LLVMPositionBuilderAtEnd(_builders.top().get(), badEnumBlock);
-	auto exprStr = type->toString();
-	std::array<LLVMValueRef, 2> args {
-		LLVMBuildGlobalStringPtr(_builders.top().get(), exprStr.c_str(), ""),
-		LLVMBuildIntCast2(_builders.top().get(), val, i64Type, false, ""),
-	};
-	LLVMBuildCall2(_builders.top().get(), funcType_Alta_bad_enum, func_Alta_bad_enum, args.data(), args.size(), "");
-	LLVMBuildUnreachable(_builders.top().get());
+	buildBadEnum(_builders.top(), type->toString(), val);
 
 	// now create the block we go to after we're done here
 	auto doneBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), parentFunc, ("@foreach_union_member_" + tmpIdxStr + "_done").c_str());
@@ -2347,6 +2311,21 @@ std::pair<LLVMValueRef, LLVMTypeRef> AltaLL::Compiler::defineRuntimeFunction(con
 			stringPtrType,
 		};
 		llfuncType = LLVMFunctionType(voidPointerType, params.data(), params.size(), false);
+	} else if (name == "_Alta_bad_cast") {
+		auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+		std::array<LLVMTypeRef, 2> params {
+			strType,
+			strType,
+		};
+		llfuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), params.data(), params.size(), false);
+	} else if (name == "_Alta_bad_enum") {
+		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
+		auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+		std::array<LLVMTypeRef, 2> params {
+			strType,
+			i64Type,
+		};
+		llfuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), params.data(), params.size(), false);
 	} else {
 		throw std::runtime_error("Unknown runtime function: " + name);
 	}
@@ -2431,6 +2410,26 @@ LLVMValueRef AltaLL::Compiler::buildGetChild(LLBuilder builder, LLVMValueRef ins
 		containerPathArray,
 	};
 	return LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+};
+
+void AltaLL::Compiler::buildBadCast(LLBuilder builder, const std::string& from, const std::string& to) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_bad_cast");
+	std::array<LLVMValueRef, 2> args {
+		LLVMBuildGlobalStringPtr(builder.get(), from.c_str(), ""),
+		LLVMBuildGlobalStringPtr(builder.get(), to.c_str(), ""),
+	};
+	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+	LLVMBuildUnreachable(builder.get());
+};
+
+void AltaLL::Compiler::buildBadEnum(LLBuilder builder, const std::string& enumType, LLVMValueRef badEnumValue) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_bad_enum");
+	std::array<LLVMValueRef, 2> args {
+		LLVMBuildGlobalStringPtr(builder.get(), enumType.c_str(), ""),
+		LLVMBuildIntCast2(builder.get(), badEnumValue, LLVMInt64TypeInContext(_llcontext.get()), false, ""),
+	};
+	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+	LLVMBuildUnreachable(builder.get());
 };
 
 void AltaLL::Compiler::updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset) {
@@ -7304,55 +7303,6 @@ void AltaLL::Compiler::finalize() {
 
 		_initFunctionBuilder = nullptr;
 		_initFunctionScopeStack = ALTACORE_NULLOPT;
-	}
-
-	auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
-	auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
-
-	if (_definedFunctions["_Alta_bad_enum"]) {
-		auto llfunc = _definedFunctions["_Alta_bad_enum"];
-
-		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
-		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
-		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
-
-		_builders.push(builder);
-
-		auto enumName = LLVMGetParam(llfunc, 0);
-		auto enumIndex = LLVMGetParam(llfunc, 1);
-
-		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
-		if (!_definedFunctions["abort"]) {
-			_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
-		}
-
-		LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
-		LLVMBuildUnreachable(_builders.top().get());
-
-		_builders.pop();
-	}
-
-	if (_definedFunctions["_Alta_bad_cast"]) {
-		auto llfunc = _definedFunctions["_Alta_bad_cast"];
-
-		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "");
-		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
-		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
-
-		_builders.push(builder);
-
-		auto enumName = LLVMGetParam(llfunc, 0);
-		auto enumIndex = LLVMGetParam(llfunc, 1);
-
-		auto abortFuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
-		if (!_definedFunctions["abort"]) {
-			_definedFunctions["abort"] = LLVMAddFunction(_llmod.get(), "abort", abortFuncType);
-		}
-
-		LLVMBuildCall2(_builders.top().get(), abortFuncType, _definedFunctions["abort"], nullptr, 0, "");
-		LLVMBuildUnreachable(_builders.top().get());
-
-		_builders.pop();
 	}
 
 	LLVMDIBuilderFinalize(_debugBuilder.get());

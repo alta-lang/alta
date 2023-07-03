@@ -2,6 +2,15 @@ import rawconststring, uint64 from "types"
 import "meta/lib/runtime/native" as native
 import unsafeAllocate, unsafeFree from "memory"
 import rawstringsEqual from "string"
+import abort from "libc/lib/stdlib"
+
+export literal function _Alta_bad_cast(fromTypeName: rawconststring, toTypeName: rawconststring): void {
+	abort()
+}
+
+export literal function _Alta_bad_enum(enumTypeName: rawconststring, badEnumValue: uint64): void {
+	abort()
+}
 
 function _Alta_get_base(inst: ptr native._Alta_basic_class): ptr native._Alta_basic_class {
 	return ((inst as ptr byte) - inst.instance_info.class_info.offset_from_base) as ptr native._Alta_basic_class
