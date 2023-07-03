@@ -2326,6 +2326,15 @@ std::pair<LLVMValueRef, LLVMTypeRef> AltaLL::Compiler::defineRuntimeFunction(con
 			i64Type,
 		};
 		llfuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), params.data(), params.size(), false);
+	} else if (name == "_Alta_virtual_lookup") {
+		auto voidType = LLVMStructTypeInContext(_llcontext.get(), NULL, 0, false);
+		auto voidPointerType = LLVMPointerType(voidType, 0);
+		auto stringType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+		std::array<LLVMTypeRef, 2> params {
+			voidPointerType,
+			stringType,
+		};
+		llfuncType = LLVMFunctionType(voidPointerType, params.data(), params.size(), false);
 	} else {
 		throw std::runtime_error("Unknown runtime function: " + name);
 	}
@@ -2430,6 +2439,16 @@ void AltaLL::Compiler::buildBadEnum(LLBuilder builder, const std::string& enumTy
 	};
 	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
 	LLVMBuildUnreachable(builder.get());
+};
+
+LLVMValueRef AltaLL::Compiler::buildVirtualLookup(LLBuilder builder, LLVMValueRef instance, const std::string& methodName) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_virtual_lookup");
+	auto llvoidPtrType = LLVMPointerType(LLVMStructTypeInContext(_llcontext.get(), NULL, 0, false), 0);
+	std::array<LLVMValueRef, 2> args {
+		LLVMBuildPointerCast(builder.get(), instance, llvoidPtrType, ""),
+		LLVMBuildGlobalStringPtr(builder.get(), methodName.c_str(), ""),
+	};
+	return LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
 };
 
 void AltaLL::Compiler::updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset) {
