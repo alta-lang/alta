@@ -14,7 +14,7 @@ export struct _Alta_class_info {
 }
 
 export struct _Alta_instance_info {
-  class_info: ptr _Alta_class_info;
+  class_info: ptr const _Alta_class_info;
 }
 
 export struct _Alta_basic_class {
