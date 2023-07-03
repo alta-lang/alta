@@ -365,6 +365,8 @@ AltaLL::Compiler::ScopeStack::ScopeStack(Compiler& _compiler, Type _type):
 	suspendableClass = compiler._suspendableClass.top();
 	LLVMPositionBuilderAtEnd(suspendableReloadBuilder.get(), suspendableReloadBlock);
 
+	compiler.setBuilderDebugLocation(suspendableReloadBuilder, 0, 0);
+
 	compiler.buildSuspendableReloadContinue(suspendableReloadBuilder, suspendableContext);
 
 	LLVMBuildBr(compiler._builders.top().get(), suspendableReloadBlock);
@@ -398,6 +400,8 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::popping() {
 	}
 
 	auto builder = llwrap(LLVMCreateBuilderInContext(compiler._llcontext.get()));
+
+	compiler.setBuilderDebugLocation(builder, 0, 0);
 
 	compiler.updateSuspendablePushStack(suspendableStackPush, totalStackSize);
 
@@ -1499,7 +1503,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doParentRetrieval(LLVMValueRef e
 			for (size_t i = idxs.top(); i < parents.size(); i++) {
 				auto& parent = parents[i];
 				parentAccessors.push_back(parent);
-				gepIndices.push_back(LLVMConstInt(gepStructIndexType, i, false));
+				gepIndices.push_back(LLVMConstInt(gepStructIndexType, i + 1, false));
 				if (parent->id == targetType->klass->id) {
 					done = true;
 					break;
@@ -1595,28 +1599,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doChildRetrieval(LLVMValueRef ex
 			}
 		}
 
-		auto voidPointerType = LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0);
-		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
-		std::array<LLVMTypeRef, 2> funcParams_Alta_get_child { voidPointerType, i64Type };
-		auto funcType_Alta_get_child = LLVMFunctionType(voidPointerType, funcParams_Alta_get_child.data(), funcParams_Alta_get_child.size(), true);
+		// remove the last component (that's the current parent)
+		parentAccessors.pop_back();
 
-		if (!_definedFunctions["_Alta_get_child"]) {
-			_definedFunctions["_Alta_get_child"] = LLVMAddFunction(_llmod.get(), "_Alta_get_child", funcType_Alta_get_child);
+		// reverse the components so that the first component is the first class we need to expand up through
+		std::reverse(parentAccessors.begin(), parentAccessors.end());
+
+		std::vector<std::string> names;
+		for (const auto& parentAccessor: parentAccessors) {
+			names.push_back(mangleName(parentAccessor));
 		}
 
-		auto func_Alta_get_child = _definedFunctions["_Alta_get_child"];
-
-		std::vector<LLVMValueRef> args {
-			LLVMBuildPointerCast(_builders.top().get(), result, voidPointerType, ("@downcast_" + tmpIdxStr + "_src_ref").c_str()),
-			LLVMConstInt(i64Type, parentAccessors.size() - 1, false)
-		};
-
-		for (size_t i = parentAccessors.size() - 1; i > 0; i--) {
-			auto mangled = mangleName(parentAccessors[i - 1]);
-			args.push_back(LLVMConstStringInContext(_llcontext.get(), mangled.c_str(), mangled.size(), false));
-		}
-
-		result = LLVMBuildCall2(_builders.top().get(), funcType_Alta_get_child, func_Alta_get_child, args.data(), args.size(), ("@downcast_" + tmpIdxStr + "_ref").c_str());
+		result = buildGetChild(_builders.top(), result, names);
+		LLVMSetValueName(result, ("@downcast_" + tmpIdxStr + "_ref").c_str());
 
 		if (didRetrieval != nullptr) {
 			*didRetrieval = true;
@@ -2340,6 +2335,18 @@ std::pair<LLVMValueRef, LLVMTypeRef> AltaLL::Compiler::defineRuntimeFunction(con
 			LLVMInt64TypeInContext(_llcontext.get()),
 		};
 		llfuncType = LLVMFunctionType(voidPointerType, params.data(), params.size(), false);
+	} else if (name == "_Alta_get_child") {
+		auto voidType = LLVMStructTypeInContext(_llcontext.get(), NULL, 0, false);
+		auto voidPointerType = LLVMPointerType(voidType, 0);
+		auto stringType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+		auto stringPtrType = LLVMPointerType(stringType, 0);
+		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
+		std::array<LLVMTypeRef, 3> params {
+			voidPointerType,
+			i64Type,
+			stringPtrType,
+		};
+		llfuncType = LLVMFunctionType(voidPointerType, params.data(), params.size(), false);
 	} else {
 		throw std::runtime_error("Unknown runtime function: " + name);
 	}
@@ -2397,6 +2404,33 @@ void AltaLL::Compiler::buildSuspendableReloadContinue(LLBuilder builder, LLVMVal
 		LLVMBuildPointerCast(builder.get(), suspendableContext, LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0), ""),
 	};
 	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+};
+
+LLVMValueRef AltaLL::Compiler::buildGetChild(LLBuilder builder, LLVMValueRef instance, const std::vector<std::string>& parentContainerPath) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_get_child");
+	auto llvoidPtrType = LLVMPointerType(LLVMStructTypeInContext(_llcontext.get(), NULL, 0, false), 0);
+
+	auto stringType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+	auto arrayType = LLVMArrayType(stringType, parentContainerPath.size());
+	auto containerPathArray = LLVMAddGlobal(_llmod.get(), arrayType, "");
+	LLVMSetLinkage(containerPathArray, LLVMInternalLinkage);
+
+	std::vector<LLVMValueRef> strings;
+
+	for (const auto& component: parentContainerPath) {
+		strings.push_back(LLVMBuildGlobalStringPtr(builder.get(), component.c_str(), ""));
+	}
+
+	auto init = LLVMConstArray(stringType, strings.data(), strings.size());
+	LLVMSetInitializer(containerPathArray, init);
+	LLVMSetGlobalConstant(containerPathArray, true);
+
+	std::array<LLVMValueRef, 3> args {
+		LLVMBuildPointerCast(builder.get(), instance, llvoidPtrType, ""),
+		LLVMConstInt(LLVMInt64TypeInContext(_llcontext.get()), parentContainerPath.size(), false),
+		containerPathArray,
+	};
+	return LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
 };
 
 void AltaLL::Compiler::updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset) {
@@ -2597,6 +2631,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			};
 
 			LLVMSetInitializer(globalClassInfo, LLVMConstNamedStruct(_definedTypes["_Alta_class_info"], members.data(), members.size()));
+			LLVMSetGlobalConstant(globalClassInfo, true);
 
 			suspendableContext = LLVMBuildAlloca(_builders.top().get(), llclass, "@suspendable");
 			auto initVal = LLVMConstNull(llclass);
@@ -3403,6 +3438,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 			co_await popStack();
 			if (LLVMIsConstant(casted)) {
 				LLVMSetInitializer(memory, casted);
+				if (!(*info->variable->type == *info->variable->type->deconstify())) {
+					LLVMSetGlobalConstant(memory, true);
+				}
 			} else {
 				LLVMSetInitializer(memory, LLVMGetUndef(lltype));
 				LLVMBuildStore(_builders.top().get(), casted, memory);
@@ -3428,6 +3466,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 		auto null = LLVMConstNull(lltype);
 		if (inModuleRoot) {
 			LLVMSetInitializer(memory, null);
+			if (!(*info->variable->type == *info->variable->type->deconstify())) {
+				LLVMSetGlobalConstant(memory, true);
+			}
 		} else {
 			LLVMBuildStore(_builders.top().get(), null, memory);
 		}
@@ -3534,7 +3575,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 		};
 
 		for (const auto& [parent, index]: parents) {
-			gepIndices.push_back(LLVMConstInt(gepStructIndexType, index, false));
+			gepIndices.push_back(LLVMConstInt(gepStructIndexType, index + 1, false));
 		}
 
 		auto parentType = std::make_shared<AltaCore::DET::Type>(varClass)->reference();
@@ -4626,6 +4667,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 			}
 
 			LLVMSetInitializer(infoVar, LLVMConstNamedStruct(_definedTypes["_Alta_class_info"], members.data(), members.size()));
+			LLVMSetGlobalConstant(infoVar, true);
 
 			auto gepIndexType = i64Type;
 			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
@@ -5398,6 +5440,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpress
 		auto llparentClassType = co_await defineClassType(parentClass);
 
 		auto llparent = LLVMBuildGEP2(_builders.top().get(), llclassType, llself, gepIndices.data(), gepIndices.size(), ("@superclass_ptr_" + tmpIdxStr).c_str());
+		args[0] = llparent;
 
 		std::vector<LLVMTypeRef> ctorParams;
 		ctorParams.push_back(co_await translateType(info->constructor->parentClassType));
@@ -6596,6 +6639,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode
 		}
 
 		LLVMSetInitializer(_definedVariables[memberVar->id], llval);
+		LLVMSetGlobalConstant(_definedVariables[memberVar->id], true);
 
 		debugMembers.push_back(LLVMDIBuilderCreateEnumerator(_debugBuilder.get(), key.c_str(), key.size(), memberVar->type->isSigned() ? LLVMConstIntGetSExtValue(llval) : (int64_t)LLVMConstIntGetZExtValue(llval), !memberVar->type->isSigned()));
 

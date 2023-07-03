@@ -619,6 +619,25 @@ namespace AltaLL {
 			return pushCustomDebugLocation(position.line, position.column, scope);
 		};
 
+		inline void setBuilderDebugLocation(LLBuilder builder, size_t line, size_t column) {
+			LLVMMetadataRef debugScope = _unknownDebugFile;
+			if (_debugLocations.size() > 0) {
+				auto& loc = _debugLocations.top();
+				if (loc) {
+					auto maybeScope = LLVMDILocationGetScope(loc);
+					if (maybeScope) {
+						debugScope = maybeScope;
+					}
+				}
+			}
+			if (llvm::isa<llvm::DILocalScope>(reinterpret_cast<llvm::DIScope*>(debugScope))) {
+				auto loc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), line, column, debugScope, NULL);
+				LLVMSetCurrentDebugLocation2(builder.get(), loc);
+			} else {
+				LLVMSetCurrentDebugLocation2(builder.get(), NULL);
+			}
+		};
+
 		inline void popDebugLocation() {
 			_debugLocations.pop();
 			if (!_debugLocations.empty()) {
@@ -802,6 +821,7 @@ namespace AltaLL {
 		LLVMValueRef buildSuspendableAlloca(LLBuilder builder, LLVMValueRef suspendableContext);
 		void buildSuspendableReload(LLBuilder builder, LLVMValueRef suspendableContext);
 		void buildSuspendableReloadContinue(LLBuilder builder, LLVMValueRef suspendableContext);
+		LLVMValueRef buildGetChild(LLBuilder builder, LLVMValueRef instance, const std::vector<std::string>& parentContainerPath);
 
 		void updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset);
 		void updateSuspendablePushStack(LLVMValueRef push, size_t stackSize);
