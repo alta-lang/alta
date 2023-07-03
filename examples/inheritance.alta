@@ -1,0 +1,45 @@
+import printLine from "io"
+
+class Grandparent {
+	protected var foo: int = 3
+
+	public function hello(): void {
+		printLine("Hello, I'm the grandparent! Foo = ", this.foo)
+	}
+}
+
+class Parent extends Grandparent {
+	public constructor() {
+		super()
+		this.foo = 5
+	}
+	public function hello(): void {
+		printLine("Hello, I'm the parent! Foo = ", this.foo)
+	}
+}
+
+class Child extends Parent {
+	public constructor() {
+		super()
+		this.foo = 7
+	}
+	public function hello(): void {
+		printLine("Hello, I'm the child! Foo = ", this.foo)
+	}
+}
+
+literal function main(argc: int, argv: ptr ptr byte): int {
+	let instance = new Child
+	let asChild: ref Child = instance
+	let asParent: ref Parent = instance
+	let asGrandparent: ref Grandparent = instance
+
+	asChild.hello()
+	asParent.hello()
+	asGrandparent.hello()
+
+	let downcast = asGrandparent as ref Child
+	downcast.hello()
+
+	return 0
+}

@@ -31,3 +31,6 @@ targets:
 - name: generator-test
   main: generator-test.alta
   type: exe
+- name: inheritance
+  main: inheritance.alta
+  type: exe
