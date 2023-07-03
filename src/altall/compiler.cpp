@@ -6085,8 +6085,27 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileStructureDefinitionStatem
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDeclarationStatement(std::shared_ptr<AltaCore::AST::VariableDeclarationStatement> node, std::shared_ptr<AltaCore::DH::VariableDeclarationStatement> info) {
-	// TODO
-	std::cerr << "TODO: VariableDeclarationStatement" << std::endl;
+	bool inModuleRoot = !info->variable->parentScope.expired() && !info->variable->parentScope.lock()->parentModule.expired();
+	auto lltype = co_await translateType(info->variable->type);
+	auto mangled = mangleName(info->variable);
+	LLVMValueRef memory = NULL;
+
+	if (!(inModuleRoot && info->variable->isLiteral)) {
+		throw AltaCore::Errors::ValidationError("Variable declarations are only support for global variables", node->position);
+	}
+
+	if (!_definedVariables[info->variable->id]) {
+		memory = LLVMAddGlobal(_llmod.get(), lltype, mangled.c_str());
+		LLVMSetLinkage(memory, LLVMExternalLinkage);
+
+		_definedVariables[info->variable->id] = memory;
+	} else {
+		memory = _definedVariables[info->variable->id];
+	}
+
+	auto gve = LLVMDIBuilderCreateGlobalVariableExpression(_debugBuilder.get(), translateParentScope(info->variable), info->variable->name.c_str(), info->variable->name.size(), mangled.c_str(), mangled.size(), debugFileForScopeItem(info->variable), node->position.line, translateTypeDebug(info->variable->type), false, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), NULL, 0);
+	LLVMGlobalSetMetadata(memory, llvm::LLVMContext::MD_dbg, gve);
+
 	co_return NULL;
 };
 
