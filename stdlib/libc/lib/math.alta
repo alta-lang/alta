@@ -1,7 +1,3 @@
-##if platform == "linux"
-@@native.link("m");
-##end if
-
 import rawstring, rawconststring from "types"
 
 declare literal export function fabsf(n: float): float
