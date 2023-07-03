@@ -3,6 +3,11 @@ import uint64, rawconststring from "types"
 #
 # @section classes
 #
+export struct _Alta_virtual_entry {
+  name: rawconststring;
+  function: ptr void;
+}
+
 export struct _Alta_class_info {
   type_name: rawconststring;
   destructor: (ptr void) -> void;
@@ -11,6 +16,7 @@ export struct _Alta_class_info {
   offset_from_base: uint64;
   offset_from_owner: uint64;
   offset_to_next: uint64;
+  virtual_table: ptr const _Alta_virtual_entry
 }
 
 export struct _Alta_instance_info {
@@ -28,7 +34,7 @@ export struct _Alta_basic_class {
 # @section lambdas
 #
 export struct _Alta_basic_lambda_state {
-  reference_count: uint64
+  reference_count: uint64;
   destructor: (ptr void) -> void;
 }
 

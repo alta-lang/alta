@@ -758,6 +758,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 				throw std::runtime_error("too much indirection for downcast");
 			}
 
+			if (currentType->indirectionLevel() == 0) {
+				throw std::runtime_error("not enough indirection for downcast");
+			}
+
 			result = co_await doChildRetrieval(result, currentType, nextType, &didRetrieval);
 			if (!didRetrieval) {
 				throw std::runtime_error("supposed to be able to do child retrieval");
@@ -818,7 +822,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			std::array<LLVMTypeRef, 2> members;
 			members[0] = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(component.target->unionOf.size() - 1));
 			members[1] = co_await translateType(component.via);
-			auto llactual = LLVMStructType(members.data(), members.size(), false);
+			auto llactual = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 			auto casted = LLVMBuildBitCast(_builders.top().get(), allocated, LLVMPointerType(llactual, 0), ("@cast_widen_tmp_fake_" + tmpIdxStr).c_str());
 
@@ -857,7 +861,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			std::array<LLVMTypeRef, 2> members;
 			members[0] = LLVMIntTypeInContext(_llcontext.get(), std::bit_width(currentType->unionOf.size() - 1));
 			members[1] = co_await translateType(component.target);
-			auto llactual = LLVMStructType(members.data(), members.size(), false);
+			auto llactual = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 			auto casted = LLVMBuildBitCast(_builders.top().get(), allocated, LLVMPointerType(llactual, 0), "");
 
@@ -1016,7 +1020,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 				std::array<LLVMTypeRef, 2> members;
 				members[0] = idxType;
 				members[1] = co_await translateType(memberType);
-				auto llactual = LLVMStructType(members.data(), members.size(), false);
+				auto llactual = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 				auto llactualPtr = LLVMBuildPointerCast(_builders.top().get(), tmp, LLVMPointerType(llactual, 0), ("@copy_union_" + tmpIdxStr + "_member_" + std::to_string(memberIndex) + "_fake").c_str());
 
@@ -1543,7 +1547,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doChildRetrieval(LLVMValueRef ex
 		exprType->klass &&
 		targetType->klass &&
 		exprType->klass->id != targetType->klass->id &&
-		targetType->klass->hasParent(exprType->klass)
+		targetType->klass->hasParent(exprType->klass) &&
+		exprType->indirectionLevel() > 0
 	) {
 		std::vector<std::shared_ptr<AltaCore::DET::Class>> parentAccessors;
 		std::stack<size_t> idxs;
@@ -1593,6 +1598,22 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doChildRetrieval(LLVMValueRef ex
 
 		result = buildGetChild(_builders.top(), result, names);
 		LLVMSetValueName(result, ("@downcast_" + tmpIdxStr + "_ref").c_str());
+
+		if (targetType->referenceLevel() > 0) {
+			// references cannot be checked for nullity in user code, so we must check them here
+			auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
+			auto isNull = LLVMBuildIsNull(_builders.top().get(), result, ("@downcast_" + tmpIdxStr + "_ref_is_null").c_str());
+			auto isNullBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@downcast_" + tmpIdxStr + "_is_null").c_str());
+			auto isNotNullBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@downcast_" + tmpIdxStr + "_is_not_null").c_str());
+
+			LLVMBuildCondBr(_builders.top().get(), isNull, isNullBlock, isNotNullBlock);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), isNullBlock);
+
+			buildBadCast(_builders.top(), mangleName(exprType->klass), mangleName(targetType->klass));
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), isNotNullBlock);
+		}
 
 		if (didRetrieval != nullptr) {
 			*didRetrieval = true;
@@ -1931,7 +1952,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef 
 		std::array<LLVMTypeRef, 2> members;
 		members[0] = idxType;
 		members[1] = co_await translateType(unionMember);
-		auto llactual = LLVMStructType(members.data(), members.size(), false);
+		auto llactual = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		auto castedUnion = LLVMBuildBitCast(_builders.top().get(), tmpified, LLVMPointerType(llactual, 0), ("@foreach_union_member_" + tmpIdxStr + "_member_" + std::to_string(i) + "_cast").c_str());
 
@@ -2626,6 +2647,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
 			auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+			auto voidPtrType = LLVMPointerTypeInContext(_llcontext.get(), 0);
 
 			/*
 			struct _Alta_class_info {
@@ -2636,9 +2658,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				uint64_t offset_from_base;
 				uint64_t offset_from_owner;
 				uint64_t offset_to_next;
+				const struct _Alta_virtual_entry* virtual_table;
 			};
 			*/
-			std::array<LLVMValueRef, 7> members {
+			std::array<LLVMValueRef, 8> members {
 				LLVMBuildGlobalStringPtr(_builders.top().get(), (mangleName(genClass)).c_str(), ""),
 				dtor,
 				LLVMConstNull(strType),
@@ -2646,6 +2669,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				LLVMConstInt(i64Type, 0, false),
 				LLVMConstInt(i64Type, 0, false),
 				LLVMConstInt(i64Type, 0, false),
+				LLVMConstNull(voidPtrType),
 			};
 
 			LLVMSetInitializer(globalClassInfo, LLVMConstNamedStruct(_definedTypes["_Alta_class_info"], members.data(), members.size()));
@@ -3702,12 +3726,17 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			args.push_back(result);
 		}
 
+		LLVMTypeRef llfuncType = NULL;
+		LLVMValueRef llfunc = NULL;
+
 		if (info->readAccessor->isVirtual()) {
-			throw std::runtime_error("TODO: support virtual read accessors");
+			llfuncType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(info->readAccessor), false);
+			llfunc = buildVirtualLookup(_builders.top(), args[0], mangleName(info->readAccessor, false));
 		} else {
-			auto [llfuncType, llfunc] = co_await declareFunction(info->readAccessor);
-			result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), ("@getter_call_" + tmpIdxStr).c_str());
+			std::tie(llfuncType, llfunc) = co_await declareFunction(info->readAccessor);
 		}
+
+		result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), ("@getter_call_" + tmpIdxStr).c_str());
 	}
 
 	if (info->isRootClassRetrieval) {
@@ -4213,24 +4242,24 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 
 		bool didRetrieval = false;
 
-		auto targetType = std::make_shared<AltaCore::DET::Type>(info->targetType->methodParent)->reference();
-
 		if (virtFunc) {
-			throw std::runtime_error("TODO: support virtual functions");
+			result = co_await getRootInstance(result, selfType);
+			targetExprStoreType = std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Void, std::vector<uint8_t> { (uint8_t)AltaCore::DET::TypeModifierFlag::Pointer });
 		} else {
+			auto targetType = std::make_shared<AltaCore::DET::Type>(info->targetType->methodParent)->reference();
 			result = co_await doParentRetrieval(result, selfType, targetType, &didRetrieval);
 			targetExprStoreType = targetType;
-
-			if (inSuspendableFunction() && !LLVMIsConstant(result)) {
-				// evaluating the arguments might cause a state change, so let's save the value of the target
-				auto alloca = currentStack().buildAlloca(co_await translateType(targetExprStoreType));
-				LLVMBuildStore(_builders.top().get(), result, alloca);
-				result = alloca;
-				storedTarget = true;
-			}
-
-			args.push_back(result);
 		}
+
+		if (inSuspendableFunction() && !LLVMIsConstant(result)) {
+			// evaluating the arguments might cause a state change, so let's save the value of the target
+			auto alloca = currentStack().buildAlloca(co_await translateType(targetExprStoreType));
+			LLVMBuildStore(_builders.top().get(), result, alloca);
+			result = alloca;
+			storedTarget = true;
+		}
+
+		args.push_back(result);
 	} else /*if (!info->targetType->isRawFunction)*/ {
 		result = co_await loadRef(result, info->targetType);
 		targetExprStoreType = info->targetType->destroyReferences();
@@ -4253,19 +4282,23 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 	}
 
 	if (info->isMethodCall) {
-		if (virtFunc) {
-			throw std::runtime_error("TODO: virtual functions");
-		} else {
-			auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(accInfo->narrowedTo);
-			auto [llfuncType, llfunc] = co_await declareFunction(func);
+		LLVMTypeRef llfuncType = NULL;
+		LLVMValueRef llfunc = NULL;
+		auto func = std::dynamic_pointer_cast<AltaCore::DET::Function>(accInfo->narrowedTo);
 
-			if (storedTarget) {
-				// now that we can no longer have a state change, load back the self argument
-				args[0] = LLVMBuildLoad2(_builders.top().get(), co_await translateType(targetExprStoreType), args[0], "");
-			}
-
-			result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), isVoid ? "" : ("@method_call_" + tmpIdxStr).c_str());
+		if (storedTarget) {
+			// now that we can no longer have a state change, load back the self argument
+			args[0] = LLVMBuildLoad2(_builders.top().get(), co_await translateType(targetExprStoreType), args[0], "");
 		}
+
+		if (virtFunc) {
+			llfuncType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(func), false);
+			llfunc = buildVirtualLookup(_builders.top(), args[0], mangleName(func, false));
+		} else {
+			std::tie(llfuncType, llfunc) = co_await declareFunction(func);
+		}
+
+		result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), isVoid ? "" : ("@method_call_" + tmpIdxStr).c_str());
 	} else if (!info->targetType->isRawFunction) {
 		auto targetType = info->targetType->destroyReferences();
 		auto target = result;
@@ -4590,7 +4623,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 			// a.k.a. offset_from_base for the last instance of this class that we encountered
 			size_t lastOffsetFromRoot = 0;
 			LLVMValueRef lastGlobalClassInfoVar = NULL;
-			std::array<LLVMValueRef, 7> lastMembers;
+			std::array<LLVMValueRef, 8> lastMembers;
 		};
 
 		std::deque<InfoStackEntry> infoStack;
@@ -4625,12 +4658,78 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 
 			auto mangled = mangleName(stackEntry.klass);
 			auto mangledChild = stackEntry.child ? mangleName(stackEntry.child) : "";
-			auto infoVar = LLVMAddGlobal(_llmod.get(), _definedTypes["_Alta_class_info"], "");
+			auto infoVar = LLVMAddGlobal(_llmod.get(), _definedTypes["_Alta_class_info"], ("_Alta_class_info@" + mangled).c_str());
 			auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
 			auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
 			auto dtorType = LLVMPointerType(_definedTypes["_Alta_class_destructor"], 0);
 
-			LLVMValueRef dtor = NULL;
+			LLVMValueRef virtualTableVar = LLVMConstNull(LLVMPointerTypeInContext(_llcontext.get(), 0));
+
+			if (!stackEntry.child) {
+				// this is the root class; let's populate the virtual function table
+				auto virtFuncs = stackEntry.klass->findAllVirtualFunctions();
+
+				if (virtFuncs.size() > 0) {
+					auto llarrayType = LLVMArrayType(_definedTypes["_Alta_virtual_entry"], virtFuncs.size() + 1);
+					virtualTableVar = LLVMAddGlobal(_llmod.get(), llarrayType, ("_Alta_virtual_table@" + mangled).c_str());
+					LLVMSetLinkage(virtualTableVar, LLVMInternalLinkage);
+					LLVMSetGlobalConstant(virtualTableVar, true);
+
+					std::vector<LLVMValueRef> entries;
+
+					for (const auto& virtFunc: virtFuncs) {
+						auto parentClass = virtFunc->parentClassType->klass;
+						LLVMValueRef llfunc = NULL;
+
+						if (parentClass->id == stackEntry.klass->id) {
+							// this is a virtual function defined on the root class, so we can just pass it through directly
+							llfunc = (co_await declareFunction(virtFunc)).second;
+						} else {
+							// this is a virtual function defined in one of the root class' parents, so we have to define a wrapper
+							auto [llfuncType, llactualFunc] = co_await declareFunction(virtFunc);
+							llfunc = LLVMAddFunction(_llmod.get(), ("_Alta_virtual_wrapper@" + mangled + "@" + mangleName(virtFunc, false)).c_str(), llfuncType);
+							LLVMSetLinkage(llfunc, LLVMInternalLinkage);
+
+							auto prevBlock = LLVMGetInsertBlock(_builders.top().get());
+
+							auto entry = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
+							LLVMPositionBuilderAtEnd(_builders.top().get(), entry);
+
+							std::vector<LLVMValueRef> args;
+							for (size_t i = 0; i < LLVMCountParams(llfunc); ++i) {
+								args.push_back(LLVMGetParam(llfunc, i));
+							}
+
+							args[0] = co_await doParentRetrieval(args[0], std::make_shared<AltaCore::DET::Type>(stackEntry.klass, std::vector<uint8_t> { (uint8_t)AltaCore::DET::TypeModifierFlag::Reference }), virtFunc->parentClassType);
+
+							bool isVoid = *virtFunc->returnType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void);
+
+							auto result = LLVMBuildCall2(_builders.top().get(), llfuncType, llactualFunc, args.data(), args.size(), isVoid ? "" : "@result");
+
+							if (isVoid) {
+								LLVMBuildRetVoid(_builders.top().get());
+							} else {
+								LLVMBuildRet(_builders.top().get(), result);
+							}
+
+							LLVMPositionBuilderAtEnd(_builders.top().get(), prevBlock);
+						}
+
+						std::array<LLVMValueRef, 2> entryMembers {
+							LLVMBuildGlobalStringPtr(_builders.top().get(), mangleName(virtFunc, false).c_str(), ""),
+							llfunc,
+						};
+
+						auto entry = LLVMConstNamedStruct(_definedTypes["_Alta_virtual_entry"], entryMembers.data(), entryMembers.size());
+						entries.push_back(entry);
+					}
+
+					entries.push_back(LLVMConstNull(_definedTypes["_Alta_virtual_entry"]));
+
+					auto init = LLVMConstArray(_definedTypes["_Alta_virtual_entry"], entries.data(), entries.size());
+					LLVMSetInitializer(virtualTableVar, init);
+				}
+			}
 
 			if (info->klass->destructor) {
 				co_await declareFunction(info->klass->destructor);
@@ -4645,9 +4744,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 				uint64_t offset_from_base;
 				uint64_t offset_from_owner;
 				uint64_t offset_to_next;
+				const struct _Alta_virtual_entry* virtual_table;
 			};
 			*/
-			std::array<LLVMValueRef, 7> members {
+			std::array<LLVMValueRef, 8> members {
 				LLVMBuildGlobalStringPtr(_builders.top().get(), mangled.c_str(), ""),
 				info->klass->destructor ? _definedFunctions[info->klass->destructor->id] : LLVMConstNull(dtorType),
 				stackEntry.child ? LLVMBuildGlobalStringPtr(_builders.top().get(), mangledChild.c_str(), "") : LLVMConstNull(strType),
@@ -4655,6 +4755,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 				LLVMConstInt(i64Type, stackEntry.offsetFromRoot, false),
 				LLVMConstInt(i64Type, stackEntry.offsetFromOwner, false),
 				LLVMConstInt(i64Type, 0, false), // updated later
+				virtualTableVar,
 			};
 
 			LLVMSetLinkage(infoVar, LLVMInternalLinkage);
@@ -5837,8 +5938,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileInstanceofExpression(std:
 	} else if (testType->klass->hasParent(targetType->klass)) {
 		bool didRetrieval = false;
 
-		result = co_await doChildRetrieval(result, targetType, testType->indirectionLevel() > 0 ? testType : testType->reference(), &didRetrieval);
-		result = LLVMBuildIsNotNull(_builders.top().get(), result, ("@instof_downcast_not_null_" + tmpIdxStr).c_str());
+		result = co_await doChildRetrieval(result, targetType, testType->destroyIndirection()->point(), &didRetrieval);
+
+		if (!didRetrieval) {
+			result = llfalse;
+		} else {
+			result = LLVMBuildIsNotNull(_builders.top().get(), result, ("@instof_downcast_not_null_" + tmpIdxStr).c_str());
+		}
 	} else {
 		result = llfalse;
 	}
@@ -7003,7 +7109,36 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		_definedDebugTypes["_Alta_lambda_destructor"] = LLVMDIBuilderCreateSubroutineType(_debugBuilder.get(), _unknownDebugFile, dtorDebugParams.data(), dtorDebugParams.size(), LLVMDIFlagZero);
 	}
 
+	if (!_definedTypes["_Alta_virtual_entry"]) {
+		/*
+		struct _Alta_virtual_entry {
+			const char* name;
+			void* function;
+		};
+		*/
+		auto stringType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+		auto voidPtrType = LLVMPointerTypeInContext(_llcontext.get(), 0);
+		std::array<LLVMTypeRef, 2> members {
+			stringType,
+			voidPtrType,
+		};
+		auto virtEntryType = _definedTypes["_Alta_virtual_entry"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+
+		auto debugCharType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "byte", 4, 8, llvm::dwarf::DW_ATE_unsigned_char, LLVMDIFlagZero);
+		auto debugStringType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugCharType, _pointerBits, _pointerBits, 0, "", 0);
+		auto debugVoidType = LLVMDIBuilderCreateUnspecifiedType(_debugBuilder.get(), "void", 4);
+		auto debugVoidPtrType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugVoidType, _pointerBits, _pointerBits, 0, "", 0);
+
+		std::array<LLVMMetadataRef, 2> debugMembers {
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "name", sizeof("name") - 1, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugStringType), LLVMDITypeGetAlignInBits(debugStringType), LLVMOffsetOfElement(_targetData.get(), virtEntryType, 0) * 8, LLVMDIFlagZero, debugStringType),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "function", sizeof("function") - 1, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugVoidPtrType), LLVMDITypeGetAlignInBits(debugVoidPtrType), LLVMOffsetOfElement(_targetData.get(), virtEntryType, 1) * 8, LLVMDIFlagZero, debugVoidPtrType),
+		};
+
+		_definedDebugTypes["_Alta_virtual_entry"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_virtual_entry", sizeof("_Alta_virtual_entry") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), virtEntryType) * 8, LLVMABIAlignmentOfType(_targetData.get(), virtEntryType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
+	}
+
 	if (!_definedTypes["_Alta_class_info"]) {
+		// TODO: optimize virtual lookups by making the structure a trie instead of a table (for faster lookups)
 		/*
 		struct _Alta_class_info {
 			const char* type_name;
@@ -7013,9 +7148,10 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			uint64_t offset_from_base;
 			uint64_t offset_from_owner;
 			uint64_t offset_to_next;
+			const struct _Alta_virtual_entry* virtual_table;
 		};
 		*/
-		static const std::array<const char*, 7> memberNames {
+		static const std::array<const char*, 8> memberNames {
 			"type_name",
 			"destructor",
 			"child_name",
@@ -7023,9 +7159,10 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			"offset_from_base",
 			"offset_from_owner",
 			"offset_to_next",
+			"virtual_table",
 		};
 
-		std::array<LLVMTypeRef, 7> members;
+		std::array<LLVMTypeRef, 8> members;
 		auto stringType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
 		auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
 		members[0] = stringType;
@@ -7035,13 +7172,15 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		members[4] = i64Type;
 		members[5] = i64Type;
 		members[6] = i64Type;
-		auto classInfoType = _definedTypes["_Alta_class_info"] = LLVMStructType(members.data(), members.size(), false);
+		members[7] = LLVMPointerType(_definedTypes["_Alta_virtual_entry"], 0);
+		auto classInfoType = _definedTypes["_Alta_class_info"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		auto debugCharType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "byte", 4, 8, llvm::dwarf::DW_ATE_unsigned_char, LLVMDIFlagZero);
 		auto debugStringType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugCharType, _pointerBits, _pointerBits, 0, "", 0);
 		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
 		auto debugDtorType = _definedDebugTypes["_Alta_class_destructor"];
 		auto debugDtorPtrType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugDtorType, _pointerBits, _pointerBits, 0, "", 0);
+		auto debugVirtEntryPtrType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), _definedDebugTypes["_Alta_virtual_entry"], _pointerBits, _pointerBits, 0, "", 0);
 
 		auto mapType = [&](size_t index) {
 			switch (index) {
@@ -7057,6 +7196,9 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 
 				case 1:
 					return debugDtorPtrType;
+
+				case 7:
+					return debugVirtEntryPtrType;
 
 				default:
 					throw std::out_of_range("bad index");
@@ -7075,12 +7217,12 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 	if (!_definedTypes["_Alta_instance_info"]) {
 		/*
 		struct _Alta_instance_info {
-			struct _Alta_class_info* class_info;
+			const struct _Alta_class_info* class_info;
 		};
 		*/
 		std::array<LLVMTypeRef, 1> members;
 		members[0] = LLVMPointerType(_definedTypes["_Alta_class_info"], 0);
-		auto instanceInfoStruct = _definedTypes["_Alta_instance_info"] = LLVMStructType(members.data(), members.size(), false);
+		auto instanceInfoStruct = _definedTypes["_Alta_instance_info"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		auto debugClassInfo = _definedDebugTypes["_Alta_class_info"];
 		auto debugClassInfoPtr = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugClassInfo, _pointerBits, _pointerBits, 0, NULL, 0);
@@ -7100,7 +7242,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		*/
 		std::array<LLVMTypeRef, 1> members;
 		members[0] = _definedTypes["_Alta_instance_info"];
-		_definedTypes["_Alta_basic_class"] = LLVMStructType(members.data(), members.size(), false);
+		_definedTypes["_Alta_basic_class"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 	}
 
 	if (!_definedTypes["_Alta_basic_function"]) {
@@ -7131,7 +7273,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			voidPointer,
 		};
 
-		auto funcType = _definedTypes["_Alta_basic_function"] = LLVMStructType(members.data(), members.size(), false);
+		auto funcType = _definedTypes["_Alta_basic_function"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		std::array<LLVMMetadataRef, 2> debugMembers {
 			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "function", sizeof("function") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 0) * 8, LLVMDIFlagZero, debugVoidPointer),
@@ -7154,7 +7296,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			LLVMPointerType(_definedTypes["_Alta_lambda_destructor"], 0),
 		};
 
-		_definedTypes["_Alta_basic_lambda_state"] = LLVMStructType(members.data(), members.size(), false);
+		_definedTypes["_Alta_basic_lambda_state"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 	}
 
 	if (!_definedTypes["_Alta_basic_suspendable_stack"]) {
@@ -7173,7 +7315,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			voidPointerType,
 		};
 
-		auto structType = _definedTypes["_Alta_basic_suspendable_stack"] = LLVMStructType(members.data(), members.size(), false);
+		auto structType = _definedTypes["_Alta_basic_suspendable_stack"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		members[1] = LLVMPointerType(_definedTypes["_Alta_basic_suspendable_stack"], 0);
 		members[2] = members[1];
@@ -7212,7 +7354,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			LLVMPointerType(_definedTypes["_Alta_basic_suspendable_stack"], 0),
 		};
 
-		auto structType = _definedTypes["_Alta_basic_suspendable"] = LLVMStructType(members.data(), members.size(), false);
+		auto structType = _definedTypes["_Alta_basic_suspendable"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
 		auto debugBoolType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "bool", 4, 8, llvm::dwarf::DW_ATE_boolean, LLVMDIFlagZero);
@@ -7239,7 +7381,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			_definedTypes["_Alta_basic_suspendable"],
 		};
 
-		auto structType = _definedTypes["_Alta_basic_generator"] = LLVMStructType(members.data(), members.size(), false);
+		auto structType = _definedTypes["_Alta_basic_generator"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		std::array<LLVMMetadataRef, 1> debugMembers {
 			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "basic_suspendable", sizeof("basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagZero, _definedDebugTypes["_Alta_basic_suspendable"]),
@@ -7282,7 +7424,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 			LLVMInt64TypeInContext(_llcontext.get()),
 		};
 
-		auto structType = _definedTypes["_Alta_basic_coroutine"] = LLVMStructType(members.data(), members.size(), false);
+		auto structType = _definedTypes["_Alta_basic_coroutine"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		auto fwd = LLVMDIBuilderCreateReplaceableCompositeType(_debugBuilder.get(), _compositeCounter++, "_Alta_basic_coroutine", sizeof("_Alta_basic_coroutine") - 1, _unknownDebugFile, _unknownDebugFile, 0, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, 0);
 		auto fwdPtr = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), fwd, _pointerBits, _pointerBits, 0, NULL, 0);

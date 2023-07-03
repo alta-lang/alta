@@ -43,7 +43,11 @@ export literal function _Alta_get_child(instance: ptr void, parentContainers: ra
 		# look through the instances of the class to find one whose parent container
 		# (i.e. the child that owns it) is equal to the one we're looking for
 		while curr {
-			assert curr.instance_info.class_info.child_name
+			if !curr.instance_info.class_info.child_name {
+				# if the current instance doesn't have a parent container (i.e. child), we can't possibly find one that matches what we're looking for
+				return nullptr
+			}
+
 			if rawstringsEqual(curr.instance_info.class_info.child_name, parentContainer) {
 				curr = _Alta_get_owner(curr)
 				break
@@ -52,8 +56,10 @@ export literal function _Alta_get_child(instance: ptr void, parentContainers: ra
 			curr = _Alta_get_next(curr)
 		}
 
-		# we *must* have found an instance of it
-		assert curr
+		if !curr {
+			# if we didn't find it, that must mean the given instance is not of the given child type
+			return nullptr
+		}
 
 		inst = curr
 	}
@@ -115,4 +121,22 @@ export literal function _Alta_suspendable_reload(suspendable: ptr native._Alta_b
 
 export literal function _Alta_suspendable_reload_continue(suspendable: ptr native._Alta_basic_suspendable): void {
 	suspendable.current_stack = suspendable.current_stack.prev
+}
+
+export literal function _Alta_virtual_lookup(instance: ptr void, methodName: rawconststring): ptr void {
+	let inst = instance as ptr native._Alta_basic_class
+	inst = _Alta_get_base(inst)
+
+	let table = inst.instance_info.class_info.virtual_table
+	let idx: uint64 = 0
+
+	while table[idx].name {
+		if rawstringsEqual(table[idx].name, methodName) {
+			return table[idx].function
+		}
+		;++idx
+	}
+
+	# this should be impossible
+	assert false
 }

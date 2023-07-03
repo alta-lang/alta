@@ -6,6 +6,14 @@ class Grandparent {
 	public function hello(): void {
 		printLine("Hello, I'm the grandparent! Foo = ", this.foo)
 	}
+
+	public @virtual function goodbye(): void {
+		printLine("Goodbye from the grandparent!")
+	}
+
+	public @virtual function leaveMeAlone(): void {
+		printLine("Don't override me! - Grandparent")
+	}
 }
 
 class Parent extends Grandparent {
@@ -13,8 +21,17 @@ class Parent extends Grandparent {
 		super()
 		this.foo = 5
 	}
+
 	public function hello(): void {
 		printLine("Hello, I'm the parent! Foo = ", this.foo)
+	}
+
+	public @virtual function goodbye(): void {
+		printLine("Goodbye from the parent!")
+	}
+
+	public @virtual function leaveMeAlone(): void {
+		printLine("Haha, I did override you anyways! - Parent")
 	}
 }
 
@@ -23,8 +40,13 @@ class Child extends Parent {
 		super()
 		this.foo = 7
 	}
+
 	public function hello(): void {
 		printLine("Hello, I'm the child! Foo = ", this.foo)
+	}
+
+	public @virtual function goodbye(): void {
+		printLine("Goodbye from the child!")
 	}
 }
 
@@ -40,6 +62,59 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 
 	let downcast = asGrandparent as ref Child
 	downcast.hello()
+
+	printLine()
+
+	instance.goodbye()
+	asChild.goodbye()
+	asParent.goodbye()
+	asGrandparent.goodbye()
+	downcast.goodbye()
+
+	printLine()
+
+	instance.leaveMeAlone()
+	asChild.leaveMeAlone()
+	asParent.leaveMeAlone()
+	asGrandparent.leaveMeAlone()
+	downcast.leaveMeAlone()
+
+	printLine()
+
+	let parentInstance = new Parent
+	let parentAsParent: ref Parent = parentInstance
+	let parentAsGrandparent: ref Grandparent = parentInstance
+
+	parentAsParent.hello()
+	parentAsGrandparent.hello()
+
+	let parentDowncast = parentAsGrandparent as ref Parent
+	parentDowncast.hello()
+
+	# we have to get them as pointers, otherwise the runtime will abort when the downcast fails
+	# (since references aren't allowed to be null)
+	let badDowncast1 = &parentAsGrandparent as ptr Child
+	let badDowncast2 = &parentAsParent as ptr Child
+
+	if badDowncast1 || badDowncast2 {
+		printLine("Huh? Those downcasts succeeded?")
+	} else {
+		printLine("Good, the bad downcasts were, in fact, bad")
+	}
+
+	printLine()
+
+	parentInstance.goodbye()
+	parentAsParent.goodbye()
+	parentAsGrandparent.goodbye()
+	parentDowncast.goodbye()
+
+	printLine()
+
+	parentInstance.leaveMeAlone()
+	parentAsParent.leaveMeAlone()
+	parentAsGrandparent.leaveMeAlone()
+	parentDowncast.leaveMeAlone()
 
 	return 0
 }
