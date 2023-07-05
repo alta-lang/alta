@@ -4,71 +4,39 @@ import Vector from "vector"
 import Pair from "util"
 import escape from "./util"
 
-# the `ptr void` is a stupid workaround for an issue with the current compiler written in C++;
-# you can't reference yourself in a generic or an optional or a union (and probably not a function type either)
-
 export class SerialNode {
 	public var name: String
 	public var content: String
 
-	private var _attributes: Map<String, ptr void>
-	private var _children: Vector<ptr void>
+	private var _attributes: Map<String, SerialNode>
+	private var _children: Vector<SerialNode>
 
 	public constructor(name: String = "", content: String = "") {
 		this.name = name
 		this.content = content
 	}
 
-	public @copy constructor(other: ref SerialNode) {
-		this.name = other.name
-		this.content = other.content
-
-		for pair: Pair<String, ptr void> in other._attributes.items {
-			let node: ref SerialNode = *(pair.second as ptr SerialNode)
-			this._attributes[pair.first] = (&new* SerialNode(node)) as ptr void
-		}
-
-		for pointer: ptr void in other._children.items {
-			let child: ref SerialNode = *(pointer as ptr SerialNode)
-			this._children.push((&new* SerialNode(child)) as ptr void)
-		}
-	}
-
-	public destructor() {
-		for pair: Pair<String, ptr void> in this._attributes.items {
-			let node = pair.second as ptr SerialNode
-			delete* node
-		}
-		for pointer: ptr void in this._children.items {
-			let child = pointer as ptr SerialNode
-			delete* child
-		}
-	}
-
 	public @read function attributeNames(): Vector<String> {
 		return this._attributes.keys
 	}
 
-	public @read generator function children(): SerialNode {
-		for pointer: ptr void in this._children.items {
-			let child: ref SerialNode = *(pointer as ptr SerialNode)
+	public @read generator function children(): ref SerialNode {
+		for child: ref SerialNode in this._children.items {
 			yield child
 		}
 		return;
 	}
 
-	public function getAttribute(name: String): SerialNode {
-		return *(this._attributes[name] as ptr SerialNode)
+	public function getAttribute(name: String): ref SerialNode {
+		return this._attributes[name]
 	}
 
 	public function setAttribute(name: String, value: SerialNode): void {
-		if this._attributes.has(name)
-			delete* this._attributes[name]
-		this._attributes[name] = (&new* SerialNode(value)) as ptr void
+		this._attributes[name] = value
 	}
 
 	public function addChild(child: SerialNode): void {
-		this._children.push((&new* SerialNode(child)) as ptr void)
+		this._children.push(child)
 	}
 
 	private function toPrettyString(indent: String): String {
@@ -76,8 +44,8 @@ export class SerialNode {
 
 		result += this.name + " {"
 
-		for pair: Pair<String, ptr void> in this._attributes.items {
-			let node: ref SerialNode = *(pair.second as ptr SerialNode)
+		for pair: Pair<String, SerialNode> in this._attributes.items {
+			let node: ref SerialNode = pair.second
 			if node.name.length == 0 {
 				result += '\n' + indent + '\t' + pair.first + " = \"" + escape(node.content) + '"'
 			} else {
@@ -93,8 +61,7 @@ export class SerialNode {
 			}
 		}
 
-		for pointer: ptr void in this._children.items {
-			let child: ref SerialNode = *(pointer as ptr SerialNode)
+		for child: ref SerialNode in this._children.items {
 			result += '\n' + indent + '\t' + child.toPrettyString(indent + '\t')
 		}
 
