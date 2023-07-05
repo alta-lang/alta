@@ -22,7 +22,7 @@ export generic class Map<K, V> {
   public function get(key: K): ref V {
     for i: Size in 0..this._keys.length {
       if this._keys[i] == key {
-        return this._values.get(i)
+        return *this._values.get(i)
       }
     }
 
