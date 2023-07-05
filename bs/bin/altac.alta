@@ -7,6 +7,8 @@ import Vector from "vector"
 import Path from "fs"
 
 literal function main(argc: int, argv: ptr ptr byte): int {
+	let scheduler = new Scheduler
+
 	let args = new Vector<String>(length: argc)
 	let path = new Path
 
@@ -24,9 +26,14 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 	# put the File in its own block to limit its scope and have it auto-closed
 	let lexer = new Lexer(path)
 	{
-		let file = new File(path)
+		let maybeFile = File.tryOpen(path)
+		if maybeFile.isError {
+			printLine("Failed to open file")
+			return 1
+		}
+		let file = maybeFile.value
 		# TODO: this isn't Unicode safe
-		while let maybeChar = file.read?() {
+		while let maybeChar = file.read() {
 			lexer.feed(*maybeChar)
 		}
 		lexer.end()
@@ -38,7 +45,9 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 	}
 
 	let parser = new Parser
-	await parser.run(lexer.tokens)
+
+	scheduler.schedule(parser.run(lexer.tokens))
+	scheduler.finishAll()
 
 	if parser.root {
 		printLine("Parsed a root node:\n", parser.root.proxy)
