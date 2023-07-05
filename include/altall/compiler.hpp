@@ -720,6 +720,8 @@ namespace AltaLL {
 					type != ANT::ClassInstantiationExpression &&
 					type != ANT::FunctionCallExpression &&
 					type != ANT::LambdaExpression &&
+					type != ANT::AwaitExpression &&
+					type != ANT::YieldExpression &&
 					canCopy
 				),
 				(
@@ -727,6 +729,8 @@ namespace AltaLL {
 					type == ANT::ClassInstantiationExpression ||
 					type == ANT::ConditionalExpression ||
 					type == ANT::LambdaExpression ||
+					type == ANT::AwaitExpression ||
+					type == ANT::YieldExpression ||
 					canTempify
 				)
 			);

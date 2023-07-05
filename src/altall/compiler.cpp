@@ -1,3 +1,4 @@
+#include "altacore/ast-shared.hpp"
 #include "altacore/det-shared.hpp"
 #include "altacore/det/function.hpp"
 #include "altacore/det/type.hpp"
@@ -1153,7 +1154,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtor(LLVMValueRef compiled
 		//   b) for function calls, returned expressions are automatically
 		//      copied if necessary (via this same method, `doCopyCtor`)
 		nodeType != AltaCore::AST::NodeType::ClassInstantiationExpression &&
-		nodeType != AltaCore::AST::NodeType::FunctionCallExpression
+		nodeType != AltaCore::AST::NodeType::FunctionCallExpression &&
+		nodeType != AltaCore::AST::NodeType::AwaitExpression &&
+		nodeType != AltaCore::AST::NodeType::YieldExpression
 	) {
 		compiled = co_await doCopyCtorInternal(compiled, exprType, additionalCopyInfo(expr, info), didCopy);
 	}
@@ -1679,7 +1682,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::tmpify(std::shared_ptr<AltaCore:
 		(
 			expr->nodeType() == AltaCore::AST::NodeType::FunctionCallExpression ||
 			expr->nodeType() == AltaCore::AST::NodeType::ClassInstantiationExpression ||
-			expr->nodeType() == AltaCore::AST::NodeType::ConditionalExpression
+			expr->nodeType() == AltaCore::AST::NodeType::ConditionalExpression ||
+			expr->nodeType() == AltaCore::AST::NodeType::YieldExpression ||
+			expr->nodeType() == AltaCore::AST::NodeType::AwaitExpression
 		)
 	) {
 		result = co_await tmpify(result, type, true);
@@ -3755,7 +3760,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			auto selfCopyInfo = additionalCopyInfo(node->target, info->target);
 			auto selfType = AltaCore::DET::Type::getUnderlyingType(info->target.get());
 
-			if (selfCopyInfo.second && node->target->nodeType() != AltaCore::AST::NodeType::FunctionCallExpression) {
+			if (selfCopyInfo.second && node->target->nodeType() != AltaCore::AST::NodeType::FunctionCallExpression && node->target->nodeType() != AltaCore::AST::NodeType::AwaitExpression && node->target->nodeType() != AltaCore::AST::NodeType::YieldExpression) {
 				result = co_await tmpify(result, selfType);
 			}
 
@@ -4293,8 +4298,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 			selfType = selfType->follow();
 		}
 
-		targetExprStoreType = selfType;
-
 		bool didRetrieval = false;
 
 		if (virtFunc) {
@@ -4303,7 +4306,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 		} else {
 			auto targetType = std::make_shared<AltaCore::DET::Type>(info->targetType->methodParent)->reference();
 			result = co_await doParentRetrieval(result, selfType, targetType, &didRetrieval);
-			targetExprStoreType = targetType;
+			if (didRetrieval) {
+				targetExprStoreType = targetType;
+			}
 		}
 
 		if (inSuspendableFunction() && !LLVMIsConstant(result)) {
