@@ -158,6 +158,14 @@ export generic class Box<T> {
     return *(this.handle as ptr T)
   }
 
+  public generic function as<U>(): Box<U> {
+    if this.handle {
+      return new Box<U>(*this.handle as ref U)
+    } else {
+      return new Box<U>
+    }
+  }
+
   # TODO: automatically provide operators if the contained type provides it
   # e.g. if the type provides `==`, define a `==` operator the defers to the contained instance
 }
