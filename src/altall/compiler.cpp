@@ -3402,13 +3402,20 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 		co_await currentStack().cleanup();
 		co_await popStack();
 
+		bool directWrap = info->parentFunction && info->parentFunction->isGenerator;
+
 		if (functionReturnType && functionReturnType->referenceLevel() > 0) {
 			// if we're returning a reference, there's no need to copy anything
+
+			if (directWrap) {
+				// wrap it in an optional
+				expr = co_await cast(expr, exprType, functionReturnType->makeOptional(), false, std::make_pair(false, false), false, &node->position);
+			}
 		} else {
-			expr = co_await cast(expr, exprType, functionReturnType, true, additionalCopyInfo(node->expression, info->expression), false, &node->expression->position);
+			expr = co_await cast(expr, exprType, directWrap ? functionReturnType->makeOptional() : functionReturnType, true, additionalCopyInfo(node->expression, info->expression), false, &node->expression->position);
 		}
 
-		if (inSuspendableFunction()) {
+		if (inSuspendableFunction() && !directWrap) {
 			// wrap it in an optional
 			expr = co_await cast(expr, functionReturnType, functionReturnType->makeOptional(), false, std::make_pair(false, false), false, &node->position);
 		}
