@@ -2046,7 +2046,7 @@ LLVMMetadataRef AltaLL::Compiler::translateClassDebug(std::shared_ptr<AltaCore::
 		// the parents are included as members from the start of the structure
 		for (const auto& parent: klass->parents) {
 			auto parentType = translateClassDebug(parent);
-			LLVMDIBuilderCreateInheritance(_debugBuilder.get(), tmpDebug, parentType, LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, 0, LLVMDIFlagPublic);
+			members.push_back(LLVMDIBuilderCreateInheritance(_debugBuilder.get(), tmpDebug, parentType, LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, 0, LLVMDIFlagPublic));
 		}
 	}
 
