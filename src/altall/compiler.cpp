@@ -3086,6 +3086,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 		}
 
 		if (suspendableContext) {
+			_suspendableContext.pop();
+
 			// now let's finish building the destructor
 			_builders.push(_suspendableDestructor.top().builder);
 
@@ -3096,6 +3098,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			LLVMBuildUnreachable(_builders.top().get());
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), _suspendableDestructor.top().entry);
+
+			pushStack(ScopeStack::Type::Function);
 
 			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
@@ -3157,13 +3161,15 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			buildSuspendablePopStack(_builders.top(), suspendableContext);
 
+			co_await currentStack().cleanup();
+			co_await popStack();
+
 			LLVMBuildRetVoid(_builders.top().get());
 
 			_builders.pop();
 		}
 
 		if (suspendableContext) {
-			_suspendableContext.pop();
 			_suspendableStateBlocks.pop();
 			_suspendableStateIndex.pop();
 			_suspendableClass.pop();
