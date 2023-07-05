@@ -71,22 +71,13 @@ export class Parser {
 	}
 
 	private async function parseRootStatement(): Box<ast.RootStatement> {
-		let statement: Box<ast.RootStatement> = nullptr
+		if let import = await this.parseImport()
+			return import
 
-		if !statement {
-			let import = await this.parseImport()
-			if import
-				statement = import
-		}
+		if let func = await this.parseFunctionDefinition()
+			return func
 
-		if !statement {
-			# can't directly assign to `statement` because of a bug in the current C++-written compiler
-			let func = await this.parseFunctionDefinition()
-			if func
-				statement = func
-		}
-
-		return statement
+		return nullptr
 	}
 
 	private async function parseImport(): Box<ast.Import> {
@@ -340,31 +331,19 @@ export class Parser {
 	}
 
 	private async function parseStatement(): Box<ast.Statement> {
-		{
-			let block = await this.parseBlock()
-			if block
-				return block
-		}
+		if let block = await this.parseBlock()
+			return block
 
-		{
-			let ret = await this.parseReturnDirective()
-			if ret
-				return ret
-		}
+		if let ret = await this.parseReturnDirective()
+			return ret
 
-		{
-			let for = await this.parseForLoop()
-			if for
-				return for
-		}
+		if let for = await this.parseForLoop()
+			return for
 
-		{
-			let expr = await this.parseExpression()
-			if expr {
-				let exprStmt: Box<ast.ExpressionStatement> = new* ast.ExpressionStatement
-				exprStmt.proxy.expression = expr
-				return exprStmt
-			}
+		if let expr = await this.parseExpression() {
+			let exprStmt: Box<ast.ExpressionStatement> = new* ast.ExpressionStatement
+			exprStmt.proxy.expression = expr
+			return exprStmt
 		}
 
 		return nullptr
@@ -655,29 +634,17 @@ export class Parser {
 		}
 
 		if deferToLowerPrecedences {
-			{
-				let int = await this.parseIntegerLiteral()
-				if int
-					return int
-			}
+			if let int = await this.parseIntegerLiteral()
+				return int
 
-			{
-				let string = await this.parseStringLiteral()
-				if string
-					return string
-			}
+			if let string = await this.parseStringLiteral()
+				return string
 
-			{
-				let acc = await this.parseStrictAccessor()
-				if acc
-					return acc
-			}
+			if let acc = await this.parseStrictAccessor()
+				return acc
 
-			{
-				let expr = await this.parseGroupedExpression()
-				if expr
-					return expr
-			}
+			if let expr = await this.parseGroupedExpression()
+				return expr
 
 			return nullptr
 		} else {
