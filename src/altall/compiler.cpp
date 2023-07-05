@@ -1,6 +1,7 @@
 #include "altacore/det-shared.hpp"
 #include "altacore/det/function.hpp"
 #include "altacore/det/type.hpp"
+#include "altacore/shared.hpp"
 #include "altacore/util.hpp"
 #include <altall/compiler.hpp>
 #include <altall/mangle.hpp>
@@ -2356,6 +2357,14 @@ std::pair<LLVMValueRef, LLVMTypeRef> AltaLL::Compiler::defineRuntimeFunction(con
 			stringType,
 		};
 		llfuncType = LLVMFunctionType(voidPointerType, params.data(), params.size(), false);
+	} else if (name == "_Alta_runtime_rawstrings_equal") {
+		auto boolType = LLVMInt1TypeInContext(_llcontext.get());
+		auto stringType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
+		std::array<LLVMTypeRef, 2> params {
+			stringType,
+			stringType,
+		};
+		llfuncType = LLVMFunctionType(boolType, params.data(), params.size(), false);
 	} else {
 		throw std::runtime_error("Unknown runtime function: " + name);
 	}
@@ -2468,6 +2477,15 @@ LLVMValueRef AltaLL::Compiler::buildVirtualLookup(LLBuilder builder, LLVMValueRe
 	std::array<LLVMValueRef, 2> args {
 		LLVMBuildPointerCast(builder.get(), instance, llvoidPtrType, ""),
 		LLVMBuildGlobalStringPtr(builder.get(), methodName.c_str(), ""),
+	};
+	return LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+};
+
+LLVMValueRef AltaLL::Compiler::buildRawStringsAreEqual(LLBuilder builder, LLVMValueRef lhs, LLVMValueRef rhs) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_runtime_rawstrings_equal");
+	std::array<LLVMValueRef, 2> args {
+		lhs,
+		rhs,
 	};
 	return LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
 };
@@ -5807,13 +5825,20 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::
 	pushDebugLocation(node->position, info->inputScope);
 
 	LLVMValueRef result = NULL;
+	auto tmpIdx = nextTemp();
+	auto tmpIdxStr = std::to_string(tmpIdx);
 
 	if (info->enumeration) {
-		throw std::runtime_error("Support enumeration lookups");
-	} else {
-		auto tmpIdx = nextTemp();
-		auto tmpIdxStr = std::to_string(tmpIdx);
+		std::shared_ptr<AltaCore::DET::Function> func = info->reverseLookup ? info->enumeration->enumerationReverseLookupFunction : info->enumeration->enumerationLookupFunction;
+		auto [llfuncType, llfunc] = co_await declareFunction(func);
+		auto subscript = co_await compileNode(node->index, info->index);
 
+		std::array<LLVMValueRef, 1> args {
+			co_await cast(subscript, info->indexType, std::get<1>(func->parameters[0]), true, additionalCopyInfo(node->index, info->index), false, &node->position),
+		};
+
+		result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), ("@enum" + std::string(info->reverseLookup ? "_reverse" : "") + "_lookup_" + tmpIdxStr).c_str());
+	} else {
 		auto target = co_await compileNode(node->target, info->target);
 
 		bool storedTarget = false;
@@ -6771,6 +6796,134 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode
 	}
 
 	LLVMDIBuilderCreateEnumerationType(_debugBuilder.get(), translateParentScope(info->ns), info->ns->name.c_str(), info->ns->name.size(), debugFileForScopeItem(info->ns), node->position.line, LLVMStoreSizeOfType(_targetData.get(), lltype) * 8, LLVMABIAlignmentOfType(_targetData.get(), lltype) * 8, debugMembers.data(), debugMembers.size(), translateTypeDebug(info->memberType));
+
+	// now let's build the lookup functions
+	{
+		auto [llfuncType, llfunc] = co_await declareFunction(info->ns->enumerationLookupFunction);
+		LLVMSetLinkage(llfunc, LLVMInternalLinkage);
+
+		auto param = LLVMGetParam(llfunc, 0);
+
+		auto entry = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@test0");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entry);
+		_builders.push(builder);
+
+		for (size_t i = 0; i < node->members.size(); ++i) {
+			const auto& [key, value] = node->members[i];
+			const auto& valueInfo = info->memberDetails[key];
+			const auto& memberVar = info->memberVariables[key];
+			auto var = _definedVariables[memberVar->id];
+
+			auto cmp = buildRawStringsAreEqual(_builders.top(), param, LLVMBuildGlobalStringPtr(_builders.top().get(), key.c_str(), ""));
+
+			auto cmpTrue = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ret" + std::to_string(i)).c_str());
+			auto cmpFalse = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@test" + std::to_string(i + 1)).c_str());
+
+			LLVMBuildCondBr(_builders.top().get(), cmp, cmpTrue, cmpFalse);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), cmpTrue);
+			auto val = LLVMConstNull(LLVMGetReturnType(llfuncType));
+			val = LLVMBuildInsertValue(_builders.top().get(), val, LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 1, false), 0, ("@ret_present_" + std::to_string(i)).c_str());
+			val = LLVMBuildInsertValue(_builders.top().get(), val, var, 1, ("@ret_insert_" + std::to_string(i)).c_str());
+			LLVMBuildRet(_builders.top().get(), val);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), cmpFalse);
+		}
+
+		LLVMSetValueName(LLVMBasicBlockAsValue(LLVMGetInsertBlock(_builders.top().get())), "@not_found");
+		LLVMBuildRet(_builders.top().get(), LLVMConstNull(LLVMGetReturnType(llfuncType)));
+
+		_builders.pop();
+	}
+
+	{
+		auto [llfuncType, llfunc] = co_await declareFunction(info->ns->enumerationReverseLookupFunction);
+		LLVMSetLinkage(llfunc, LLVMInternalLinkage);
+
+		auto entry = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@test0");
+		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(builder.get(), entry);
+		_builders.push(builder);
+
+		pushStack(ScopeStack::Type::Function);
+
+		std::shared_ptr<AltaCore::DET::Function> cmpFunc = nullptr;
+
+		if (info->memberType->klass) {
+			for (const auto& op: info->memberType->klass->operators) {
+				if (op->operatorType != AltaCore::Shared::ClassOperatorType::Equality) continue;
+				if (!op->parameterVariables[0]->type->isCompatibleWith(*info->memberType->reference())) continue;
+				if (!AltaCore::DET::Type(AltaCore::DET::NativeType::Bool).isCompatibleWith(*op->returnType)) continue;
+
+				// this is the operator we want
+				cmpFunc = op;
+				break;
+			}
+		}
+
+		if (!info->memberType->klass || cmpFunc) {
+			auto param = LLVMGetParam(llfunc, 0);
+			auto paramOnStack = cmpFunc ? co_await tmpify(param, info->ns->enumerationReverseLookupFunction->parameterVariables[0]->type, true) : NULL;
+
+			for (size_t i = 0; i < node->members.size(); ++i) {
+				const auto& [key, value] = node->members[i];
+				const auto& valueInfo = info->memberDetails[key];
+				const auto& memberVar = info->memberVariables[key];
+				auto var = _definedVariables[memberVar->id];
+
+				LLVMValueRef cmp = NULL;
+
+				if (info->memberType->klass) {
+					auto [llcmpFuncType, llcmpFunc] = co_await declareFunction(cmpFunc);
+
+					pushStack(ScopeStack::Type::Temporary);
+
+					std::array<LLVMValueRef, 2> args {
+						var,
+						co_await cast(paramOnStack, info->ns->enumerationReverseLookupFunction->parameterVariables[0]->type->reference(), cmpFunc->parameterVariables[0]->type, true, std::make_pair(true, false), false, &node->position),
+					};
+
+					auto ret = LLVMBuildCall2(_builders.top().get(), llcmpFuncType, llcmpFunc, args.data(), args.size(), ("@cmp" + std::to_string(i)).c_str());
+					cmp = co_await cast(ret, cmpFunc->returnType, std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Bool), false, std::make_pair(false, false), false, &node->position);
+
+					co_await currentStack().cleanup();
+					co_await popStack();
+				} else {
+					auto lhs = LLVMBuildLoad2(_builders.top().get(), lltype, var, ("@load" + std::to_string(i)).c_str());
+
+					if (info->memberType->isFloatingPoint()) {
+						cmp = LLVMBuildFCmp(_builders.top().get(), LLVMRealUEQ, lhs, param, ("@cmp" + std::to_string(i)).c_str());
+					} else {
+						cmp = LLVMBuildICmp(_builders.top().get(), LLVMIntEQ, lhs, param, ("@cmp" + std::to_string(i)).c_str());
+					}
+				}
+
+				auto cmpTrue = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@ret" + std::to_string(i)).c_str());
+				auto cmpFalse = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@test" + std::to_string(i + 1)).c_str());
+
+				LLVMBuildCondBr(_builders.top().get(), cmp, cmpTrue, cmpFalse);
+
+				LLVMPositionBuilderAtEnd(_builders.top().get(), cmpTrue);
+				auto val = LLVMConstNull(LLVMGetReturnType(llfuncType));
+				val = LLVMBuildInsertValue(_builders.top().get(), val, LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 1, false), 0, ("@ret_present_" + std::to_string(i)).c_str());
+				val = LLVMBuildInsertValue(_builders.top().get(), val, LLVMBuildGlobalStringPtr(_builders.top().get(), key.c_str(), ""), 1, ("@ret_insert_" + std::to_string(i)).c_str());
+				LLVMBuildRet(_builders.top().get(), val);
+
+				LLVMPositionBuilderAtEnd(_builders.top().get(), cmpFalse);
+			}
+
+			LLVMSetValueName(LLVMBasicBlockAsValue(LLVMGetInsertBlock(_builders.top().get())), "@not_found");
+			LLVMBuildRet(_builders.top().get(), LLVMConstNull(LLVMGetReturnType(llfuncType)));
+		} else {
+			LLVMBuildUnreachable(_builders.top().get());
+		}
+
+		co_await currentStack().cleanup();
+		co_await popStack();
+
+		_builders.pop();
+	}
 
 	co_return NULL;
 };

@@ -825,6 +825,7 @@ namespace AltaLL {
 		void buildBadCast(LLBuilder builder, const std::string& from, const std::string& to);
 		void buildBadEnum(LLBuilder builder, const std::string& enumType, LLVMValueRef badEnumValue);
 		LLVMValueRef buildVirtualLookup(LLBuilder builder, LLVMValueRef instance, const std::string& methodName);
+		LLVMValueRef buildRawStringsAreEqual(LLBuilder builder, LLVMValueRef lhs, LLVMValueRef rhs);
 
 		void updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset);
 		void updateSuspendablePushStack(LLVMValueRef push, size_t stackSize);
