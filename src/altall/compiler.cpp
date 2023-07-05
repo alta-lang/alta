@@ -1027,6 +1027,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 
 				auto llactualPtr = LLVMBuildPointerCast(_builders.top().get(), tmp, LLVMPointerType(llactual, 0), ("@copy_union_" + tmpIdxStr + "_member_" + std::to_string(memberIndex) + "_fake").c_str());
 
+				std::array<LLVMValueRef, 2> idxGEPIndices {
+					LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+					LLVMConstInt(gepStructIndexType, 0, false), // the index within the union
+				};
+				auto memberIdxPtr = LLVMBuildGEP2(_builders.top().get(), llactual, llactualPtr, idxGEPIndices.data(), idxGEPIndices.size(), ("@copy_union_" + tmpIdxStr + "_member_idx_" + std::to_string(memberIndex) + "_ref").c_str());
+
+				LLVMBuildStore(_builders.top().get(), LLVMConstInt(idxType, memberIndex, false), memberIdxPtr);
+
 				std::array<LLVMValueRef, 2> gepIndices {
 					LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
 					LLVMConstInt(gepStructIndexType, 1, false), // the member within the union
@@ -1035,7 +1043,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 
 				LLVMBuildStore(_builders.top().get(), copied, memberTmpPtr);
 
-				co_return LLVMBuildLoad2(_builders.top().get(), members[1], memberTmpPtr, ("@copy_union_" + tmpIdxStr + "_member_" + std::to_string(memberIndex)).c_str());
+				co_return LLVMBuildLoad2(_builders.top().get(), llunionType, tmp, ("@copy_union_" + tmpIdxStr + "_member_" + std::to_string(memberIndex)).c_str());
 			});
 
 			didCopyInternal = true;
