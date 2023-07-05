@@ -18,7 +18,9 @@ export class Type extends Node {
 	protected @override function serialize(): SerialNode {
 		let serial = new SerialNode("Type")
 
-		serial.setAttribute("target", this.target.proxy.serialize())
+		if this.target {
+			serial.setAttribute("target", this.target.proxy.serialize())
+		}
 
 		serial.setAttribute("isMutable", new SerialNode(content: this.isMutable ? "true" : "false"))
 		serial.setAttribute("isReference", new SerialNode(content: this.isReference ? "true" : "false"))
