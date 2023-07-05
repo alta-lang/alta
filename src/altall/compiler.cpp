@@ -900,6 +900,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 
 			if (currentType->referenceLevel() == 0) {
 				result = co_await tmpify(result, currentType, false);
+			} else if (currentType->indirectionLevel() > 0) {
+				result = co_await loadIndirection(result, currentType, 1);
 			}
 
 			auto [lltype, llfunc] = co_await declareFunction(component.method);
@@ -1379,6 +1381,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRealInstance(LLVMValueRef exp
 
 		if (exprType->indirectionLevel() == 0) {
 			result = co_await tmpify(result, exprType, false);
+		} else if (exprType->indirectionLevel() > 1) {
+			result = co_await loadIndirection(result, exprType, 1);
+			exprType = exprType->destroyIndirection()->reference();
 		}
 
 		std::array<LLVMValueRef, 3> accessGEP {
@@ -1425,6 +1430,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRootInstance(LLVMValueRef exp
 
 		if (exprType->indirectionLevel() == 0) {
 			result = co_await tmpify(result, exprType, false);
+		} else if (exprType->indirectionLevel() > 1) {
+			result = co_await loadIndirection(result, exprType, 1);
+			exprType = exprType->destroyIndirection()->reference();
 		}
 
 		std::array<LLVMValueRef, 3> accessGEP {
@@ -1514,6 +1522,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doParentRetrieval(LLVMValueRef e
 
 		if (exprType->indirectionLevel() == 0) {
 			result = co_await tmpify(result, exprType, false);
+		} else if (exprType->indirectionLevel() > 1) {
+			result = co_await loadIndirection(result, exprType, 1);
+			exprType = exprType->destroyIndirection()->reference();
 		}
 
 		auto refTargetType = targetType->indirectionLevel() > 0 ? targetType : targetType->reference();
@@ -1595,6 +1606,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doChildRetrieval(LLVMValueRef ex
 		std::vector<std::string> names;
 		for (const auto& parentAccessor: parentAccessors) {
 			names.push_back(mangleName(parentAccessor));
+		}
+
+		if (exprType->indirectionLevel() > 1) {
+			result = co_await loadIndirection(result, exprType, 1);
+			exprType = exprType->destroyIndirection()->reference();
 		}
 
 		result = buildGetChild(_builders.top(), result, names);
