@@ -140,3 +140,7 @@ export literal function _Alta_virtual_lookup(instance: ptr void, methodName: raw
 	# this should be impossible
 	assert false
 }
+
+export literal function _Alta_runtime_rawstrings_equal(lhs: rawconststring, rhs: rawconststring): bool {
+	return rawstringsEqual(lhs, rhs)
+}
