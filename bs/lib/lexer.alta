@@ -160,7 +160,7 @@ function isIdentifierNonFirst(cp: uint32): bool {
 # this could probably be split up into different coroutines like the parser is going to be,
 # but the lexer is small and simple enough that we can try to be as efficient as possible
 # by processing everything in this one single generator
-generator function process(file: Path)(uint32...): Token? {
+generator function process(file: Path)(uint32...): Token {
 	let token: Token? = null
 	let cpQueue: Queue<uint32>
 	let line: Size = 1
@@ -507,10 +507,8 @@ export class Lexer {
 	}
 
 	public function feed(input: CodePoint): void {
-		if let maybeMaybeTok = (*this.gen).next(input) {
-			if let maybeTok = *maybeMaybeTok {
-				this.tokens.push(*maybeTok)
-			}
+		if let maybeTok = (*this.gen).next(input) {
+			this.tokens.push(*maybeTok)
 		}
 	}
 
@@ -521,10 +519,8 @@ export class Lexer {
 	}
 
 	public function end(): void {
-		if let maybeMaybeTok = (*this.gen).next() {
-			if let maybeTok = *maybeMaybeTok {
-				this.tokens.push(*maybeTok)
-			}
+		if let maybeTok = (*this.gen).next() {
+			this.tokens.push(*maybeTok)
 		}
 	}
 }
