@@ -12,7 +12,10 @@
 #include <iostream>
 
 bool AltaLL::init() {
-	// nothing for now
+	LLVMInitializeAllTargetInfos();
+	LLVMInitializeAllTargets();
+	LLVMInitializeAllTargetMCs();
+	LLVMInitializeAllAsmPrinters();
 	return true;
 };
 
@@ -20,7 +23,7 @@ void AltaLL::finit() {
 	// nothing for now
 };
 
-void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Filesystem::Path binaryOutputPath, bool debug) {
+void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Filesystem::Path binaryOutputPath, bool debug, std::string targetName, std::string cpu, std::string cpuFeatures) {
 	auto llcontext = llwrap(LLVMContextCreate());
 	auto llmod = llwrap(LLVMModuleCreateWithNameInContext("alta_product", llcontext.get()));
 	std::string defaultTriple = wrapMessage(LLVMGetDefaultTargetTriple());
@@ -31,24 +34,36 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	auto outputBitcodePathStr = outputPathStr + ".bc";
 	auto outputDisassemblyPathStr = outputPathStr + ".ll";
 	auto outputObjectPathStr = outputPathStr + ".o";
+	char* errorMessage = NULL;
 
 	LLVMContextSetOpaquePointers(llcontext.get(), true);
 
 	std::stack<std::pair<std::shared_ptr<AltaCore::AST::RootNode>, size_t>> rootStack;
 	std::unordered_set<std::string> processedRoots;
 
-	LLVMInitializeNativeTarget();
-	LLVMInitializeNativeAsmPrinter();
-
-	if (LLVMGetTargetFromTriple(defaultTriple.c_str(), &rawTarget, NULL)) {
-		throw std::runtime_error("Failed to get target");
+	if (targetName.empty()) {
+		targetName = defaultTriple;
+		if (cpu.empty()) {
+			cpu = hostCPU;
+		}
+		if (cpuFeatures.empty()) {
+			cpuFeatures = hostCPUFeatures;
+		}
 	}
 
-	auto targetMachine = llwrap(LLVMCreateTargetMachine(rawTarget, defaultTriple.c_str(), hostCPU.c_str(), hostCPUFeatures.c_str(), debug ? LLVMCodeGenLevelNone : LLVMCodeGenLevelDefault, LLVMRelocPIC, LLVMCodeModelDefault));
+	std::string targetTriple = wrapMessage(LLVMNormalizeTargetTriple(targetName.c_str()));
+
+	if (LLVMGetTargetFromTriple(targetTriple.c_str(), &rawTarget, &errorMessage)) {
+		std::string err = wrapMessage(errorMessage);
+		errorMessage = nullptr;
+		throw std::runtime_error("Failed to get target: " + err);
+	}
+
+	auto targetMachine = llwrap(LLVMCreateTargetMachine(rawTarget, targetTriple.c_str(), cpu.c_str(), cpuFeatures.c_str(), debug ? LLVMCodeGenLevelNone : LLVMCodeGenLevelDefault, LLVMRelocPIC, LLVMCodeModelDefault));
 	auto targetData = llwrap(LLVMCreateTargetDataLayout(targetMachine.get()));
 
 	LLVMSetModuleDataLayout(llmod.get(), targetData.get());
-	LLVMSetTarget(llmod.get(), defaultTriple.c_str());
+	LLVMSetTarget(llmod.get(), targetTriple.c_str());
 
 	Compiler altaCompiler(llcontext, llmod, targetMachine, targetData);
 

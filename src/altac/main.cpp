@@ -421,6 +421,12 @@ int main(int argc, char** argv) {
       .longID("debug")
       .description("Compiles the code for debugging. This not only adds debug information to the output, but it also disables optimizations to allow the output to reflect the source as closely as possible.")
       ;
+    auto targetOption = Option()
+      .shortID("t")
+      .longID("target")
+      .description("Specifies the target to compile the code for")
+      .valueDescription("A target description string (i.e. target triple), as accepted by LLVM")
+      .defaultValue("");
 
     parser
       .add(verboseSwitch)
@@ -436,6 +442,7 @@ int main(int argc, char** argv) {
       .add(stdlibOverride)
       .add(outputTypeOption)
       .add(buildForDebugSwitch)
+      .add(targetOption)
       .parse(argc, argv)
       ;
 
@@ -880,7 +887,7 @@ int main(int argc, char** argv) {
       };
 
       try {
-        AltaLL::compile(root, outDir / target.name, buildForDebug);
+        AltaLL::compile(root, outDir / target.name, buildForDebug, targetOption.value());
       } catch (AltaCore::Errors::ValidationError& e) {
         std::cerr << CLI::COLOR_RED << "AST failed to compile" << CLI::COLOR_NORMAL << std::endl;
         logger(AltaCore::Logging::Message("frontend", "G0001", AltaCore::Logging::Severity::Error, e.position, e.what()));

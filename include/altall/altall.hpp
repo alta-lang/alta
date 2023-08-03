@@ -12,7 +12,7 @@ namespace AltaLL {
 
 	void registerAttributes(AltaCore::Filesystem::Path modulePath);
 
-	void compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Filesystem::Path binaryOutputPath, bool debug);
+	void compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Filesystem::Path binaryOutputPath, bool debug, std::string targetName, std::string cpu = "", std::string cpuFeatures = "");
 };
 
 #endif // ALTALL_ALTALL_HPP
