@@ -4536,6 +4536,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalStatement(std:
 
 		// now let's position the builder in the "false" block so we can continue with other alternatives
 		LLVMPositionBuilderAtEnd(_builders.top().get(), falseBlockExit);
+		if (inSuspendableFunction()) {
+			// create a new state for the false branch (since the next block will use the current suspendable index
+			// to determine where to branch for stack reloading)
+			co_await updateSuspendableStateIndex(++_suspendableStateIndex.top());
+		}
 
 		if (i == info->alternatives.size() && !node->finalResult) {
 			// this is the final alterantive and we don't have an "else" case;
@@ -4589,7 +4594,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileConditionalExpression(std
 
 	LLVMBuildCondBr(_builders.top().get(), test, trueBlock, falseBlock);
 
-	// this should and the short-circuiting logical operators should be the *only* times when we could have a suspendable state change (i.e. yield or await) during a stack branch
+	// this and the short-circuiting logical operators should be the *only* times when we could have a suspendable state change (i.e. yield or await) during a stack branch
 
 	currentStack().beginBranch();
 
