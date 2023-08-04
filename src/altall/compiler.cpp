@@ -410,7 +410,7 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::popping() {
 	auto func = LLVMGetBasicBlockParent(suspendableReloadBlock);
 	auto badBlock = LLVMAppendBasicBlockInContext(compiler._llcontext.get(), func, "@bad_state_index");
 	LLVMPositionBuilderAtEnd(suspendableReloadBuilder.get(), badBlock);
-	LLVMBuildUnreachable(suspendableReloadBuilder.get());
+	compiler.buildBadSuspendableState(suspendableReloadBuilder, suspendableContext);
 	LLVMPositionBuilderAtEnd(suspendableReloadBuilder.get(), suspendableReloadBlock);
 
 	auto gepIndexType = LLVMInt64TypeInContext(compiler._llcontext.get());
@@ -2334,7 +2334,7 @@ std::pair<LLVMValueRef, LLVMTypeRef> AltaLL::Compiler::defineRuntimeFunction(con
 			LLVMInt64TypeInContext(_llcontext.get()),
 		};
 		llfuncType = LLVMFunctionType(voidType, params.data(), params.size(), false);
-	} else if (name == "_Alta_suspendable_pop_stack" || name == "_Alta_suspendable_reload" || name == "_Alta_suspendable_reload_continue") {
+	} else if (name == "_Alta_suspendable_pop_stack" || name == "_Alta_suspendable_reload" || name == "_Alta_suspendable_reload_continue" || name == "_Alta_bad_suspendable_state") {
 		auto basicSuspendablePtrType = LLVMPointerType(_definedTypes["_Alta_basic_suspendable"], 0);
 		auto voidType = LLVMVoidTypeInContext(_llcontext.get());
 		std::array<LLVMTypeRef, 1> params {
@@ -2517,6 +2517,15 @@ LLVMValueRef AltaLL::Compiler::buildRawStringsAreEqual(LLBuilder builder, LLVMVa
 		rhs,
 	};
 	return LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+};
+
+void AltaLL::Compiler::buildBadSuspendableState(LLBuilder builder, LLVMValueRef suspendableContext) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_bad_suspendable_state");
+	std::array<LLVMValueRef, 1> args {
+		suspendableContext,
+	};
+	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+	LLVMBuildUnreachable(builder.get());
 };
 
 void AltaLL::Compiler::updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset) {
@@ -3059,7 +3068,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 		if (suspendableContext) {
 			auto badState = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@bad_state");
 			LLVMPositionBuilderAtEnd(_builders.top().get(), badState);
-			LLVMBuildUnreachable(_builders.top().get());
+			buildBadSuspendableState(_builders.top(), suspendableContext);
 
 			// alright, now let's go back to the entry block to set up the state switch
 			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
@@ -3100,7 +3109,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			auto badBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), _suspendableDestructor.top().function, "@bad_state");
 			LLVMPositionBuilderAtEnd(_builders.top().get(), badBlock);
-			LLVMBuildUnreachable(_builders.top().get());
+			buildBadSuspendableState(_builders.top(), suspendableContext);
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), _suspendableDestructor.top().entry);
 

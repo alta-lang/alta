@@ -12,6 +12,10 @@ export literal function _Alta_bad_enum(enumTypeName: rawconststring, badEnumValu
 	abort()
 }
 
+export literal function _Alta_bad_suspendable_state(suspendable: ptr native._Alta_basic_suspendable): void {
+	abort()
+}
+
 function _Alta_get_base(inst: ptr native._Alta_basic_class): ptr native._Alta_basic_class {
 	return ((inst as ptr byte) - inst.instance_info.class_info.offset_from_base) as ptr native._Alta_basic_class
 }

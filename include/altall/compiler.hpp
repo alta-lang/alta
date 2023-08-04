@@ -830,6 +830,7 @@ namespace AltaLL {
 		void buildBadEnum(LLBuilder builder, const std::string& enumType, LLVMValueRef badEnumValue);
 		LLVMValueRef buildVirtualLookup(LLBuilder builder, LLVMValueRef instance, const std::string& methodName);
 		LLVMValueRef buildRawStringsAreEqual(LLBuilder builder, LLVMValueRef lhs, LLVMValueRef rhs);
+		void buildBadSuspendableState(LLBuilder builder, LLVMValueRef suspendableContext);
 
 		void updateSuspendableAlloca(LLVMValueRef alloca, size_t stackOffset);
 		void updateSuspendablePushStack(LLVMValueRef push, size_t stackSize);
@@ -904,7 +905,7 @@ namespace AltaLL {
 			_pointerBits = LLVMPointerSize(_targetData.get()) * 8;
 
 			_unknownDebugFile = LLVMDIBuilderCreateFile(_debugBuilder.get(), "<unknown>", 9, "", 0);
-			_unknownDebugUnit = LLVMDIBuilderCreateCompileUnit(_debugBuilder.get(), LLVMDWARFSourceLanguageC, _unknownDebugFile, ALTA_COMPILER_NAME, sizeof(ALTA_COMPILER_NAME), /* TODO */ false, "", 0, 0x01000000, "", 0, LLVMDWARFEmissionFull, 0, true, false, "", 0, "", 0);
+			_unknownDebugUnit = LLVMDIBuilderCreateCompileUnit(_debugBuilder.get(), LLVMDWARFSourceLanguageC_plus_plus, _unknownDebugFile, ALTA_COMPILER_NAME, sizeof(ALTA_COMPILER_NAME), /* TODO */ false, "", 0, 0x01000000, "", 0, LLVMDWARFEmissionFull, 0, true, false, "", 0, "", 0);
 			_unknownRootDebugScope = _unknownDebugFile;
 		};
 
