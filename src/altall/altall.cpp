@@ -10,6 +10,7 @@
 #include <llvm-c/Analysis.h>
 #include <altall/mangle.hpp>
 #include <iostream>
+#include <llvm/BinaryFormat/Dwarf.h>
 
 bool AltaLL::init() {
 	LLVMInitializeAllTargetInfos();
@@ -111,6 +112,13 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 		};
 		auto node = LLVMMDNodeInContext2(llcontext.get(), refs.data(), refs.size());
 		LLVMAddNamedMetadataOperand(llmod.get(), "alta.mapping", LLVMMetadataAsValue(llcontext.get(), node));
+	}
+
+	if (debug) {
+		auto debugInfoVerMD = LLVMValueAsMetadata(LLVMConstInt(LLVMInt32TypeInContext(llcontext.get()), llvm::DEBUG_METADATA_VERSION, false));
+		auto dwarfVersionMD = LLVMValueAsMetadata(LLVMConstInt(LLVMInt32TypeInContext(llcontext.get()), llvm::dwarf::DWARF_VERSION, false));
+		LLVMAddModuleFlag(llmod.get(), LLVMModuleFlagBehaviorWarning, "Dwarf Version", sizeof("Dwarf Version"), dwarfVersionMD);
+		LLVMAddModuleFlag(llmod.get(), LLVMModuleFlagBehaviorWarning, "Debug Info Version", sizeof("Debug Info Version") - 1, debugInfoVerMD);
 	}
 
 	// for debugging
