@@ -2058,18 +2058,18 @@ LLVMMetadataRef AltaLL::Compiler::translateClassDebug(std::shared_ptr<AltaCore::
 	if (suspendable) {
 		// suspendable contexts require suspendable context info
 		auto basicSuspendable = _definedDebugTypes[isCoroutine ? "_Alta_basic_coroutine" : "_Alta_basic_generator"];
-		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "base", sizeof("base") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(basicSuspendable), LLVMDITypeGetAlignInBits(basicSuspendable), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagZero, basicSuspendable));
+		members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "base", sizeof("base") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(basicSuspendable), LLVMDITypeGetAlignInBits(basicSuspendable), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagPublic, basicSuspendable));
 
 		// suspendable functions might require an input and output variable
 
 		if (klass->suspendableInput) {
 			auto debugType = translateTypeDebug(klass->suspendableInput->makeOptional());
-			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "suspendable_input", sizeof("suspendable_input") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagZero, debugType));
+			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "suspendable_input", sizeof("suspendable_input") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagPublic, debugType));
 		}
 
 		if (klass->suspendableOutput) {
 			auto debugType = translateTypeDebug(klass->suspendableOutput->makeOptional());
-			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "suspendable_output", sizeof("suspendable_output") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagZero, debugType));
+			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), tmpDebug, "suspendable_output", sizeof("suspendable_output") - 1, debugFileForScope(klass->scope), klass->position.line, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), lltype, members.size()) * 8, LLVMDIFlagPublic, debugType));
 		}
 	}
 
@@ -2241,7 +2241,7 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 		uint64_t unionSize = 0;
 		uint32_t unionAlign = 0;
 
-		structMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__tag", sizeof("__tag") - 1, debugFile, type->position.line, tagBits, LLVMABIAlignmentOfType(_targetData.get(), tagType) * 8, 0, LLVMDIFlagArtificial, tagDebugType);
+		structMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__tag", sizeof("__tag") - 1, debugFile, type->position.line, tagBits, LLVMABIAlignmentOfType(_targetData.get(), tagType) * 8, 0, static_cast<LLVMDIFlags>(LLVMDIFlagPublic), tagDebugType);
 		offsetMembers[0] = tagType;
 
 		for (const auto& component: type->unionOf) {
@@ -2254,7 +2254,7 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 			auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), offsetMembers.data(), offsetMembers.size(), false);
 
 			auto offset = LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1);
-			structMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), offsetMembers[1]) * 8, LLVMABIAlignmentOfType(_targetData.get(), offsetMembers[1]) * 8, offset * 8, LLVMDIFlagArtificial, debugType);
+			structMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), offsetMembers[1]) * 8, LLVMABIAlignmentOfType(_targetData.get(), offsetMembers[1]) * 8, offset * 8, static_cast<LLVMDIFlags>(LLVMDIFlagPublic), debugType);
 
 			offsetMembers[1] = nullptr;
 
@@ -2271,7 +2271,7 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 
 			auto memberStruct = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, size * 8, align * 8, LLVMDIFlagArtificial, NULL, structMembers.data(), structMembers.size(), 0, NULL, "", 0);
 			auto mangledName = mangleType(component);
-			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), mangledName.c_str(), mangledName.size(), debugFile, type->position.line, size * 8, align * 8, 0, LLVMDIFlagArtificial, memberStruct));
+			members.push_back(LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), mangledName.c_str(), mangledName.size(), debugFile, type->position.line, size * 8, align * 8, 0, static_cast<LLVMDIFlags>(LLVMDIFlagPublic), memberStruct));
 			structMembers[1] = nullptr;
 		}
 
@@ -2295,10 +2295,10 @@ LLVMMetadataRef AltaLL::Compiler::translateTypeDebug(std::shared_ptr<AltaCore::D
 		auto tmpStruct = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		auto boolType = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "bool", 4, 8, llvm::dwarf::DW_ATE_boolean, LLVMDIFlagZero);
-		debugMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__present", sizeof("__present") - 1, debugFile, type->position.line, 8, 8, 0, LLVMDIFlagArtificial, boolType);
+		debugMembers[0] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__present", sizeof("__present") - 1, debugFile, type->position.line, 8, 8, 0, static_cast<LLVMDIFlags>(LLVMDIFlagPublic), boolType);
 
 		auto targetType = translateTypeDebug(type->optionalTarget);
-		debugMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMDITypeGetSizeInBits(targetType), LLVMDITypeGetAlignInBits(targetType), LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1) * 8, LLVMDIFlagArtificial, targetType);
+		debugMembers[1] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), translateParentScope(type), "__body", sizeof("__body") - 1, debugFile, type->position.line, LLVMDITypeGetSizeInBits(targetType), LLVMDITypeGetAlignInBits(targetType), LLVMOffsetOfElement(_targetData.get(), tmpStruct, 1) * 8, static_cast<LLVMDIFlags>(LLVMDIFlagPublic), targetType);
 
 		result = LLVMDIBuilderCreateStructType(_debugBuilder.get(), translateParentScope(type), "", 0, debugFile, type->position.line, LLVMStoreSizeOfType(_targetData.get(), tmpStruct) * 8, LLVMABIAlignmentOfType(_targetData.get(), tmpStruct) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
 	} else if (type->bitfield) {
@@ -3993,7 +3993,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 		std::array<LLVMValueRef, 2> vals;
 		vals[0] = LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 0, false);
 		vals[1] = LLVMGetPoison(co_await translateType(info->targetType->optionalTarget));
-		rhs = LLVMConstNamedStruct(co_await translateType(info->targetType), vals.data(), vals.size());
+		rhs = LLVMConstNamedStruct(co_await translateType(info->targetType->destroyIndirection()), vals.data(), vals.size());
 	} else {
 		rhs = co_await cast(rhs, rhsType, rhsTargetType, canCopy, additionalCopyInfo(node->value, info->value), false, &node->value->position);
 	}
@@ -7339,8 +7339,8 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto debugVoidPtrType = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugVoidType, _pointerBits, _pointerBits, 0, "", 0);
 
 		std::array<LLVMMetadataRef, 2> debugMembers {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "name", sizeof("name") - 1, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugStringType), LLVMDITypeGetAlignInBits(debugStringType), LLVMOffsetOfElement(_targetData.get(), virtEntryType, 0) * 8, LLVMDIFlagZero, debugStringType),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "function", sizeof("function") - 1, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugVoidPtrType), LLVMDITypeGetAlignInBits(debugVoidPtrType), LLVMOffsetOfElement(_targetData.get(), virtEntryType, 1) * 8, LLVMDIFlagZero, debugVoidPtrType),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "name", sizeof("name") - 1, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugStringType), LLVMDITypeGetAlignInBits(debugStringType), LLVMOffsetOfElement(_targetData.get(), virtEntryType, 0) * 8, LLVMDIFlagPublic, debugStringType),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "function", sizeof("function") - 1, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugVoidPtrType), LLVMDITypeGetAlignInBits(debugVoidPtrType), LLVMOffsetOfElement(_targetData.get(), virtEntryType, 1) * 8, LLVMDIFlagPublic, debugVoidPtrType),
 		};
 
 		_definedDebugTypes["_Alta_virtual_entry"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_virtual_entry", sizeof("_Alta_virtual_entry") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), virtEntryType) * 8, LLVMABIAlignmentOfType(_targetData.get(), virtEntryType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
@@ -7417,7 +7417,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		std::array<LLVMMetadataRef, 7> debugMembers;
 		for (size_t i = 0; i < debugMembers.size(); ++i) {
 			auto debugType = mapType(i);
-			debugMembers[i] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, memberNames[i], strlen(memberNames[i]), _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), classInfoType, i) * 8, LLVMDIFlagZero, debugType);
+			debugMembers[i] = LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, memberNames[i], strlen(memberNames[i]), _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugType), LLVMDITypeGetAlignInBits(debugType), LLVMOffsetOfElement(_targetData.get(), classInfoType, i) * 8, LLVMDIFlagPublic, debugType);
 		}
 
 		_definedDebugTypes["_Alta_class_info"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_class_info", sizeof("_Alta_class_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), classInfoType) * 8, LLVMABIAlignmentOfType(_targetData.get(), classInfoType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
@@ -7437,7 +7437,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto debugClassInfoPtr = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugClassInfo, _pointerBits, _pointerBits, 0, NULL, 0);
 
 		std::array<LLVMMetadataRef, 1> debugElements {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "class_info", sizeof("class_info") - 1, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugClassInfo), LLVMDITypeGetAlignInBits(debugClassInfo), 0, LLVMDIFlagZero, debugClassInfoPtr),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "class_info", sizeof("class_info") - 1, _unknownDebugFile, 0, LLVMDITypeGetSizeInBits(debugClassInfo), LLVMDITypeGetAlignInBits(debugClassInfo), 0, LLVMDIFlagPublic, debugClassInfoPtr),
 		};
 
 		_definedDebugTypes["_Alta_instance_info"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_instance_info", sizeof("_Alta_instance_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), instanceInfoStruct) * 8, LLVMABIAlignmentOfType(_targetData.get(), instanceInfoStruct) * 8, LLVMDIFlagZero, NULL, debugElements.data(), debugElements.size(), 0, NULL, "", 0);
@@ -7485,8 +7485,8 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto funcType = _definedTypes["_Alta_basic_function"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		std::array<LLVMMetadataRef, 2> debugMembers {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "function", sizeof("function") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 0) * 8, LLVMDIFlagZero, debugVoidPointer),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "lambda_state", sizeof("lambda_state") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 1) * 8, LLVMDIFlagZero, debugVoidPointer),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "function", sizeof("function") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 0) * 8, LLVMDIFlagPublic, debugVoidPointer),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "lambda_state", sizeof("lambda_state") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), funcType, 1) * 8, LLVMDIFlagPublic, debugVoidPointer),
 		};
 
 		_definedDebugTypes["_Alta_basic_function"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_function", sizeof("_Alta_basic_function") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), funcType) * 8, LLVMABIAlignmentOfType(_targetData.get(), funcType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
@@ -7536,9 +7536,9 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto debugTypePtr = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), debugType, _pointerBits, _pointerBits, 0, NULL, 0);
 
 		std::array<LLVMMetadataRef, 3> debugMembers {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "size", sizeof("size") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagZero, debugI64Type),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "next", sizeof("next") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[1]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[1]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 1) * 8, LLVMDIFlagZero, debugTypePtr),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "prev", sizeof("prev") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[2]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[2]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 2) * 8, LLVMDIFlagZero, debugTypePtr),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "size", sizeof("size") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagPublic, debugI64Type),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "next", sizeof("next") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[1]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[1]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 1) * 8, LLVMDIFlagPublic, debugTypePtr),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "prev", sizeof("prev") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[2]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[2]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 2) * 8, LLVMDIFlagPublic, debugTypePtr),
 		};
 
 		auto permaDebugType = _definedDebugTypes["_Alta_basic_suspendable_stack"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_suspendable_stack", sizeof("_Alta_basic_suspendable_stack") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, "", 0);
@@ -7570,10 +7570,10 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto debugStackPtr = LLVMDIBuilderCreatePointerType(_debugBuilder.get(), _definedDebugTypes["_Alta_basic_suspendable_stack"], _pointerBits, _pointerBits, 0, NULL, 0);
 
 		std::array<LLVMMetadataRef, 4> debugMembers {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "instance_info", sizeof("instance_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagZero, _definedDebugTypes["_Alta_instance_info"]),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "state", sizeof("state") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[1]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[1]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 1) * 8, LLVMDIFlagZero, debugI64Type),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "done", sizeof("done") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[2]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[2]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 2) * 8, LLVMDIFlagZero, debugBoolType),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "current_stack", sizeof("current_stack") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[3]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[3]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 3) * 8, LLVMDIFlagZero, debugStackPtr),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "instance_info", sizeof("instance_info") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagPublic, _definedDebugTypes["_Alta_instance_info"]),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "state", sizeof("state") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[1]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[1]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 1) * 8, LLVMDIFlagPublic, debugI64Type),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "done", sizeof("done") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[2]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[2]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 2) * 8, LLVMDIFlagPublic, debugBoolType),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "current_stack", sizeof("current_stack") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[3]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[3]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 3) * 8, LLVMDIFlagPublic, debugStackPtr),
 		};
 
 		_definedDebugTypes["_Alta_basic_suspendable"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_suspendable", sizeof("_Alta_basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, NULL, 0);
@@ -7593,7 +7593,7 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto structType = _definedTypes["_Alta_basic_generator"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
 
 		std::array<LLVMMetadataRef, 1> debugMembers {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "basic_suspendable", sizeof("basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagZero, _definedDebugTypes["_Alta_basic_suspendable"]),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "basic_suspendable", sizeof("basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagPublic, _definedDebugTypes["_Alta_basic_suspendable"]),
 		};
 
 		_definedDebugTypes["_Alta_basic_generator"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_generator", sizeof("_Alta_basic_generator") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, NULL, 0);
@@ -7641,10 +7641,10 @@ void AltaLL::Compiler::compile(std::shared_ptr<AltaCore::AST::RootNode> root) {
 		auto debugI64Type = LLVMDIBuilderCreateBasicType(_debugBuilder.get(), "u64", 3, 64, llvm::dwarf::DW_ATE_unsigned, LLVMDIFlagZero);
 
 		std::array<LLVMMetadataRef, 4> debugMembers {
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "basic_suspendable", sizeof("basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagZero, _definedDebugTypes["_Alta_basic_suspendable"]),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "waiting_for", sizeof("waiting_for") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), structType, 1) * 8, LLVMDIFlagZero, fwdPtr),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "next", sizeof("next") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), structType, 2) * 8, LLVMDIFlagZero, debugCoroutineNext),
-			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "id", sizeof("id") - 1, _unknownDebugFile, 0, 64, 64, LLVMOffsetOfElement(_targetData.get(), structType, 3) * 8, LLVMDIFlagZero, debugI64Type),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "basic_suspendable", sizeof("basic_suspendable") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), members[0]) * 8, LLVMABIAlignmentOfType(_targetData.get(), members[0]) * 8, LLVMOffsetOfElement(_targetData.get(), structType, 0) * 8, LLVMDIFlagPublic, _definedDebugTypes["_Alta_basic_suspendable"]),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "waiting_for", sizeof("waiting_for") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), structType, 1) * 8, LLVMDIFlagPublic, fwdPtr),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "next", sizeof("next") - 1, _unknownDebugFile, 0, _pointerBits, _pointerBits, LLVMOffsetOfElement(_targetData.get(), structType, 2) * 8, LLVMDIFlagPublic, debugCoroutineNext),
+			LLVMDIBuilderCreateMemberType(_debugBuilder.get(), _unknownDebugFile, "id", sizeof("id") - 1, _unknownDebugFile, 0, 64, 64, LLVMOffsetOfElement(_targetData.get(), structType, 3) * 8, LLVMDIFlagPublic, debugI64Type),
 		};
 
 		auto debugType = _definedDebugTypes["_Alta_basic_coroutine"] = LLVMDIBuilderCreateStructType(_debugBuilder.get(), _unknownDebugFile, "_Alta_basic_coroutine", sizeof("_Alta_basic_coroutine") - 1, _unknownDebugFile, 0, LLVMStoreSizeOfType(_targetData.get(), structType) * 8, LLVMABIAlignmentOfType(_targetData.get(), structType) * 8, LLVMDIFlagZero, NULL, debugMembers.data(), debugMembers.size(), 0, NULL, NULL, 0);
