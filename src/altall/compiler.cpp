@@ -1223,7 +1223,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 
 			// UDecWrap is not available in my current version of LLVM (nor in any version of the C API I can currently find)
 			//auto old = LLVMBuildAtomicRMW(_builders.top().get(),  LLVMAtomicRMWBinOpUDecWrap, refCountPtr, LLVMConstInt(refCountType, 0, false), LLVMAtomicOrderingRelease, false);
-			auto old = LLVMBuildAtomicRMW(_builders.top().get(), LLVMAtomicRMWBinOpSub, refCountPtr, LLVMConstInt(refCountType, 0, false), LLVMAtomicOrderingRelease, false);
+			auto old = LLVMBuildAtomicRMW(_builders.top().get(), LLVMAtomicRMWBinOpSub, refCountPtr, LLVMConstInt(refCountType, 1, false), LLVMAtomicOrderingRelease, false);
 
 			LLVMSetValueName(old, ("@dtor_fat_func_" + tmpIdxStr + "_old_refcnt").c_str());
 
