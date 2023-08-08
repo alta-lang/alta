@@ -670,6 +670,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 					throw std::runtime_error("This should be impossible (cast:optional_present)");
 				}
 				result = co_await loadRef(result, currentType);
+				if (currentType->indirectionLevel() == 0 && !additionalCopyInfo.first && !copy) {
+					// it *should* be safe to tmpify whenever we can't copy
+					co_await tmpify(result, currentType);
+				}
 				result = LLVMBuildExtractValue(_builders.top().get(), result, 0, ("@check_opt_present_" + tmpIdxStr).c_str());
 				currentType = std::make_shared<DET::Type>(DET::NativeType::Bool);
 				copy = false;
@@ -773,7 +777,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			additionalCopyInfo = std::make_pair(false, false);
 		} else if (component.type == CCT::Reference) {
 			if (additionalCopyInfo.second) {
-				result = co_await tmpify(result, currentType, false);
+				// it *should* be safe to tmpify whenever we can't copy
+				result = co_await tmpify(result, currentType, !additionalCopyInfo.first && !copy);
 			}
 
 			currentType = currentType->reference();
@@ -900,7 +905,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 			auto classType = std::make_shared<DET::Type>(component.method->parentScope.lock()->parentClass.lock());
 
 			if (currentType->referenceLevel() == 0) {
-				result = co_await tmpify(result, currentType, false);
+				// XXX: not sure if this is safe to place on the stack in all cases
+				result = co_await tmpify(result, currentType);
 			} else if (currentType->indirectionLevel() > 0) {
 				result = co_await loadIndirection(result, currentType, 1);
 			}
@@ -1267,7 +1273,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 			};
 
 			contained = LLVMBuildGEP2(_builders.top().get(), co_await translateType(exprType->destroyReferences()), result, gepIndices.data(), gepIndices.size(), ("@dtor_opt_" + tmpIdxStr + "_val_ref").c_str());
-			containedType = containedType->reference();
+			//containedType = containedType->reference();
 
 			auto llfunc = LLVMGetBasicBlockParent(LLVMGetInsertBlock(_builders.top().get()));
 			auto doDtorBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@dtor_opt_" + tmpIdxStr + "_do_dtor").c_str());
@@ -1390,9 +1396,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRealInstance(LLVMValueRef exp
 		auto tmpIdx = nextTemp();
 		auto tmpIdxStr = std::to_string(tmpIdx);
 
-		if (exprType->indirectionLevel() == 0) {
-			result = co_await tmpify(result, exprType, false);
-		} else if (exprType->indirectionLevel() > 1) {
+		// it should be impossible to get the real instance of a raw class instance
+		assert(exprType->indirectionLevel() != 0);
+
+		if (exprType->indirectionLevel() > 1) {
 			result = co_await loadIndirection(result, exprType, 1);
 			exprType = exprType->destroyIndirection()->reference();
 		}
@@ -1439,9 +1446,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRootInstance(LLVMValueRef exp
 		auto tmpIdx = nextTemp();
 		auto tmpIdxStr = std::to_string(tmpIdx);
 
-		if (exprType->indirectionLevel() == 0) {
-			result = co_await tmpify(result, exprType, false);
-		} else if (exprType->indirectionLevel() > 1) {
+		// it should be impossible to get the root instance of a raw class instance
+		assert(exprType->indirectionLevel() != 0);
+
+		if (exprType->indirectionLevel() > 1) {
 			result = co_await loadIndirection(result, exprType, 1);
 			exprType = exprType->destroyIndirection()->reference();
 		}
@@ -1532,7 +1540,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doParentRetrieval(LLVMValueRef e
 		}
 
 		if (exprType->indirectionLevel() == 0) {
-			result = co_await tmpify(result, exprType, false);
+			result = co_await tmpify(result, exprType);
 		} else if (exprType->indirectionLevel() > 1) {
 			result = co_await loadIndirection(result, exprType, 1);
 			exprType = exprType->destroyIndirection()->reference();
