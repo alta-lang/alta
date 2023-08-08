@@ -375,14 +375,18 @@ namespace AltaLL {
 			return _rootDebugScopes[module->path];
 		};
 
-		inline LLVMMetadataRef translateFunction(std::shared_ptr<AltaCore::DET::Function> func, bool asDefinition = false) {
-			if (!_overrideFuncScopes.empty() && _overrideFuncScopes.top().first == func->id) {
+		inline LLVMMetadataRef translateFunction(std::shared_ptr<AltaCore::DET::Function> func, bool asDefinition = false, std::string methodID = "", bool skipFirstParam = false) {
+			if (methodID.empty()) {
+				methodID = func->id;
+			}
+
+			if (!_overrideFuncScopes.empty() && _overrideFuncScopes.top().first == methodID) {
 				return _overrideFuncScopes.top().second;
 			}
 
 			// if we already had a scope defined for this function, it was just a declaration, so we overwrite it unconditionally.
 			// nothing outside the function needs access to the function definition's scope, so this should be perfectly fine.
-			bool needsToBeSet = !_definedScopes[func->id] || (asDefinition && !reinterpret_cast<llvm::MDNode*>(_definedScopes[func->id])->isTemporary() && !reinterpret_cast<llvm::DISubprogram*>(_definedScopes[func->id])->isDefinition());
+			bool needsToBeSet = !_definedScopes[methodID] || (asDefinition && !reinterpret_cast<llvm::MDNode*>(_definedScopes[methodID])->isTemporary() && !reinterpret_cast<llvm::DISubprogram*>(_definedScopes[methodID])->isDefinition());
 			if (needsToBeSet) {
 				auto mangled = mangleName(func);
 				auto parentScope = func->parentScope.lock();
@@ -390,7 +394,7 @@ namespace AltaLL {
 				auto debugFile = debugFileForModule(parentModule);
 
 				// create a temporary node to resolve cycles in the scope resolution
-				auto tmpNode = _definedScopes[func->id] = LLVMTemporaryMDNode(_llcontext.get(), NULL, 0);
+				auto tmpNode = _definedScopes[methodID] = LLVMTemporaryMDNode(_llcontext.get(), NULL, 0);
 
 				auto llparentScope = translateScope(parentScope);
 
@@ -403,6 +407,13 @@ namespace AltaLL {
 				}
 
 				auto altaFuncType = AltaCore::DET::Type::getUnderlyingType(func);
+
+#if 0
+				if (skipFirstParam) {
+					altaFuncType = altaFuncType->copy();
+					altaFuncType->parameters.erase(altaFuncType->parameters.begin());
+				}
+#endif
 
 				if (func->isLambda) {
 					altaFuncType->isRawFunction = true;
@@ -432,12 +443,12 @@ namespace AltaLL {
 						break;
 				}
 
-				_definedScopes[func->id] = LLVMDIBuilderCreateFunction(_debugBuilder.get(), llparentScope, func->name.c_str(), func->name.size(), mangled.c_str(), mangled.size(), debugFile, func->position.line, funcType, false, asDefinition, func->position.line, static_cast<LLVMDIFlags>(flags), /* TODO */ false);
+				_definedScopes[methodID] = LLVMDIBuilderCreateFunction(_debugBuilder.get(), llparentScope, func->name.c_str(), func->name.size(), mangled.c_str(), mangled.size(), debugFile, func->position.line, funcType, false, asDefinition, func->position.line, static_cast<LLVMDIFlags>(flags), /* TODO */ false);
 
 				// now replace all uses of the temporary node
-				LLVMMetadataReplaceAllUsesWith(tmpNode, _definedScopes[func->id]);
+				LLVMMetadataReplaceAllUsesWith(tmpNode, _definedScopes[methodID]);
 			}
-			return _definedScopes[func->id];
+			return _definedScopes[methodID];
 		};
 
 		inline LLVMMetadataRef debugFileForScope(std::shared_ptr<AltaCore::DET::Scope> scope) {
@@ -489,6 +500,8 @@ namespace AltaLL {
 		};
 
 		inline LLVMMetadataRef translateScope(std::shared_ptr<AltaCore::DET::Scope> scope) {
+			static size_t overrideCounter = 0;
+
 			if (!scope) {
 				return _unknownRootDebugScope;
 			}
@@ -498,7 +511,7 @@ namespace AltaLL {
 			if (!_overrideFuncScopes.empty()) {
 				if (auto func = AltaCore::Util::getFunction(scope).lock()) {
 					if (func->id == _overrideFuncScopes.top().first) {
-						scopeID += "@override";
+						scopeID += "@override@" + std::to_string(overrideCounter++);
 					}
 				}
 			}

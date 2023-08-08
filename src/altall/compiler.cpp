@@ -5111,8 +5111,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 	auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 	LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
-	auto llfuncDebug = translateFunction(info->method, true);
+	auto llfuncDebug = translateFunction(info->method, true, methodID);
 	LLVMSetSubprogram(llfunc, llfuncDebug);
+
+	_overrideFuncScopes.emplace(info->method->id, llfuncDebug);
 
 	_builders.push(builder);
 	pushStack(ScopeStack::Type::Function);
@@ -5122,6 +5124,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		auto selfParam = LLVMGetParam(llfunc, 0);
 		LLVMSetValueName(selfParam, "@this");
 		_thisContextValue.push(selfParam);
+
+		auto tmpThis = co_await tmpify(selfParam, info->method->parentClassType, false, true);
+
+		auto thisDebugType = LLVMDIBuilderCreateObjectPointerType(_debugBuilder.get(), translateTypeDebug(info->method->parentClassType));
+		auto thisDebugVar = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->method->scope), "this", sizeof("this") - 1, 1, debugFileForScopeItem(info->method), node->position.line, thisDebugType, false, LLVMDIFlagZero);
+		auto thisDebugLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), node->position.line, node->position.column, translateScope(info->method->scope), NULL);
+
+		LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), tmpThis, thisDebugVar, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), thisDebugLoc, LLVMGetInsertBlock(_builders.top().get()));
 	}
 
 	if (isCtor) {
@@ -5345,7 +5355,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 	}
 
 	co_await popStack();
+	popDebugLocation();
 	_builders.pop();
+
+	_overrideFuncScopes.pop();
 
 	if (isCtor) {
 		auto methodID2 = info->method->id;
@@ -5368,7 +5381,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
+		auto llfuncDebug = translateFunction(info->method, true, methodID2, true);
+		LLVMSetSubprogram(llfunc2, llfuncDebug);
+
+		_overrideFuncScopes.emplace(info->method->id, llfuncDebug);
+
 		_builders.push(builder);
+		pushUnknownDebugLocation(info->method->scope);
 
 		auto llclassRefType = LLVMPointerType(llclassType, 0);
 		auto llboolType = LLVMInt1TypeInContext(_llcontext.get());
@@ -5401,7 +5420,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 		LLVMBuildRet(_builders.top().get(), LLVMBuildLoad2(_builders.top().get(), llclassType, instance, ""));
 
+		popDebugLocation();
 		_builders.pop();
+
+		_overrideFuncScopes.pop();
 
 		// now build the persistent version
 		methodID2 = "_persistent_" + methodID2;
@@ -5419,7 +5441,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 		builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 		LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
+		auto llfuncDebug2 = translateFunction(info->method, true, methodID2, true);
+		LLVMSetSubprogram(llfunc2, llfuncDebug2);
+
+		_overrideFuncScopes.emplace(info->method->id, llfuncDebug2);
+
 		_builders.push(builder);
+		pushUnknownDebugLocation(info->method->scope);
 
 		instance = LLVMBuildMalloc(_builders.top().get(), llclassType, "@this");
 
@@ -5437,7 +5465,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 		LLVMBuildRet(_builders.top().get(), instance);
 
+		popDebugLocation();
 		_builders.pop();
+
+		_overrideFuncScopes.pop();
 
 		auto llfuncReturnsRef = llfunc2;
 		auto llfuncTypeReturnsRef = llfuncType2;
@@ -5449,11 +5480,20 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 			auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
+			auto castFuncDebug = translateFunction(info->correspondingMethod, true);
+			LLVMSetSubprogram(castFunc, castFuncDebug);
+
+			_builders.push(builder);
+			pushUnknownDebugLocation(info->correspondingMethod->scope);
+
 			auto llval = LLVMGetParam(castFunc, 0);
 
 			auto result = LLVMBuildCall2(builder.get(), llfuncTypeReturnsInstance, llfuncReturnsInstance, &llval, 1, "");
 
 			LLVMBuildRet(builder.get(), result);
+
+			popDebugLocation();
+			_builders.pop();
 		}
 
 		if (info->optionalVariantFunctions.size() > 0) {
@@ -5498,7 +5538,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 				LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
+				auto llfuncOptionalDebug = translateFunction(variant, true);
+				LLVMSetSubprogram(llfuncOptional, llfuncOptionalDebug);
+
 				_builders.push(builder);
+				pushUnknownDebugLocation(variant->scope);
 				pushStack(ScopeStack::Type::Function);
 
 				std::vector<LLVMValueRef> args;
@@ -5510,7 +5554,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 					const auto& paramInfo = info->parameters[i];
 
 					if (paramInfo->defaultValue && !optionalValueProvided[optionalIndex++]) {
+						auto tmp = paramInfo->defaultValue->inputScope;
+						paramInfo->defaultValue->inputScope = variant->scope;
 						auto compiled = co_await compileNode(node->parameters[i]->defaultValue, paramInfo->defaultValue);
+						paramInfo->defaultValue->inputScope = tmp;
 						auto casted = co_await cast(compiled, AltaCore::DET::Type::getUnderlyingType(paramInfo->defaultValue.get()), paramInfo->type->type, false, additionalCopyInfo(node->parameters[i]->defaultValue, paramInfo->defaultValue), false, &node->parameters[i]->defaultValue->position);
 						args.push_back(casted);
 					} else {
@@ -5528,6 +5575,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				LLVMBuildRet(_builders.top().get(), call);
 
 				co_await popStack();
+				popDebugLocation();
 				_builders.pop();
 
 				// now build the persistent version
@@ -5546,7 +5594,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
 				LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
 
+				llfuncOptionalDebug = translateFunction(variant, true, optionalMethodID);
+				LLVMSetSubprogram(llfuncOptional, llfuncOptionalDebug);
+
+				_overrideFuncScopes.emplace(variant->id, llfuncOptionalDebug);
+
 				_builders.push(builder);
+				pushUnknownDebugLocation(variant->scope);
 				pushStack(ScopeStack::Type::Function);
 
 				args.clear();
@@ -5558,7 +5612,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 					const auto& paramInfo = info->parameters[i];
 
 					if (paramInfo->defaultValue && !optionalValueProvided[optionalIndex++]) {
+						auto tmp = paramInfo->defaultValue->inputScope;
+						paramInfo->defaultValue->inputScope = variant->scope;
 						auto compiled = co_await compileNode(node->parameters[i]->defaultValue, paramInfo->defaultValue);
+						paramInfo->defaultValue->inputScope = tmp;
 						auto casted = co_await cast(compiled, AltaCore::DET::Type::getUnderlyingType(paramInfo->defaultValue.get()), paramInfo->type->type, false, additionalCopyInfo(node->parameters[i]->defaultValue, paramInfo->defaultValue), false, &node->parameters[i]->defaultValue->position);
 						args.push_back(casted);
 					} else {
@@ -5576,7 +5633,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 				LLVMBuildRet(_builders.top().get(), call);
 
 				co_await popStack();
+				popDebugLocation();
 				_builders.pop();
+
+				_overrideFuncScopes.pop();
 			}
 		}
 	} else {
@@ -5586,7 +5646,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 	_suspendableContext.pop();
 
-	popDebugLocation();
 	co_return NULL;
 };
 
