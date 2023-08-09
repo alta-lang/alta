@@ -3150,6 +3150,17 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), earlyExit);
 
+			if (genClass->suspendableInput || genClass->suspendableOutput) {
+				std::array<LLVMValueRef, 2> storedValueGEPIndices {
+					LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+					LLVMConstInt(gepStructIndexType, 1, false), // @Suspendable@::suspendable_input or @Suspendable@::suspendable_output
+				};
+				auto inputGEP = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, storedValueGEPIndices.data(), storedValueGEPIndices.size(), "@suspendable_stored_value_gep");
+				auto maybeType = genClass->suspendableInput ? genClass->suspendableInput->makeOptional() : genClass->suspendableOutput->makeOptional();
+				co_await doDtor(inputGEP, maybeType);
+				LLVMBuildStore(_builders.top().get(), LLVMConstNull(co_await translateType(maybeType)), inputGEP);
+			}
+
 			LLVMBuildRetVoid(_builders.top().get());
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), continueDtor);
@@ -3194,7 +3205,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			co_await currentStack().cleanup();
 			co_await popStack();
 
-			LLVMBuildRetVoid(_builders.top().get());
+			LLVMBuildBr(_builders.top().get(), earlyExit);
 
 			_builders.pop();
 		}
