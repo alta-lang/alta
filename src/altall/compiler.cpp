@@ -2,6 +2,7 @@
 #include "altacore/det-shared.hpp"
 #include "altacore/det/function.hpp"
 #include "altacore/det/type.hpp"
+#include "altacore/optional.hpp"
 #include "altacore/shared.hpp"
 #include "altacore/util.hpp"
 #include <altall/compiler.hpp>
@@ -1974,6 +1975,67 @@ void AltaLL::Compiler::exitInitFunction() {
 	_stacks.pop_back();
 };
 
+LLVMValueRef AltaLL::Compiler::enterDeinitFunction() {
+	if (!_deinitFunction) {
+		auto opaquePtr = LLVMPointerTypeInContext(_llcontext.get(), 0);
+		auto i32Type = LLVMInt32TypeInContext(_llcontext.get());
+
+		if (!_definedTypes["@llvm.global_dtors.entry"]) {
+			std::array<LLVMTypeRef, 3> members {
+				i32Type,
+				opaquePtr,
+				opaquePtr,
+			};
+			_definedTypes["@llvm.global_dtors.entry"] = LLVMStructTypeInContext(_llcontext.get(), members.data(), members.size(), false);
+		}
+
+		if (!_definedTypes["@llvm.global_dtor"]) {
+			_definedTypes["@llvm.global_dtor"] = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), nullptr, 0, false);
+		}
+
+		_deinitFunction = LLVMAddFunction(_llmod.get(), "_Alta_module_destructor", _definedTypes["@llvm.global_dtor"]);
+		_definedFunctions["_Alta_module_destructor"] = _deinitFunction;
+
+		auto globalDtors = LLVMAddGlobal(_llmod.get(), LLVMArrayType(_definedTypes["@llvm.global_dtors.entry"], 1), "llvm.global_dtors");
+		LLVMSetLinkage(globalDtors, LLVMAppendingLinkage);
+
+		std::array<LLVMValueRef, 3> globalDtorsEntry {
+			LLVMConstInt(i32Type, 65535, false),
+			_deinitFunction,
+			LLVMConstNull(opaquePtr),
+		};
+
+		std::array<LLVMValueRef, 1> globalDtorsEntries {
+			LLVMConstNamedStruct(_definedTypes["@llvm.global_dtors.entry"], globalDtorsEntry.data(), globalDtorsEntry.size()),
+		};
+
+		LLVMSetInitializer(globalDtors, LLVMConstArray(_definedTypes["@llvm.global_dtors.entry"], globalDtorsEntries.data(), globalDtorsEntries.size()));
+	}
+
+	if (!_deinitFunctionBuilder) {
+		auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), _deinitFunction, "@entry");
+		_deinitFunctionBuilder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+		LLVMPositionBuilderAtEnd(_deinitFunctionBuilder.get(), entryBlock);
+	}
+
+	_builders.push(_deinitFunctionBuilder);
+
+	if (_deinitFunctionScopeStack) {
+		_stacks.push_back(std::move(*_deinitFunctionScopeStack));
+		_deinitFunctionScopeStack = ALTACORE_NULLOPT;
+	} else {
+		pushStack(ScopeStack::Type::Function);
+	}
+
+	return _deinitFunction;
+};
+
+void AltaLL::Compiler::exitDeinitFunction() {
+	_builders.pop();
+	_deinitFunctionScopeStack = std::move(_stacks.back());
+	_stacks.pop_back();
+};
+
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::forEachUnionMember(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, LLVMTypeRef returnValueType, std::function<LLCoroutine(LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType, size_t memberIndex)> callback) {
 	LLVMValueRef retVal = NULL;
 	auto tmpIdx = nextTemp();
@@ -3599,6 +3661,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileVariableDefinitionExpress
 			} else {
 				LLVMSetInitializer(memory, LLVMGetUndef(lltype));
 				LLVMBuildStore(_builders.top().get(), casted, memory);
+			}
+
+			if (canDestroy(info->variable->type)) {
+				enterDeinitFunction();
+
+				pushStack(ScopeStack::Type::Temporary);
+				pushDebugLocation(node->position, info->inputScope);
+				co_await doDtor(memory, info->variable->type);
+				co_await currentStack().cleanup();
+				popDebugLocation();
+				co_await popStack();
+
+				exitDeinitFunction();
 			}
 		} else {
 			pushStack(ScopeStack::Type::Temporary);
@@ -7777,6 +7852,20 @@ void AltaLL::Compiler::finalize() {
 
 		_initFunctionBuilder = nullptr;
 		_initFunctionScopeStack = ALTACORE_NULLOPT;
+	}
+
+	if (_deinitFunction) {
+		_builders.push(_deinitFunctionBuilder);
+
+		auto tmp = _deinitFunctionScopeStack->cleanup();
+		tmp.coroutine.resume();
+
+		_builders.pop();
+
+		LLVMBuildRetVoid(_deinitFunctionBuilder.get());
+
+		_deinitFunctionBuilder = nullptr;
+		_deinitFunctionScopeStack = ALTACORE_NULLOPT;
 	}
 
 	LLVMDIBuilderFinalize(_debugBuilder.get());

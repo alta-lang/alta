@@ -305,6 +305,9 @@ namespace AltaLL {
 		LLVMValueRef _initFunction = nullptr;
 		ALTACORE_OPTIONAL<ScopeStack> _initFunctionScopeStack = ALTACORE_NULLOPT;
 		LLBuilder _initFunctionBuilder;
+		LLVMValueRef _deinitFunction = nullptr;
+		ALTACORE_OPTIONAL<ScopeStack> _deinitFunctionScopeStack = ALTACORE_NULLOPT;
+		LLBuilder _deinitFunctionBuilder;
 		std::stack<size_t> temporaryIndices;
 		LLDIBuilder _debugBuilder = nullptr;
 		ALTACORE_MAP<AltaCore::Filesystem::Path, LLVMMetadataRef> _debugFiles;
@@ -773,6 +776,8 @@ namespace AltaLL {
 
 		LLVMValueRef enterInitFunction();
 		void exitInitFunction();
+		LLVMValueRef enterDeinitFunction();
+		void exitDeinitFunction();
 
 		LLCoroutine forEachUnionMember(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> type, LLVMTypeRef returnValueType, std::function<LLCoroutine(LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType, size_t memberIndex)> callback);
 
