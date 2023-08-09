@@ -46,7 +46,8 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 
 	let parser = new Parser
 
-	scheduler.schedule(parser.run(lexer.tokens))
+	let tmp = parser.run(lexer.tokens)
+	scheduler.schedule(tmp)
 	scheduler.finishAll()
 
 	if parser.root {
