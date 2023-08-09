@@ -785,7 +785,7 @@ namespace AltaLL {
 						(
 							exprType->isUnion() ||
 							(exprType->isOptional && *exprType->optionalTarget != AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) ||
-							(exprType->klass && exprType->klass->destructor)
+							(exprType->klass && !(exprType->klass->isStructure || exprType->klass->isBitfield))
 						)
 					) ||
 					(

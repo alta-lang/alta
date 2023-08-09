@@ -1344,11 +1344,28 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 			dtor = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_class_info"], dtor, gepIndices2.data(), gepIndices2.size(), ("@dtor_instance_" + tmpIdxStr + "_root_dtor_ptr").c_str());
 			dtor = LLVMBuildLoad2(_builders.top().get(), dtorPtr, dtor, ("@dtor_instance_" + tmpIdxStr + "_root_dtor").c_str());
 
+			auto dtorIsNotNull = LLVMBuildIsNotNull(_builders.top().get(), dtor, ("@dtor_instance_" + tmpIdxStr + "_dtor_is_not_null").c_str());
+
+			auto notNullDtorBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@dtor_instance_" + tmpIdxStr + "_nonnull_dtor").c_str());
+			auto doneDtorBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, ("@dtor_instance_" + tmpIdxStr + "_dtor_done").c_str());
+
+			currentStack().beginBranch();
+
+			LLVMBuildCondBr(_builders.top().get(), dtorIsNotNull, notNullDtorBlock, doneDtorBlock);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), notNullDtorBlock);
+
 			std::array<LLVMValueRef, 1> args {
 				LLVMBuildPointerCast(_builders.top().get(), result, LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0), ("@dtor_instance_" + tmpIdxStr + "_root_instance").c_str()),
 			};
 			result = LLVMBuildCall2(_builders.top().get(), dtorType, dtor, args.data(), args.size(), "");
 
+			auto exitBlockDtor = LLVMGetInsertBlock(_builders.top().get());
+			LLVMBuildBr(_builders.top().get(), doneDtorBlock);
+
+			LLVMPositionBuilderAtEnd(_builders.top().get(), doneDtorBlock);
+
+			co_await currentStack().endBranch(doneDtorBlock, { notNullBlock, exitBlockDtor });
 			auto exitBlock = LLVMGetInsertBlock(_builders.top().get());
 			LLVMBuildBr(_builders.top().get(), doneBlock);
 
