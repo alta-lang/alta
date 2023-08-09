@@ -2639,7 +2639,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileExpressionStatement(std::
 
 	pushStack(ScopeStack::Type::Temporary);
 	pushDebugLocation(node->position, info->inputScope);
-	co_await compileNode(node->expression, info->expression);
+	co_await tmpify(node->expression, info->expression);
 	co_await currentStack().cleanup();
 	popDebugLocation();
 	co_await popStack();
