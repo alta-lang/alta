@@ -99,6 +99,7 @@ class BoxList {
         delete* ptr
         break
       }
+      prev = ptr
       ptr = ptr.next
     }
   }
