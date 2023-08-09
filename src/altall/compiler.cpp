@@ -1387,7 +1387,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRealInstance(LLVMValueRef exp
 	if (
 		!exprType->isNative &&
 		!exprType->isUnion() &&
-		exprType->klass
+		exprType->klass &&
+		!(
+			exprType->klass->isStructure ||
+			exprType->klass->isBitfield
+		)
 	) {
 		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
@@ -1439,7 +1443,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRootInstance(LLVMValueRef exp
 	if (
 		!exprType->isNative &&
 		!exprType->isUnion() &&
-		exprType->klass
+		exprType->klass &&
+		!(
+			exprType->klass->isStructure ||
+			exprType->klass->isBitfield
+		)
 	) {
 		auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
 		auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
@@ -6440,7 +6448,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDeleteStatement(std::shar
 	co_await doDtor(target, targetType);
 
 	if (info->persistent) {
-		LLVMBuildFree(_builders.top().get(), target);
+		auto root = co_await getRootInstance(target, targetType);
+		LLVMBuildFree(_builders.top().get(), root);
 	}
 
 	co_return NULL;
