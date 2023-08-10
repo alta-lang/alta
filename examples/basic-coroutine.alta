@@ -11,15 +11,18 @@ async function looper(times: int): void {
 }
 
 literal function main(): int {
+	# create a scheduler
+	let scheduler = new Scheduler
+
 	# schedule one instance of the coroutine
-	$scheduler.schedule(looper(5))
+	scheduler.schedule(looper(5))
 
 	# every time we call an async function, it returns a new coroutine;
 	# so we can call it again to schedule a different instance of it:
-	$scheduler.schedule(looper(10))
+	scheduler.schedule(looper(10))
 
 	# wait for all coroutines to finish before exiting the process
-	$scheduler.finishAll()
+	scheduler.finishAll()
 
 	return 0
 }
