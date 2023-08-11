@@ -60,9 +60,9 @@ export type uint_fast64_t = uint64_t
 	export type uintptr = unsigned int
 ##end if
 
-export var INTMAX_MIN: const intmax_t = -9223372036854775807 - 1
-export var INTMAX_MAX: const intmax_t = 9223372036854775807
-export var UINTMAX_MAX: const uintmax_t = 18446744073709551615
+export var INTMAX_MIN: const intmax_t = (1 as uint64_t) << (63 as uint64_t)
+export var INTMAX_MAX: const intmax_t = ((1 as uint64_t) << (63 as uint64_t)) - (1 as uint64_t)
+export var UINTMAX_MAX: const uintmax_t = (0 as uint64_t) - (1 as uint64_t)
 
 export var INT8_MIN: const int8_t = -128
 export var INT8_MAX: const int8_t = 127
@@ -76,9 +76,9 @@ export var INT32_MIN: const int32_t = -2147483647 - 1
 export var INT32_MAX: const int32_t = 2147483647
 export var UINT32_MAX: const uint32_t = 4294967295
 
-export var INT64_MIN: const int64_t = -9223372036854775807 - 1
-export var INT64_MAX: const int64_t = 9223372036854775807
-export var UINT64_MAX: const uint64_t = 18446744073709551615
+export var INT64_MIN: const int64_t = INTMAX_MIN
+export var INT64_MAX: const int64_t = INTMAX_MAX
+export var UINT64_MAX: const uint64_t = UINTMAX_MAX
 
 export var INT_LEAST8_MIN: const int_least8_t = INT8_MIN
 export var INT_LEAST8_MAX: const int_least8_t = INT8_MAX
