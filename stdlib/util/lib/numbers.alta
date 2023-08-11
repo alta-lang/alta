@@ -46,14 +46,14 @@ export function parseNumber<T>(string: String, radix: Size = 10): Result<T, Erro
     result += additional
   }
 
-  return Result<T, Error>(ok: negate ? -result : result)
+  return new Result<T, Error>(ok: negate ? -result : result)
 }
 
 export function parseFloatingPoint<T>(string: String, radix: Size = 10): Result<T, Error> {
   if radix > 36
     return new Result<T, Error>(error: Error.InvalidRadix)
   if string.length < 1
-    return 0
+    return new Result<T, Error>(error: 0)
   let first: Size = 0
   for i: Size in 0...string.length {
     if i == string.length {
@@ -71,14 +71,14 @@ export function parseFloatingPoint<T>(string: String, radix: Size = 10): Result<
     }
   }
   if first == 0 && string[0] != '.'
-    return 0
+    return new Result<T, Error>(ok: 0)
   let maybeWhole = parseNumber<T>(string.substring(0, to: first), radix)
   if maybeWhole.isError {
     return maybeWhole
   }
   let whole = maybeWhole.value
   if first == string.length
-    return whole
+    return new Result<T, Error>(ok: whole)
 
   let isExponent = false
   let charThere = string[first]
@@ -87,7 +87,7 @@ export function parseFloatingPoint<T>(string: String, radix: Size = 10): Result<
   } else if charThere == 'e' || charThere == 'E' || charThere == 'p' || charThere == 'P' {
     isExponent = true
   } else {
-    return whole
+    return new Result<T, Error>(ok: whole)
   }
 
   let second: Size = 0
@@ -108,7 +108,7 @@ export function parseFloatingPoint<T>(string: String, radix: Size = 10): Result<
     }
   }
   if second == first
-    return whole
+    return new Result<T, Error>(ok: whole)
 
   let maybeSecondPart = parseNumber<T>(string.substring(first, to: second), radix)
   if maybeSecondPart.isError {
@@ -117,13 +117,13 @@ export function parseFloatingPoint<T>(string: String, radix: Size = 10): Result<
   let secondPart = maybeSecondPart.value
 
   if isExponent {
-    return whole * power<T>(10, secondPart)
+    return new Result<T, Error>(ok: whole * power<T>(10, secondPart))
   } else {
     let decimal = whole + (secondPart / power<T>(radix, second - first))
     if second == string.length
-      return decimal
+      return new Result<T, Error>(ok: decimal)
     if string[second] != 'e' && string[second] != 'E'
-      return decimal
+      return new Result<T, Error>(ok: decimal)
 
     let third: Size = 0
     ;++second
@@ -143,7 +143,7 @@ export function parseFloatingPoint<T>(string: String, radix: Size = 10): Result<
       }
     }
     if third == second
-      return decimal
+      return new Result<T, Error>(ok: decimal)
 
     let maybeThirdPart = parseNumber<T>(string.substring(second, to: third), radix)
     if maybeThirdPart.isError {
@@ -151,7 +151,7 @@ export function parseFloatingPoint<T>(string: String, radix: Size = 10): Result<
     }
     let thirdPart = maybeThirdPart.value
 
-    return decimal * power<T>(10, thirdPart)
+    return new Result<T, Error>(ok: decimal * power<T>(10, thirdPart))
   }
 }
 
