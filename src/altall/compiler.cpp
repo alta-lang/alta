@@ -4315,7 +4315,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 				result = (info->commonOperandType->isFloatingPoint() ? LLVMBuildFRem : (info->commonOperandType->isSigned() ? LLVMBuildSRem : LLVMBuildURem))(_builders.top().get(), lhs, rhs, ("@mod_" + tmpIdxStr).c_str());
 			} break;
 			case AltaCore::Shared::OperatorType::LeftShift: {
-				result = LLVMBuildLShr(_builders.top().get(), lhs, rhs, ("@shl_" + tmpIdxStr).c_str());
+				result = LLVMBuildShl(_builders.top().get(), lhs, rhs, ("@shl_" + tmpIdxStr).c_str());
 			} break;
 			case AltaCore::Shared::OperatorType::RightShift: {
 				result = (info->commonOperandType->isSigned() ? LLVMBuildAShr : LLVMBuildLShr)(_builders.top().get(), lhs, rhs, ("@shr_" + tmpIdxStr).c_str());
