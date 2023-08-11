@@ -86,7 +86,7 @@ export class Socket {
 		if posix.fcntl(this.handle, posix.F_SETFL, flags | posix.O_NONBLOCK) == -1
 			return new Result<void, Error>(error: Error.FcntlFailure)
 
-		return new Result<void, Error>(ok: true)
+		return new Result<void, Error>(ok: void)
 	}
 
 	private function construct(type: SocketType, protocol: Protocol): Result<void, Error> {
@@ -165,12 +165,11 @@ export class Socket {
 			return new Result<bool, Error>(error: Error.PollFailure)
 		if ret == 0
 			return new Result<bool, Error>(ok: false)
-		return new Result<bool, Error>(ok: read && (fd.revents & posix.POLLIN) != 0) || (write && (fd.revents & posix.POLLOUT) != 0)
+		return new Result<bool, Error>(ok: (read && (fd.revents & posix.POLLIN) != 0) || (write && (fd.revents & posix.POLLOUT) != 0))
 	}
 
 	public function accept(block: bool = false): Result<Pair<Socket, Pair<Address, uint16>>, Error> {
 		if block
-			# TODO: don't just swallow the error
 			if (let res = this.waitFor(read: true)).isError
 				return res.morphError<Pair<Socket, Pair<Address, uint16>>>()
 		# there *should* be a client ready to be `accept`ed now
@@ -264,10 +263,10 @@ export class Socket {
 		}
 		return new Result<Size, Error>(ok: sent as Size)
 	}
-	public function send(data: ptr const byte, length: Size, block: bool = false): Size? {
+	public function send(data: ptr const byte, length: Size, block: bool = false): Result<Size, Error> {
 		return this.send(data as ptr const uint8, length, block)
 	}
-	public function send(data: Vector<uint8>, block: bool = false): Size? {
+	public function send(data: Vector<uint8>, block: bool = false): Result<Size, Error> {
 		return this.send(data.data, data.length, block)
 	}
 
@@ -296,7 +295,7 @@ export class Socket {
 	}
 	public function receive(block: bool = false): Result<Vector<uint8>, Error> {
 		if !block && !this.canRead
-			return null
+			return new Result<Vector<uint8>, Error>(error: Error.WouldBlock)
 
 		if block
 			if (let res = this.waitFor(read: true)).isError
@@ -320,8 +319,8 @@ export class TCPSocket extends Socket {
 
 	public function accept(block: bool = false): Pair<TCPSocket, Pair<Address, uint16>>? {
 		let maybe = super.accept(block: block)
-		if maybe
-			return new Pair<TCPSocket, Pair<Address, uint16>>((*maybe).first as TCPSocket, (*maybe).second)
+		if maybe.isOk
+			return new Pair<TCPSocket, Pair<Address, uint16>>(maybe.value.first as TCPSocket, maybe.value.second)
 		return null
 	}
 }
