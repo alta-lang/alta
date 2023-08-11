@@ -6115,9 +6115,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSuperClassFetch(std::shared_ptr<AltaCore::AST::SuperClassFetch> node, std::shared_ptr<AltaCore::DH::SuperClassFetch> info) {
-	// TODO
-	std::cerr << "TODO: SuperClassFetch" << std::endl;
-	co_return NULL;
+	auto thisType = std::make_shared<AltaCore::DET::Type>(info->klass)->reference();
+	auto parentType = std::make_shared<AltaCore::DET::Type>(info->superclass)->reference();
+	co_return co_await doParentRetrieval(_thisContextValue.top(), thisType, parentType);
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileInstanceofExpression(std::shared_ptr<AltaCore::AST::InstanceofExpression> node, std::shared_ptr<AltaCore::DH::InstanceofExpression> info) {
