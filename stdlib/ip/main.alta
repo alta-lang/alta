@@ -31,7 +31,7 @@ export class Address {
   public @from constructor(address: String) {
     let parsed = this.tryFrom(address)
     assert parsed
-    *this = *parsed
+    this = *parsed
   }
 
   # @brief Tries to constructs an `Address` by parsing the given string as an IPv4 or IPv6 address
