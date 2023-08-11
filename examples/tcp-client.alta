@@ -33,7 +33,7 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 
 	printLine("Connected to ", args[1], ':', port)
 
-	let serverMessage = *conn.receive(block: true)
+	let serverMessage = conn.receive(block: true).value
 
 	if serverMessage.length > 0 {
 		printLine("Got a message from the server: ", new String(serverMessage.data, serverMessage.length))

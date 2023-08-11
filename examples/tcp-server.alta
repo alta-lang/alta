@@ -41,7 +41,7 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 		let message = format("Hello there, ", clientLocation.first, ':', clientLocation.second, '!')
 		client.send(message.data, message.length, block: true)
 
-		let clientMessage = *client.receive(block: true)
+		let clientMessage = client.receive(block: true).value
 
 		if clientMessage.length > 0
 			printLine("Got a message from the client: ", new String(clientMessage.data, clientMessage.length))
