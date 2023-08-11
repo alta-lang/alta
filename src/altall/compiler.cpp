@@ -6551,7 +6551,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDeleteStatement(std::shar
 	co_await doDtor(target, targetType);
 
 	if (info->persistent) {
-		auto root = co_await getRootInstance(target, targetType);
+		auto root = co_await getRootInstance(target, info->persistent ? targetType->reference() : targetType);
 		LLVMBuildFree(_builders.top().get(), root);
 	}
 
