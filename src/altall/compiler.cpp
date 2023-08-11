@@ -7016,10 +7016,24 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode
 			_definedVariables[memberVar->id] = LLVMAddGlobal(_llmod.get(), lltype, mangled.c_str());
 		}
 
+		enterInitFunction();
 		auto llval = value ? co_await compileNode(value, valueInfo) : LLVMConstAdd(prevVal, LLVMConstInt(lltype, 1, false));
+		exitInitFunction();
 
 		if (!LLVMIsConstant(llval)) {
 			throw std::runtime_error("Support non-constant enum values");
+		}
+
+		if (value) {
+			auto valueType = AltaCore::DET::Type::getUnderlyingType(valueInfo.get());
+
+			if (valueType->referenceLevel() == info->memberType->referenceLevel() + 1) {
+				auto initializer = LLVMGetInitializer(llval);
+				if (!initializer) {
+					throw std::runtime_error("no support for initializing enum values with external constants");
+				}
+				llval = initializer;
+			}
 		}
 
 		LLVMSetInitializer(_definedVariables[memberVar->id], llval);
