@@ -6914,7 +6914,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 			LLVMConstInt(gepStructIndexType, i + 1, false),
 		};
 		auto gep = LLVMBuildGEP2(_builders.top().get(), lambdaStateType, lambdaState, gepIndices.data(), gepIndices.size(), ("@lambda_init_ref_gep@" + std::to_string(i) + "@" + mangled).c_str());
-		LLVMBuildStore(_builders.top().get(), _definedVariables[var->id], gep);
+
+		LLVMValueRef llvar = nullptr;
+
+		if (var->name == "this" && !var->parentScope.expired() && !var->parentScope.lock()->parentClass.expired()) {
+			if (_thisContextValue.empty()) {
+				throw std::runtime_error("No `this` context?");
+			}
+			llvar = _thisContextValue.top();
+		} else {
+			llvar = _definedVariables[var->id];
+		}
+
+		LLVMBuildStore(_builders.top().get(), llvar, gep);
 	}
 
 	for (size_t i = 0; i < info->function->copiedVariables.size(); ++i) {
@@ -6926,7 +6938,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 		};
 		auto gep = LLVMBuildGEP2(_builders.top().get(), lambdaStateType, lambdaState, gepIndices.data(), gepIndices.size(), ("@lambda_init_copy_gep@" + std::to_string(i) + "@" + mangled).c_str());
 		bool didCopy = false;
-		auto copy = co_await doCopyCtor(_definedVariables[var->id], var->type->reference(true), std::make_pair(true, false), &didCopy);
+
+		LLVMValueRef llvar = nullptr;
+
+		if (var->name == "this" && !var->parentScope.expired() && !var->parentScope.lock()->parentClass.expired()) {
+			if (_thisContextValue.empty()) {
+				throw std::runtime_error("No `this` context?");
+			}
+			llvar = _thisContextValue.top();
+		} else {
+			llvar = _definedVariables[var->id];
+		}
+
+		auto copy = co_await doCopyCtor(llvar, var->type->reference(true), std::make_pair(true, false), &didCopy);
 		if (!didCopy) {
 			copy = LLVMBuildLoad2(_builders.top().get(), co_await translateType(var->type), _definedVariables[var->id], ("@lambda_var_load@" + mangleName(var)).c_str());
 		}
