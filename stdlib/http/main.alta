@@ -3,7 +3,7 @@ import uint8, SizeMaximum, uint16, Size from "types"
 import String, CodePoint from "string"
 import Path from "uri"
 import parseNumber, Pair, numberToString from "util"
-import TCPSocket from "net"
+import TCPSocket, Error as NetError from "net"
 import Address from "ip"
 import List from "list"
 import Map from "map"
@@ -392,8 +392,8 @@ export class OutgoingResponse {
 	module function trySend(): ref OutgoingResponse {
 		# use the `send(data:length:)` variant to avoid copying the buffer
 		let sent = this.socket.send(this.buffer.data, length: this.buffer.length)
-		if sent
-			this.buffer.remove(from: 0, length: *sent)
+		if sent.isOk
+			this.buffer.remove(from: 0, length: sent.value)
 		return this
 	}
 
@@ -525,9 +525,9 @@ export class Server {
 
 		while true {
 			let maybeData = req.socket.receive()
-			if maybeData {
-				let data = *maybeData
-				let result = this.tryParse(req, res, *maybeData)
+			if maybeData.isOk {
+				let data = maybeData.value
+				let result = this.tryParse(req, res, data)
 				if result.isError {
 					# if we failed to parse it, tell the client they made a bad request
 					res.status = Status.BadRequest
@@ -588,11 +588,11 @@ export class IncomingResponse {
 		return this.message.headers
 	}
 
-	public function receive(): Vector<uint8>? {
+	public function receive(): Result<Vector<uint8>, NetError> {
 		if this.message.body.length > 0 {
 			let copy = this.message.body
 			this.message.body.clear()
-			return copy
+			return new Result<Vector<uint8>, NetError>(ok: copy)
 		}
 		return this.socket.receive()
 	}
@@ -643,8 +643,8 @@ export class OutgoingRequest {
 			return this
 		# use the `send(data:length:)` variant to avoid copying the buffer
 		let sent = this.socket.send(this.buffer.data, length: this.buffer.length)
-		if sent
-			this.buffer.remove(from: 0, length: *sent)
+		if sent.isOk
+			this.buffer.remove(from: 0, length: sent.value)
 		return this
 	}
 
@@ -723,8 +723,8 @@ export class OutgoingRequest {
 		let res = new IncomingResponse(this.socket)
 		while true {
 			let maybeData = this.socket.receive()
-			if maybeData {
-				res.message.process(*maybeData)
+			if maybeData.isOk {
+				res.message.process(maybeData.value)
 				# if we've reached the body, we're done waiting and we can hand off the response to the handler
 				# they can get the body themselves
 				if res.message.inBody {
@@ -745,7 +745,10 @@ export class OutgoingRequest {
 export async function request(address: Address, port: uint16 = 80): Result<OutgoingRequest, Error> {
 	let socket = new TCPSocket
 
-	socket.connect(address, port)
+	let result = socket.connect(address, port)
+	if result.isError
+		# FIXME: don't swallow the error
+		return new Result<OutgoingRequest, Error>(error: Error.ConnectionFailure)
 
 	while socket.connecting
 		yield;
