@@ -655,6 +655,9 @@ namespace AltaLL {
 		};
 
 		inline void popDebugLocation() {
+			if (_debugLocations.empty()) {
+				throw std::runtime_error("invalid debug location pop");
+			}
 			_debugLocations.pop();
 			if (!_debugLocations.empty()) {
 				LLVMSetCurrentDebugLocation2(_builders.top().get(), _debugLocations.top());
