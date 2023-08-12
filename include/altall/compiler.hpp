@@ -760,8 +760,8 @@ namespace AltaLL {
 		LLCoroutine loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, size_t finalRefLevel = 0);
 		LLCoroutine loadIndirection(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, size_t finalIndirLevel = 0);
 
-		LLCoroutine getRealInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
-		LLCoroutine getRootInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType);
+		LLCoroutine getRealInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didRetrieval = nullptr);
+		LLCoroutine getRootInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didRetrieval = nullptr);
 
 		LLCoroutine doParentRetrieval(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, std::shared_ptr<AltaCore::DET::Type> targetType, bool* didRetrieval = nullptr);
 		LLCoroutine doChildRetrieval(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, std::shared_ptr<AltaCore::DET::Type> targetType, bool* didRetrieval = nullptr);

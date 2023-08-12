@@ -1327,7 +1327,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), notNullBlock);
 
-			result = co_await getRootInstance(singleRef, exprType->reference());
+			bool didRetrieval = false;
+			result = co_await getRootInstance(singleRef, exprType->reference(), &didRetrieval);
+			if (!didRetrieval) {
+				throw std::runtime_error("root instance retrieval must succeed");
+			}
 			result = LLVMBuildPointerCast(_builders.top().get(), result, LLVMPointerType(_definedTypes["_Alta_basic_class"], 0), ("@dtor_instance_" + tmpIdxStr + "_root_basic_class").c_str());
 
 			auto dtor = LLVMBuildGEP2(_builders.top().get(), _definedTypes["_Alta_basic_class"], result, gepIndices.data(), gepIndices.size(), ("@dtor_instance_" + tmpIdxStr + "_root_class_info_ptr_ptr").c_str());
@@ -1399,8 +1403,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::loadIndirection(LLVMValueRef exp
 	co_return expr;
 };
 
-AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRealInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRealInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didRetrieval) {
 	auto result = expr;
+
+	if (didRetrieval) {
+		*didRetrieval = false;
+	}
 
 	if (
 		!exprType->isNative &&
@@ -1450,13 +1458,21 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRealInstance(LLVMValueRef exp
 		if (exprType->indirectionLevel() == 0) {
 			result = LLVMBuildLoad2(_builders.top().get(), lltype, result, ("@real_inst_" + tmpIdxStr).c_str());
 		}
+
+		if (didRetrieval) {
+			*didRetrieval = true;
+		}
 	}
 
 	co_return result;
 };
 
-AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRootInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRootInstance(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didRetrieval) {
 	auto result = expr;
+
+	if (didRetrieval) {
+		*didRetrieval = false;
+	}
 
 	if (
 		!exprType->isNative &&
@@ -1500,6 +1516,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::getRootInstance(LLVMValueRef exp
 		auto classPointerAsInt = LLVMBuildPtrToInt(_builders.top().get(), result, i64Type, ("@root_inst_" + tmpIdxStr + "_addr_start").c_str());
 		auto subtracted = LLVMBuildSub(_builders.top().get(), classPointerAsInt, offsetFromBase, ("@root_inst_" + tmpIdxStr + "_addr_subbed").c_str());
 		result = LLVMBuildIntToPtr(_builders.top().get(), subtracted, LLVMPointerType(LLVMVoidTypeInContext(_llcontext.get()), 0), ("@root_inst_" + tmpIdxStr + "_ref").c_str());
+
+		if (didRetrieval) {
+			*didRetrieval = true;
+		}
 	}
 
 	co_return result;
@@ -3908,7 +3928,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 
 			if (info->readAccessor->isVirtual()) {
 				auto type = std::make_shared<AltaCore::DET::Type>(accessorClass)->reference();
-				result = co_await getRootInstance(result, type);
+				bool didRetrieval = false;
+				result = co_await getRootInstance(result, type, &didRetrieval);
+				if (!didRetrieval) {
+					throw std::runtime_error("root instance retrieval must succeed for virtual calls");
+				}
 			}
 
 			args.push_back(result);
@@ -3932,7 +3956,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 		auto realType = AltaCore::DET::Type::getUnderlyingType(info.get());
 		info->isRootClassRetrieval = true;
 		if (realType->klass) {
-			result = co_await getRootInstance(result, realType);
+			bool didRetrieval = false;
+			result = co_await getRootInstance(result, realType, &didRetrieval);
+			if (!didRetrieval) {
+				throw std::runtime_error("root instance retrieval must succeed because this is a class");
+			}
+		} else {
+			result = co_await loadRef(result, realType, realType->pointerLevel() == 0 ? 1 : 0);
 		}
 	}
 
@@ -4036,7 +4066,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 		auto realType = AltaCore::DET::Type::getUnderlyingType(info.get());
 		info->isRootClassRetrieval = true;
 		if (realType->klass) {
-			result = co_await getRootInstance(result, realType);
+			bool didRetrieval = false;
+			result = co_await getRootInstance(result, realType, &didRetrieval);
+			if (!didRetrieval) {
+				throw std::runtime_error("root instance retrieval must succeed because this is a class");
+			}
+		} else {
+			result = co_await loadRef(result, realType, realType->pointerLevel() == 0 ? 1 : 0);
 		}
 	}
 
@@ -4429,7 +4465,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionCallExpression(st
 		bool didRetrieval = false;
 
 		if (virtFunc) {
-			result = co_await getRootInstance(result, selfType);
+			bool didRetrival = false;
+			result = co_await getRootInstance(result, selfType, &didRetrieval);
+			if (!didRetrieval) {
+				throw std::runtime_error("root instance retrieval must succeed because this is virtual");
+			}
 			targetExprStoreType = std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Void, std::vector<uint8_t> { (uint8_t)AltaCore::DET::TypeModifierFlag::Pointer });
 		} else {
 			auto targetType = std::make_shared<AltaCore::DET::Type>(info->targetType->methodParent)->reference();
@@ -6551,7 +6591,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDeleteStatement(std::shar
 	co_await doDtor(target, targetType);
 
 	if (info->persistent) {
-		auto root = co_await getRootInstance(target, info->persistent ? targetType->reference() : targetType);
+		bool didRetrieval = false;
+		auto root = co_await getRootInstance(target, targetType->reference(), &didRetrieval);
+		if (!didRetrieval) {
+			// this is actually fine
+		}
 		LLVMBuildFree(_builders.top().get(), root);
 	}
 
