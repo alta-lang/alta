@@ -612,7 +612,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 	auto tmpIdx = nextTemp();
 	auto tmpIdxStr = std::to_string(tmpIdx);
 
-	if (dest->isExactlyCompatibleWith(*exprType)) {
+	if (dest->isExactlyCompatibleWith(*exprType) || (dest->isExactlyCompatibleWith(*exprType->dereference()) && copy && additionalCopyInfo.first && dest->indirectionLevel() == 0)) {
 		if (
 			copy &&
 			additionalCopyInfo.first &&
@@ -621,7 +621,11 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::cast(LLVMValueRef expr, std::sha
 				(!dest->isUnion() && exprType->isUnion())
 			)
 		) {
-			expr = co_await doCopyCtor(expr, exprType, additionalCopyInfo);
+			bool didCopy = false;
+			expr = co_await doCopyCtor(expr, exprType, additionalCopyInfo, &didCopy);
+			if (!didCopy) {
+				expr = co_await loadRef(expr, exprType);
+			}
 		}
 		co_return expr;
 	}
@@ -1003,6 +1007,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 			LLVMBuildBr(_builders.top().get(), doneBlock);
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), doneBlock);
+
+			didCopyInternal = true;
 		}
 	} else {
 		if (additionalCopyInfo.second && exprType->indirectionLevel() < 1) {
