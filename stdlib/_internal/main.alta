@@ -1,3 +1,4 @@
 export * from "./lib/coroutines" as Coroutines
 export * from "./lib/result"
 export * from "./lib/runtime"
+export * from "./lib/native" as Native

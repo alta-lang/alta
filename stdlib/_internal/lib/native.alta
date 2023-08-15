@@ -1,0 +1,77 @@
+import uint64, rawconststring from "types"
+
+#
+# @section classes
+#
+export struct _Alta_virtual_entry {
+  name: rawconststring;
+  function: ptr void;
+}
+
+export struct _Alta_class_info {
+  type_name: rawconststring;
+  destructor: (ptr void) -> void;
+  child_name: rawconststring;
+  offset_from_real: uint64;
+  offset_from_base: uint64;
+  offset_from_owner: uint64;
+  offset_to_next: uint64;
+  virtual_table: ptr const _Alta_virtual_entry
+}
+
+export struct _Alta_instance_info {
+  class_info: ptr const _Alta_class_info;
+}
+
+export struct _Alta_basic_class {
+  instance_info: _Alta_instance_info;
+}
+#
+# @end section
+#
+
+#
+# @section lambdas
+#
+export struct _Alta_basic_lambda_state {
+  reference_count: uint64;
+  destructor: (ptr void) -> void;
+}
+
+export struct _Alta_basic_function {
+  function: ptr void;
+  lambda_state: ptr void;
+}
+#
+# @end section
+#
+
+#
+# @section suspendables
+#
+export struct _Alta_basic_suspendable_stack {
+  size: uint64;
+  next: ptr _Alta_basic_suspendable_stack;
+  prev: ptr _Alta_basic_suspendable_stack;
+}
+
+export struct _Alta_basic_suspendable {
+  instance_info: _Alta_instance_info;
+  state: uint64;
+  done: bool;
+  current_stack: ptr _Alta_basic_suspendable_stack;
+}
+
+export struct _Alta_basic_generator {
+  basic_suspendable: _Alta_basic_suspendable;
+}
+
+export struct _Alta_basic_coroutine {
+  basic_suspendable: _Alta_basic_suspendable;
+  waiting_for: ptr _Alta_basic_coroutine;
+  next: (ptr _Alta_basic_coroutine) -> void;
+  id: uint64;
+}
+#
+# @end section
+#
