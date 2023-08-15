@@ -3928,6 +3928,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 					auto mangled = mangleName(var);
 					_definedVariables[var->id] = LLVMAddGlobal(_llmod.get(), varType, mangled.c_str());
 					result = _definedVariables[var->id];
+
+					if (var->type->referenceLevel() > 0) {
+						result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@fetch_ref_" + tmpIdxStr).c_str());
+					}
 				}
 			}
 
@@ -4041,6 +4045,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			};
 
 			result = LLVMBuildGEP2(_builders.top().get(), co_await translateType(info->targetType->destroyIndirection()), result, gepIndices.data(), gepIndices.size(), ("@member_access_" + tmpIdxStr).c_str());
+
+#if 0
+			if (info->targetType->referenceLevel() > 0) {
+				result = LLVMBuildLoad2(_builders.top().get(), co_await translateType(info->targetType), result, ("@member_access_ref_" + tmpIdxStr).c_str());
+			}
+#endif
 		}
 	} else if (info->readAccessor) {
 		// TODO
@@ -4340,7 +4350,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 	}
 
 	if (canDestroyVar) {
-		co_await doDtor(co_await loadRef(lhs, info->targetType->dereference()), info->targetType->destroyReferences());
+		co_await doDtor(co_await loadRef(lhs, info->targetType, 1), info->targetType->destroyReferences());
 	}
 
 	if (info->operatorMethod) {
@@ -4352,6 +4362,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAssignmentExpression(std:
 		};
 		result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), ("@assignment_operator_" + tmpIdxStr).c_str());
 	} else {
+		lhs = co_await loadRef(lhs, info->targetType, 1);
 		result = LLVMBuildStore(_builders.top().get(), rhs, lhs);
 		result = lhs; // the result of the assignment is a reference to the assignee
 	}
@@ -4389,7 +4400,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileBinaryOperation(std::shar
 		auto argInfo = thisIsLeftHand ? info->right : info->left;
 		auto argType = thisIsLeftHand ? info->rightType : info->leftType;
 
-		if (!additionalCopyInfo(instanceAlta, instanceInfo).first) {
+		if (instanceType->referenceLevel() == 0) {
 			instance = co_await tmpify(instance, instanceType);
 		}
 
@@ -6615,6 +6626,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileUnaryOperation(std::share
 	if (info->operatorMethod) {
 		if (info->targetType->referenceLevel() == 0) {
 			compiled = co_await tmpify(compiled, info->targetType);
+		} else if (info->targetType->referenceLevel() > 1) {
+			compiled = co_await loadRef(compiled, info->targetType, 1);
 		}
 
 		auto [llfuncType, llfunc] = co_await declareFunction(info->operatorMethod);
@@ -6668,6 +6681,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileUnaryOperation(std::share
 				}
 
 				if (info->targetType->referenceLevel() > 0) {
+					compiled = co_await loadRef(compiled, info->targetType, 1);
 					LLVMBuildStore(_builders.top().get(), inc, compiled);
 				}
 
