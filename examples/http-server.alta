@@ -5,7 +5,8 @@ import String from "string"
 import Pair from "util"
 
 literal function main(argc: int, argv: ptr ptr byte): int {
-	let server = new Server
+	let scheduler = new Scheduler
+	let server = new Server(scheduler)
 
 	server.requestHandler = (req: IncomingRequest, res: ref OutgoingResponse) => void {
 		printLine("Received a ", req.method, " request for ", req.path)
@@ -35,7 +36,9 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 	server.listen(port: 8080)
 	printLine("Now listening on port 8080...")
 
-	await server.run()
+	let co = server.run()
+	scheduler.schedule(co)
+	scheduler.finishAll()
 
 	return 0
 }
