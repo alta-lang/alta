@@ -7153,7 +7153,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(st
 	} else if (info->items.size() == 1 && info->items.front()->id == AltaCore::Util::getModule(info->inputScope.get()).lock()->internal.schedulerVariable->id) {
 		throw std::runtime_error("TODO: scheduler fetch");
 	} else if (info->items.size() == 1 && info->items.front()->name == "$coroutine") {
-		throw std::runtime_error("TODO: coroutine fetch");
+		co_return _suspendableContext.top();
 	} else {
 		auto result = _definedVariables[info->items.front()->id];
 
