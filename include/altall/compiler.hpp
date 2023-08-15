@@ -1,11 +1,13 @@
 #ifndef ALTALL_COMPILER_HPP
 #define ALTALL_COMPILER_HPP
 
+#include "altacore/ast/accessor.hpp"
 #include "altacore/det-shared.hpp"
 #include "altacore/det/class.hpp"
 #include "altacore/det/module.hpp"
 #include "altacore/det/scope-item.hpp"
 #include "altacore/det/scope.hpp"
+#include "altacore/detail-handles.hpp"
 #include "altacore/errors.hpp"
 #include "altacore/optional.hpp"
 #include "altacore/util.hpp"
@@ -734,6 +736,13 @@ namespace AltaLL {
 					//canTempify = true;
 				}
 			}
+			if (type == ANT::Accessor) {
+				auto acc = std::dynamic_pointer_cast<AAST::Accessor>(node);
+				auto det = std::dynamic_pointer_cast<DH::Accessor>(info);
+
+				canCopy = false;
+				//canTempify = false;
+			}
 			return std::make_pair(
 				(
 					type != ANT::ClassInstantiationExpression &&
@@ -741,6 +750,8 @@ namespace AltaLL {
 					type != ANT::LambdaExpression &&
 					type != ANT::AwaitExpression &&
 					type != ANT::YieldExpression &&
+					(type != AltaCore::AST::NodeType::Accessor || !std::dynamic_pointer_cast<AltaCore::DH::Accessor>(info)->readAccessor) &&
+					(type != AltaCore::AST::NodeType::Fetch || !std::dynamic_pointer_cast<AltaCore::DH::Fetch>(info)->readAccessor) &&
 					canCopy
 				),
 				(
@@ -750,6 +761,8 @@ namespace AltaLL {
 					type == ANT::LambdaExpression ||
 					type == ANT::AwaitExpression ||
 					type == ANT::YieldExpression ||
+					(type == AltaCore::AST::NodeType::Accessor && std::dynamic_pointer_cast<AltaCore::DH::Accessor>(info)->readAccessor) ||
+					(type == AltaCore::AST::NodeType::Fetch && std::dynamic_pointer_cast<AltaCore::DH::Fetch>(info)->readAccessor) ||
 					canTempify
 				)
 			);

@@ -2,6 +2,7 @@
 #include "altacore/det-shared.hpp"
 #include "altacore/det/function.hpp"
 #include "altacore/det/type.hpp"
+#include "altacore/detail-handles.hpp"
 #include "altacore/optional.hpp"
 #include "altacore/shared.hpp"
 #include "altacore/util.hpp"
@@ -1163,7 +1164,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtor(LLVMValueRef compiled
 		nodeType != AltaCore::AST::NodeType::ClassInstantiationExpression &&
 		nodeType != AltaCore::AST::NodeType::FunctionCallExpression &&
 		nodeType != AltaCore::AST::NodeType::AwaitExpression &&
-		nodeType != AltaCore::AST::NodeType::YieldExpression
+		nodeType != AltaCore::AST::NodeType::YieldExpression &&
+		(nodeType != AltaCore::AST::NodeType::Accessor || !std::dynamic_pointer_cast<AltaCore::DH::Accessor>(info)->readAccessor) &&
+		(nodeType != AltaCore::AST::NodeType::Fetch || !std::dynamic_pointer_cast<AltaCore::DH::Fetch>(info)->readAccessor)
 	) {
 		compiled = co_await doCopyCtorInternal(compiled, exprType, additionalCopyInfo(expr, info), didCopy);
 	}
@@ -1738,7 +1741,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::tmpify(std::shared_ptr<AltaCore:
 			expr->nodeType() == AltaCore::AST::NodeType::ClassInstantiationExpression ||
 			expr->nodeType() == AltaCore::AST::NodeType::ConditionalExpression ||
 			expr->nodeType() == AltaCore::AST::NodeType::YieldExpression ||
-			expr->nodeType() == AltaCore::AST::NodeType::AwaitExpression
+			expr->nodeType() == AltaCore::AST::NodeType::AwaitExpression ||
+			(expr->nodeType() == AltaCore::AST::NodeType::Accessor && std::dynamic_pointer_cast<AltaCore::DH::Accessor>(info)->readAccessor) ||
+			(expr->nodeType() == AltaCore::AST::NodeType::Fetch && std::dynamic_pointer_cast<AltaCore::DH::Fetch>(info)->readAccessor)
 		)
 	) {
 		result = co_await tmpify(result, type, true);
@@ -3908,7 +3913,14 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			auto selfCopyInfo = additionalCopyInfo(node->target, info->target);
 			auto selfType = AltaCore::DET::Type::getUnderlyingType(info->target.get());
 
-			if (selfCopyInfo.second && node->target->nodeType() != AltaCore::AST::NodeType::FunctionCallExpression && node->target->nodeType() != AltaCore::AST::NodeType::AwaitExpression && node->target->nodeType() != AltaCore::AST::NodeType::YieldExpression) {
+			if (
+				selfCopyInfo.second &&
+				node->target->nodeType() != AltaCore::AST::NodeType::FunctionCallExpression &&
+				node->target->nodeType() != AltaCore::AST::NodeType::AwaitExpression &&
+				node->target->nodeType() != AltaCore::AST::NodeType::YieldExpression &&
+				(node->target->nodeType() != AltaCore::AST::NodeType::Accessor || !std::dynamic_pointer_cast<AltaCore::DH::Accessor>(info->target)->readAccessor) &&
+				(node->target->nodeType() != AltaCore::AST::NodeType::Fetch || !std::dynamic_pointer_cast<AltaCore::DH::Fetch>(info->target)->readAccessor)
+			) {
 				result = co_await tmpify(result, selfType);
 			}
 
