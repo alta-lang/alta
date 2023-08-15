@@ -2828,6 +2828,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 		_suspendableContext.push(nullptr);
 
+		LLVMValueRef globalClassInfo = nullptr;
+
 		if (info->function->isGenerator || info->function->isAsync) {
 			auto [dtorType, dtor] = co_await declareFunction(genClass->destructor);
 
@@ -2838,7 +2840,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 			suspendableContext = LLVMGetParam(llfunc, 0);
 
-			auto globalClassInfo = LLVMAddGlobal(_llmod.get(), _definedTypes["_Alta_class_info"], (mangleName(genClass) + "@class_info").c_str());
+			globalClassInfo = LLVMAddGlobal(_llmod.get(), _definedTypes["_Alta_class_info"], (mangleName(genClass) + "@class_info").c_str());
 
 			auto i64Type = LLVMInt64TypeInContext(_llcontext.get());
 			auto strType = LLVMPointerType(LLVMInt8TypeInContext(_llcontext.get()), 0);
@@ -3113,11 +3115,19 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			if (info->function->isMethod) {
 				auto selfParam = buildSuspendableAlloca(_builders.top(), suspendableContext);
 				updateSuspendableAlloca(selfParam, LLVMOffsetOfElement(_targetData.get(), paramStackType, paramStackIndex++));
+
+				auto thisDebugType = LLVMDIBuilderCreateObjectPointerType(_debugBuilder.get(), translateTypeDebug(info->function->parentClassType));
+				auto thisDebugVar = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), "this", sizeof("this") - 1, 1, debugFileForScopeItem(info->function), node->position.line, thisDebugType, false, LLVMDIFlagZero);
+				auto thisDebugLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), node->position.line, node->position.column, translateScope(info->function->scope), NULL);
+
+				LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), selfParam, thisDebugVar, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), thisDebugLoc, LLVMGetInsertBlock(_builders.top().get()));
+
 				// "this" is a pointer to the class instance; we don't want a pointer to a pointer
 				selfParam = LLVMBuildLoad2(_builders.top().get(), co_await translateType(info->function->parentClassType), selfParam, "@this");
 				_thisContextValue.push(selfParam);
 			}
 
+			size_t llparamIndexCoro = info->function->isMethod ? 1 : 0;
 			for (size_t i = 0; i < info->parameters.size(); ++i) {
 				const auto& param = node->parameters[i];
 				const auto& paramInfo = info->parameters[i];
@@ -3130,6 +3140,15 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 				updateSuspendableAlloca(llparam, LLVMOffsetOfElement(_targetData.get(), paramStackType, paramStackIndex++));
 
 				LLVMSetValueName(llparam, (param->name + "@on_stack").c_str());
+
+				++llparamIndexCoro;
+
+				auto paramNameDebug = param->name;
+				auto paramTypeDebug = translateTypeDebug(var->type);
+				auto llparamDebug = LLVMDIBuilderCreateParameterVariable(_debugBuilder.get(), translateScope(info->function->scope), paramNameDebug.c_str(), paramNameDebug.size(), llparamIndexCoro, debugFileForScope(info->function->scope), param->position.line, paramTypeDebug, false, LLVMDIFlagZero);
+				auto paramLoc = LLVMDIBuilderCreateDebugLocation(_llcontext.get(), param->position.line, param->position.column, translateScope(info->function->scope), NULL);
+
+				LLVMDIBuilderInsertDeclareAtEnd(_debugBuilder.get(), llparam, llparamDebug, LLVMDIBuilderCreateExpression(_debugBuilder.get(), NULL, 0), paramLoc, LLVMGetInsertBlock(_builders.top().get()));
 
 				_definedVariables[var->id] = llparam;
 			}
@@ -3152,6 +3171,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 				currentStack().pushItem(_definedVariables[var->id], var->type);
 			}
+
+			// once we've actually started executing the function, we switch to a new state (state 1)
+			co_await updateSuspendableStateIndex(++_suspendableStateIndex.top());
 		}
 
 		pushDebugLocation(node->body->position, nextFunc ? nextFunc->scope : info->function->scope);
@@ -3306,6 +3328,8 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			}
 
 			LLVMPositionBuilderAtEnd(_builders.top().get(), _suspendableDestructor.top().exit);
+
+			paramStackIndex = info->function->isMethod ? 2 : 1;
 
 			for (size_t i_plus_one = info->parameters.size(); i_plus_one > 0; --i_plus_one) {
 				auto i = i_plus_one - 1;
@@ -3542,6 +3566,108 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 			auto done = LLVMBuildLoad2(_builders.top().get(), LLVMInt1TypeInContext(_llcontext.get()), gep, "@suspendable_done");
 
 			LLVMBuildRet(_builders.top().get(), done);
+
+			_builders.pop();
+		}
+
+		if (info->coroutine) {
+			// build the `id` getter
+			auto idGetter = std::dynamic_pointer_cast<AltaCore::DET::Function>(genClass->scope->items[4]);
+			auto [llfuncType, llfunc] = co_await declareFunction(idGetter);
+
+			auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
+			auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+			_builders.push(builder);
+
+			suspendableContext = LLVMGetParam(llfunc, 0);
+
+			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+			std::array<LLVMValueRef, 3> gepIndices {
+				LLVMConstInt(gepIndexType, 0, false), // the first element in the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+				LLVMConstInt(gepStructIndexType, 3, false), // _Alta_basic_coroutine::id
+			};
+			auto gep = LLVMBuildGEP2(_builders.top().get(), llclass, suspendableContext, gepIndices.data(), gepIndices.size(), "@coro_id_ref");
+
+			auto id = LLVMBuildLoad2(_builders.top().get(), LLVMInt64TypeInContext(_llcontext.get()), gep, "@coro_id");
+
+			LLVMBuildRet(_builders.top().get(), id);
+
+			_builders.pop();
+		}
+
+		if (suspendableContext) {
+			// build the copy constructor (it's actually a move constructor)
+			auto copyCtor = std::dynamic_pointer_cast<AltaCore::DET::Function>(genClass->copyConstructor);
+
+			std::vector<LLVMTypeRef> llparamTypesCopyCtor;
+			for (size_t i = 0; i < genClass->copyConstructor->parameters.size(); ++i) {
+				auto lltype = co_await translateType(std::get<1>(genClass->copyConstructor->parameters[i]));
+
+				if (std::get<2>(genClass->copyConstructor->parameters[i])) {
+					llparamTypesCopyCtor.push_back(LLVMInt64TypeInContext(_llcontext.get()));
+					llparamTypesCopyCtor.push_back(LLVMPointerType(lltype, 0));
+				} else {
+					llparamTypesCopyCtor.push_back(lltype);
+				}
+			}
+
+			auto llfuncType = LLVMFunctionType(llclass, llparamTypesCopyCtor.data(), llparamTypesCopyCtor.size(), false);
+			auto [llfuncTypeIgnored, llfunc] = co_await declareFunction(copyCtor, llfuncType);
+
+			auto entryBlock = LLVMAppendBasicBlockInContext(_llcontext.get(), llfunc, "@entry");
+			auto builder = llwrap(LLVMCreateBuilderInContext(_llcontext.get()));
+			LLVMPositionBuilderAtEnd(builder.get(), entryBlock);
+
+			_builders.push(builder);
+
+			LLVMValueRef sourceContext = LLVMGetParam(llfunc, 0);
+
+			auto moved = LLVMBuildLoad2(_builders.top().get(), llclass, sourceContext, "@moved");
+
+			// create a suspendable context that's marked as done
+			auto resetVal = LLVMConstNull(llclass);
+			if (info->coroutine) {
+				auto nextFunc = std::dynamic_pointer_cast<AltaCore::DET::Function>(genClass->scope->items[3]);
+				auto [coroNextType, coroNext] = co_await declareFunction(nextFunc);
+
+				auto resetContext = LLVMConstNull(_definedTypes["_Alta_basic_coroutine"]);
+				auto resetSuspendable = LLVMConstNull(_definedTypes["_Alta_basic_suspendable"]);
+				resetSuspendable = LLVMBuildInsertValue(_builders.top().get(), resetSuspendable, LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 1, false), 2, "@suspendable_reset_core");
+				resetContext = LLVMBuildInsertValue(_builders.top().get(), resetContext, resetSuspendable, 0, "@suspendable_reset_context");
+				resetContext = LLVMBuildInsertValue(_builders.top().get(), resetContext, coroNext, 2, "@suspendable_reset_context2");
+				resetVal = LLVMBuildInsertValue(_builders.top().get(), resetVal, resetContext, 0, "@suspendable_reset_val");
+			} else if (info->generator) {
+				auto resetContext = LLVMConstNull(_definedTypes["_Alta_basic_generator"]);
+				auto resetSuspendable = LLVMConstNull(_definedTypes["_Alta_basic_suspendable"]);
+				resetSuspendable = LLVMBuildInsertValue(_builders.top().get(), resetSuspendable, LLVMConstInt(LLVMInt1TypeInContext(_llcontext.get()), 1, false), 2, "@suspendable_reset_core");
+				resetContext = LLVMBuildInsertValue(_builders.top().get(), resetContext, resetSuspendable, 0, "@suspendable_reset_context");
+				resetVal = LLVMBuildInsertValue(_builders.top().get(), resetVal, resetContext, 0, "@suspendable_reset_val");
+			}
+			LLVMBuildStore(_builders.top().get(), resetVal, sourceContext);
+
+			auto gepIndexType = LLVMInt64TypeInContext(_llcontext.get());
+			auto gepStructIndexType = LLVMInt32TypeInContext(_llcontext.get());
+
+			std::array<LLVMValueRef, 4> gepIndices {
+				LLVMConstInt(gepIndexType, 0, false), // the first index in the "array"
+				LLVMConstInt(gepStructIndexType, 0, false), // @Suspendable@::basic_context
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_{coroutine,generator}::basic_suspendable
+				LLVMConstInt(gepStructIndexType, 0, false), // _Alta_basic_suspendable::instance_info
+			};
+
+			std::array<LLVMValueRef, 1> instInfoVals {
+				globalClassInfo,
+			};
+
+			auto instInfoGEP = LLVMBuildGEP2(_builders.top().get(), llclass, sourceContext, gepIndices.data(), gepIndices.size(), "@suspendable_instance_info_reset_ref");
+			LLVMBuildStore(_builders.top().get(), LLVMConstNamedStruct(_definedTypes["_Alta_instance_info"], instInfoVals.data(), instInfoVals.size()), instInfoGEP);
+
+			LLVMBuildRet(_builders.top().get(), moved);
 
 			_builders.pop();
 		}
