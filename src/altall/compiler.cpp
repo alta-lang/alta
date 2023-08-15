@@ -6307,6 +6307,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::
 
 			auto [llfuncType, llfunc] = co_await declareFunction(info->operatorMethod);
 
+			if (info->targetType->referenceLevel() == 0) {
+				target = co_await tmpify(target, info->targetType);
+			}
+
 			std::array<LLVMValueRef, 2> args {
 				target,
 				subscript,
