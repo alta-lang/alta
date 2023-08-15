@@ -1410,7 +1410,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 };
 
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::loadRef(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, size_t finalRefLevel) {
-	for (size_t i = finalRefLevel; i < exprType->referenceLevel(); ++i) {
+	while (exprType->referenceLevel() > finalRefLevel) {
 		exprType = exprType->dereference();
 		expr = LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType), expr, "");
 	}
