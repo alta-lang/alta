@@ -476,8 +476,14 @@ export class OutgoingResponse {
 #
 export class Server {
 	private var socket: TCPSocket
+	private var scheduler: ptr Scheduler = nullptr
 
 	private var coroutineIDs: Vector<Coroutines.ID>
+	private var cleanupIDs: Vector<Coroutines.ID>
+
+	public constructor(scheduler: ref Scheduler) {
+		this.scheduler = &scheduler
+	}
 
 	# TODO: create something like Node's EventEmitter
 	#       that's going to have to wait until we implement async lambdas
@@ -551,16 +557,32 @@ export class Server {
 		for i: Size in 0..this.coroutineIDs.length {
 			if this.coroutineIDs[i] == $coroutine.id {
 				this.coroutineIDs.remove(i)
+				this.cleanupIDs.push($coroutine.id)
 				break
 			}
 		}
 	}
 
+	# this *must* be declared after `handleConnection` because the current Alta compiler does
+	private var coroutines: Vector<@returnTypeOf this.handleConnection>
+
 	public function checkForConnection(): void {
 		let client = this.socket.accept()
 		# if we've got a new request, create the necessary objects for the request and response
 		if client {
-			this.coroutineIDs.push($scheduler.schedule(this.handleConnection((*client).first, (*client).second)))
+			let coro: ref @returnTypeOf this.handleConnection = this.coroutines.push(this.handleConnection((*client).first, (*client).second))
+			this.coroutineIDs.push((*this.scheduler).schedule(coro))
+		}
+		if this.cleanupIDs.length > 0 {
+			for id: Coroutines.ID in this.cleanupIDs.items {
+				for i: Size in 0..this.coroutines.length {
+					if this.coroutines[i].id == id {
+						this.coroutines.remove(i)
+						break
+					}
+				}
+			}
+			this.cleanupIDs.clear()
 		}
 	}
 
