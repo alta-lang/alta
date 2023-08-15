@@ -1123,7 +1123,20 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtorInternal(LLVMValueRef 
 			// otherwise, there's no point in continuing
 			exprType->klass->copyConstructor
 		) {
-			auto [lltype, llfunc] = co_await declareFunction(exprType->klass->copyConstructor);
+			std::vector<LLVMTypeRef> llparamTypesCopyCtor;
+			for (size_t i = 0; i < exprType->klass->copyConstructor->parameters.size(); ++i) {
+				auto lltype = co_await translateType(std::get<1>(exprType->klass->copyConstructor->parameters[i]));
+
+				if (std::get<2>(exprType->klass->copyConstructor->parameters[i])) {
+					llparamTypesCopyCtor.push_back(LLVMInt64TypeInContext(_llcontext.get()));
+					llparamTypesCopyCtor.push_back(LLVMPointerType(lltype, 0));
+				} else {
+					llparamTypesCopyCtor.push_back(lltype);
+				}
+			}
+
+			auto llfuncType = LLVMFunctionType(co_await translateType(exprType->klass->copyConstructor->parentClassType->destroyReferences()), llparamTypesCopyCtor.data(), llparamTypesCopyCtor.size(), false);
+			auto [lltype, llfunc] = co_await declareFunction(exprType->klass->copyConstructor, llfuncType);
 			copyFuncType = lltype;
 			copyFunc = llfunc;
 
