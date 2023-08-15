@@ -7244,12 +7244,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode(std::shared_ptr<AltaCore::AST::EnumerationDefinitionNode> node, std::shared_ptr<AltaCore::DH::EnumerationDefinitionNode> info) {
 	auto lltype = co_await translateType(info->memberType);
 	std::vector<LLVMMetadataRef> debugMembers;
+	bool isNative = info->memberType->isNative;
 
-	if (!info->memberType->isNative) {
-		throw std::runtime_error("Support non-native enums");
-	}
-
-	auto prevVal = LLVMConstInt(lltype, 0, false);
+	LLVMValueRef prevVal = isNative ? LLVMConstInt(lltype, 0, false) : NULL;
 
 	for (size_t i = 0; i < node->members.size(); ++i) {
 		const auto& [key, value] = node->members[i];
@@ -7259,30 +7256,43 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode
 		if (!_definedVariables[memberVar->id]) {
 			auto mangled = mangleName(memberVar);
 			_definedVariables[memberVar->id] = LLVMAddGlobal(_llmod.get(), lltype, mangled.c_str());
+			LLVMSetLinkage(_definedVariables[memberVar->id], LLVMInternalLinkage);
 		}
 
 		enterInitFunction();
-		auto llval = value ? co_await compileNode(value, valueInfo) : LLVMConstAdd(prevVal, LLVMConstInt(lltype, 1, false));
-		exitInitFunction();
-
-		if (!LLVMIsConstant(llval)) {
-			throw std::runtime_error("Support non-constant enum values");
-		}
-
+		LLVMValueRef llval = NULL;
 		if (value) {
-			auto valueType = AltaCore::DET::Type::getUnderlyingType(valueInfo.get());
-
-			if (valueType->referenceLevel() == info->memberType->referenceLevel() + 1) {
-				auto initializer = LLVMGetInitializer(llval);
-				if (!initializer) {
-					throw std::runtime_error("no support for initializing enum values with external constants");
-				}
-				llval = initializer;
-			}
+			llval = co_await compileNode(value, valueInfo);
+		} else if (isNative) {
+			llval = LLVMConstAdd(prevVal, LLVMConstInt(lltype, 1, false));
+		} else {
+			throw std::runtime_error("TODO: Support non-native enums with implicit members");
 		}
 
-		LLVMSetInitializer(_definedVariables[memberVar->id], llval);
-		LLVMSetGlobalConstant(_definedVariables[memberVar->id], true);
+		if (isNative && LLVMIsConstant(llval)) {
+			exitInitFunction();
+
+			if (value) {
+				auto valueType = AltaCore::DET::Type::getUnderlyingType(valueInfo.get());
+
+				if (valueType->referenceLevel() == info->memberType->referenceLevel() + 1) {
+					auto initializer = LLVMGetInitializer(llval);
+					if (!initializer) {
+						throw std::runtime_error("no support for initializing enum values with external constants");
+					}
+					llval = initializer;
+				}
+			}
+
+			LLVMSetInitializer(_definedVariables[memberVar->id], llval);
+			LLVMSetGlobalConstant(_definedVariables[memberVar->id], true);
+		} else {
+			LLVMSetInitializer(_definedVariables[memberVar->id], LLVMGetPoison(co_await translateType(info->memberType)));
+			LLVMSetGlobalConstant(_definedVariables[memberVar->id], false);
+			llval = co_await cast(llval, AltaCore::DET::Type::getUnderlyingType(valueInfo.get()), info->memberType, false, additionalCopyInfo(value, valueInfo), false, &value->position);
+			LLVMBuildStore(_builders.top().get(), llval, _definedVariables[memberVar->id]);
+			exitInitFunction();
+		}
 
 		debugMembers.push_back(LLVMDIBuilderCreateEnumerator(_debugBuilder.get(), key.c_str(), key.size(), memberVar->type->isSigned() ? LLVMConstIntGetSExtValue(llval) : (int64_t)LLVMConstIntGetZExtValue(llval), !memberVar->type->isSigned()));
 
