@@ -5311,7 +5311,9 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 					}
 
 					LLVMBuildStore(_builders.top().get(), init, gep);
-				} else if (memberDefInfo->varDef->type->type->referenceLevel() > 0 || memberDefInfo->varDef->type->type->klass) {
+				} else if (memberDefInfo->varDef->type->type->referenceLevel() > 0) {
+					LLVMBuildStore(_builders.top().get(), LLVMGetPoison(co_await translateType(memberDefInfo->varDef->type->type)), gep);
+				} else if (memberDefInfo->varDef->type->type->klass) {
 					throw std::runtime_error("this should have been handled by AltaCore");
 				} else {
 					LLVMBuildStore(_builders.top().get(), LLVMConstNull(co_await translateType(memberDefInfo->varDef->type->type)), gep);
