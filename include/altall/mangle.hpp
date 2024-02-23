@@ -13,7 +13,7 @@ namespace AltaLL {
 	std::string escapeName(std::string name);
 	std::string mangleName(std::shared_ptr<AltaCore::DET::Module> mod, bool fullName = true);
 	std::string mangleName(std::shared_ptr<AltaCore::DET::Scope> scope, bool fullName = true);
-	std::string mangleName(std::shared_ptr<AltaCore::DET::ScopeItem> item, bool fullName = true);
+	std::string mangleName(std::shared_ptr<AltaCore::DET::ScopeItem> item, bool fullName = true, bool root = true);
 };
 
 #endif // ALTALL_MANGLE_HPP

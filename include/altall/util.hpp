@@ -31,6 +31,27 @@ namespace AltaLL {
 		LLVMDisposeMessage(msg);
 		return str;
 	};
+
+	static inline std::string byteToHex(uint8_t value, bool upper = false) {
+		std::string str("00");
+		uint8_t digit;
+
+		digit = ((value >> 4) & 0x0f);
+		if (digit < 10) {
+			str[0] = digit + '0';
+		} else {
+			str[0] = (digit - 10) + (upper ? 'A' : 'a');
+		}
+
+		digit = ((value >> 0) & 0x0f);
+		if (digit < 10) {
+			str[1] = digit + '0';
+		} else {
+			str[1] = (digit - 10) + (upper ? 'A' : 'a');
+		}
+
+		return str;
+	};
 };
 
 #endif // ALTALL_UTIL_HPP
