@@ -172,30 +172,15 @@ install(FILES "${PROJECT_SOURCE_DIR}/deps/PicoSHA2/LICENSE"
   COMPONENT Core
   RENAME "PicoSHA2.LICENSE.txt"
 )
-install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/any/LICENSE_1_0.txt"
-  DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
-  COMPONENT Core
-  RENAME "any.LICENSE.txt"
-)
 install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/crossguid/LICENSE"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
   RENAME "crossguid.LICENSE.txt"
 )
-install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/optional/COPYING"
-  DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
-  COMPONENT Core
-  RENAME "optional.LICENSE.txt"
-)
 install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/semver.c/LICENSE"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
   COMPONENT Core
   RENAME "semver.c.LICENSE.txt"
-)
-install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/variant/LICENSE.md"
-  DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
-  COMPONENT Core
-  RENAME "variant.LICENSE.txt"
 )
 install(FILES "${PROJECT_SOURCE_DIR}/deps/alta-core/deps/yaml-cpp/LICENSE"
   DESTINATION "${ALTA_DOC_DIR}/additional-licenses"
