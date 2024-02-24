@@ -37,7 +37,9 @@ void AltaLL::compile(std::shared_ptr<AltaCore::AST::RootNode> root, AltaCore::Fi
 	auto outputObjectPathStr = outputPathStr + ".o";
 	char* errorMessage = NULL;
 
+#if LLVM_VERSION_MAJOR < 15
 	LLVMContextSetOpaquePointers(llcontext.get(), true);
+#endif
 
 	std::stack<std::pair<std::shared_ptr<AltaCore::AST::RootNode>, size_t>> rootStack;
 	std::unordered_set<std::string> processedRoots;
