@@ -276,7 +276,7 @@ export class Socket {
 			if (let res = this.waitFor(read: true)).isError
 				return res.morphError<Vector<uint8>>()
 
-		let buf = new Vector<uint8>(max, 0)
+		let buf = new Vector<uint8>(length: max, 0)
 		let received = posix.recv(this.handle, buf.data as ptr void, buf.length, 0)
 		if received == -1 {
 			let err = posix.errno

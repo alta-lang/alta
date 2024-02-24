@@ -61,7 +61,7 @@ export function split(utf16: Vector<uint16>, littleEndian: bool): Vector<uint8> 
 }
 
 export function split(utf32: uint32, littleEndian: bool): Vector<uint8> {
-  let result = new Vector<uint8>(4, '\0')
+  let result = new Vector<uint8>(length: 4, '\0')
 
   result[0] = utf32 & 0xff000000
   result[1] = utf32 & 0x00ff0000
@@ -110,7 +110,7 @@ bitfield UTF8MultiByte: uint32 {
 
 export function utf32ToUTF8(utf32: uint32): Vector<uint8> {
   let bytes = detectRequiredUTF8BytesForUTF32(utf32)
-  let result = new Vector<uint8>(bytes, '\0')
+  let result = new Vector<uint8>(length: bytes, '\0')
 
   result.first = bytes == 1 ? 0 : 0b11110000
 
