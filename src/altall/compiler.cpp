@@ -2533,6 +2533,9 @@ std::pair<LLVMValueRef, LLVMTypeRef> AltaLL::Compiler::defineRuntimeFunction(con
 			stringType,
 		};
 		llfuncType = LLVMFunctionType(boolType, params.data(), params.size(), false);
+	} else if (name == "_Alta_bad_return") {
+		std::array<LLVMTypeRef, 0> params {};
+		llfuncType = LLVMFunctionType(LLVMVoidTypeInContext(_llcontext.get()), params.data(), params.size(), false);
 	} else {
 		throw std::runtime_error("Unknown runtime function: " + name);
 	}
@@ -2635,6 +2638,13 @@ void AltaLL::Compiler::buildBadEnum(LLBuilder builder, const std::string& enumTy
 		LLVMBuildGlobalStringPtr(builder.get(), enumType.c_str(), ""),
 		LLVMBuildIntCast2(builder.get(), badEnumValue, LLVMInt64TypeInContext(_llcontext.get()), false, ""),
 	};
+	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
+	LLVMBuildUnreachable(builder.get());
+};
+
+void AltaLL::Compiler::buildBadReturn(LLBuilder builder) {
+	auto [llfunc, llfuncType] = defineRuntimeFunction("_Alta_bad_return");
+	std::array<LLVMValueRef, 0> args {};
 	LLVMBuildCall2(builder.get(), llfuncType, llfunc, args.data(), args.size(), "");
 	LLVMBuildUnreachable(builder.get());
 };
@@ -3222,7 +3232,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFunctionDefinitionNode(st
 
 				LLVMBuildRetVoid(_builders.top().get());
 			} else {
-				LLVMBuildUnreachable(_builders.top().get());
+				buildBadReturn(_builders.top());
 			}
 		}
 
@@ -5675,7 +5685,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassSpecialMethodDefinit
 
 			LLVMBuildRetVoid(_builders.top().get());
 		} else {
-			LLVMBuildUnreachable(_builders.top().get());
+			buildBadReturn(_builders.top());
 		}
 	}
 
@@ -7008,7 +7018,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileLambdaExpression(std::sha
 
 			LLVMBuildRetVoid(_builders.top().get());
 		} else {
-			LLVMBuildUnreachable(_builders.top().get());
+			buildBadReturn(_builders.top());
 		}
 	}
 
@@ -7226,7 +7236,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassOperatorDefinitionSt
 
 			LLVMBuildRetVoid(_builders.top().get());
 		} else {
-			LLVMBuildUnreachable(_builders.top().get());
+			buildBadReturn(_builders.top());
 		}
 	}
 
@@ -7420,7 +7430,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileEnumerationDefinitionNode
 			LLVMSetValueName(LLVMBasicBlockAsValue(LLVMGetInsertBlock(_builders.top().get())), "@not_found");
 			LLVMBuildRet(_builders.top().get(), LLVMConstNull(LLVMGetReturnType(llfuncType)));
 		} else {
-			LLVMBuildUnreachable(_builders.top().get());
+			buildBadReturn(_builders.top());
 		}
 
 		co_await currentStack().cleanup();

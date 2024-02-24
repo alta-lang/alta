@@ -16,6 +16,10 @@ export literal function _Alta_bad_suspendable_state(suspendable: ptr native._Alt
 	abort()
 }
 
+export literal function _Alta_bad_return(): void {
+	abort()
+}
+
 function _Alta_get_base(inst: ptr native._Alta_basic_class): ptr native._Alta_basic_class {
 	return ((inst as ptr byte) - inst.instance_info.class_info.offset_from_base) as ptr native._Alta_basic_class
 }

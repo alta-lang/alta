@@ -862,6 +862,7 @@ namespace AltaLL {
 		LLVMValueRef buildGetChild(LLBuilder builder, LLVMValueRef instance, const std::vector<std::string>& parentContainerPath);
 		void buildBadCast(LLBuilder builder, const std::string& from, const std::string& to);
 		void buildBadEnum(LLBuilder builder, const std::string& enumType, LLVMValueRef badEnumValue);
+		void buildBadReturn(LLBuilder builder);
 		LLVMValueRef buildVirtualLookup(LLBuilder builder, LLVMValueRef instance, const std::string& methodName);
 		LLVMValueRef buildRawStringsAreEqual(LLBuilder builder, LLVMValueRef lhs, LLVMValueRef rhs);
 		void buildBadSuspendableState(LLBuilder builder, LLVMValueRef suspendableContext);
