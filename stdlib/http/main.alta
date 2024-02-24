@@ -313,6 +313,8 @@ export class Message {
 				this.inHeaders = true
 			}
 		}
+
+		return new Result<void, Error>(ok: void)
 	}
 }
 
