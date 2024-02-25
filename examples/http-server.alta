@@ -1,8 +1,9 @@
-import Server, IncomingRequest, OutgoingResponse, Status, Field from "http"
+import Server, IncomingRequest, OutgoingResponse, Status, Field, Error as HTTPError from "http"
 import Path from "uri"
 import printLine, print from "io"
 import String from "string"
 import Pair from "util"
+import Error as NetError from "net"
 
 literal function main(argc: int, argv: ptr ptr byte): int {
 	let scheduler = new Scheduler
@@ -33,7 +34,15 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 		res.end("Not found")
 	}
 
-	server.listen(port: 8080)
+	if (let res = server.listen(port: 8080)).isError {
+		let errName = @reverse NetError[res.error]
+		if errName {
+			printLine("Failed to listen on port 8080: ", *errName)
+		} else {
+			printLine("Failed to listen on port 8080: ", res.error)
+		}
+		return 1
+	}
 	printLine("Now listening on port 8080...")
 
 	let co = server.run()
