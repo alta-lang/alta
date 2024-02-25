@@ -6315,16 +6315,47 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSubscriptExpression(std::
 		if (info->operatorMethod) {
 			subscript = co_await cast(subscript, info->indexType, info->operatorMethod->parameterVariables.front()->type, true, additionalCopyInfo(node->index, info->index), false, &node->index->position);
 
-			auto [llfuncType, llfunc] = co_await declareFunction(info->operatorMethod);
+			LLVMTypeRef llfuncType = NULL;
+			LLVMValueRef llfunc = NULL;
 
-			if (info->targetType->referenceLevel() == 0) {
-				target = co_await tmpify(target, info->targetType);
+			auto selfType = info->targetType;
+
+			while (selfType->pointerLevel() > 1) {
+				target = LLVMBuildLoad2(_builders.top().get(), co_await translateType(selfType->follow()), target, "");
+				selfType = selfType->follow();
+			}
+
+			bool didRetrieval = false;
+
+			if (info->operatorMethod->isVirtual()) {
+				bool didRetrival = false;
+				target = co_await getRootInstance(target, selfType, &didRetrieval);
+				if (!didRetrieval) {
+					throw std::runtime_error("root instance retrieval must succeed because this is virtual");
+				}
+				selfType = std::make_shared<AltaCore::DET::Type>(AltaCore::DET::NativeType::Void, std::vector<uint8_t> { (uint8_t)AltaCore::DET::TypeModifierFlag::Pointer });
+			} else {
+				target = co_await doParentRetrieval(target, selfType, info->operatorMethod->parentClassType, &didRetrieval);
+				if (didRetrieval) {
+					selfType = info->operatorMethod->parentClassType;
+				}
+			}
+
+			if (selfType->referenceLevel() == 0) {
+				target = co_await tmpify(target, selfType);
 			}
 
 			std::array<LLVMValueRef, 2> args {
 				target,
 				subscript,
 			};
+
+			if (info->operatorMethod->isVirtual()) {
+				llfuncType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(info->operatorMethod), false);
+				llfunc = buildVirtualLookup(_builders.top(), args[0], mangleName(info->operatorMethod, false));
+			} else {
+				std::tie(llfuncType, llfunc) = co_await declareFunction(info->operatorMethod);
+			}
 
 			result = LLVMBuildCall2(_builders.top().get(), llfuncType, llfunc, args.data(), args.size(), ("@subscript_op_call_" + tmpIdxStr).c_str());
 		} else {
