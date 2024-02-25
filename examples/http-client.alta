@@ -1,34 +1,32 @@
-import request, Method, Status, Field from "http"
+import request, Method, Status, Field, Error as HTTPError from "http"
 import Path from "uri"
 import printLine, print from "io"
 import String from "string"
 import Pair, parseNumber from "util"
 import Vector from "vector"
 import uint16 from "types"
+import Error as NetError from "net"
 
-literal function main(argc: int, argv: ptr ptr byte): int {
-	let args = new Vector<String>
-	for i: int in 0..argc {
-		args.push(argv[i])
+async function doRequest(host: String, port: uint16): Result<void, int> {
+	let maybeReq = await request(host, port)
+	if maybeReq.isError {
+		printLine("Failed to create request: ", maybeReq.error)
+		return new Result<void, int>(error: 2)
 	}
 
-	if args.length < 2 {
-		printLine("Usage: ", args[0], " <address> [port]")
-		return 1
-	}
-
-	let port: uint16 = 8080
-
-	if args.length > 2
-		port = parseNumber<uint16>(args[2]).value
-
-	let req = await request(args[1], port)
+	let req = maybeReq.value
 
 	req.method = Method.Get
 	req.path = "/"
 	req.end()
 
-	let res = await req.waitForResponse()
+	let maybeRes = await req.waitForResponse()
+	if maybeRes.isError {
+		printLine("Failed to read response from server: ", maybeRes.error)
+		return new Result<void, int>(error: 3)
+	}
+
+	let res = maybeRes.value
 
 	printLine("Server responded with status code ", res.status)
 
@@ -45,17 +43,59 @@ literal function main(argc: int, argv: ptr ptr byte): int {
 
 	while true {
 		let maybeData = res.receive()
-		if maybeData {
+		if maybeData.isOk {
 			# a chunk with zero length indicates the server is done
 			# TODO: move this check into the HTTP package logic to make it easier for users
 			#       and also make it smarter (e.g. instead of relying on system behavior
 			#       where peers closing their sockets generates a packet with zero length, we
 			#       should be checking for Content-Length or, once we support HTTP/1.1, the terminating
 			#       chunk in a chunked transfer encoding response)
-			if (*maybeData).length == 0
+			if maybeData.value.length == 0
 				break
-			print(new String((*maybeData).data, (*maybeData).length))
+			print(new String(maybeData.value.data, maybeData.value.length))
+		} else if maybeData.error == NetError.WouldBlock {
+			# ignore the error
+		} else {
+			printLine("Failed to read from socket: ", maybeData.error)
+			return new Result<void, int>(error: 4)
 		}
+		yield; # be nice to the other coroutines
+	}
+
+	return new Result<void, int>(ok: void)
+}
+
+literal function main(argc: int, argv: ptr ptr byte): int {
+	let scheduler = new Scheduler
+
+	let args = new Vector<String>
+	for i: int in 0..argc {
+		args.push(argv[i])
+	}
+
+	if args.length < 2 {
+		printLine("Usage: ", args[0], " <address> [port]")
+		return 1
+	}
+
+	let port: uint16 = 8080
+
+	if args.length > 2 {
+		let res = parseNumber<uint16>(args[2])
+		if res.isError {
+			printLine("Invalid port (", args[2], ")")
+			return 1
+		}
+		port = res.value
+	}
+
+	let co = doRequest(args[1], port)
+	scheduler.schedule(co)
+	scheduler.finishAll()
+
+	if (*co.value).isError {
+		printLine("Request failed")
+		return (*co.value).error
 	}
 
 	return 0
