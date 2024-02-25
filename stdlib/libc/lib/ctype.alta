@@ -1,14 +1,14 @@
-declare literal export function isalnum(character: int): bool
-declare literal export function isalpha(character: int): bool
-declare literal export function iscntrl(character: int): bool
-declare literal export function isdigit(character: int): bool
-declare literal export function isgraph(character: int): bool
-declare literal export function islower(character: int): bool
-declare literal export function isprint(character: int): bool
-declare literal export function ispunct(character: int): bool
-declare literal export function isspace(character: int): bool
-declare literal export function isupper(character: int): bool
-declare literal export function isxdigit(character: int): bool
+declare literal export function isalnum(character: int): int
+declare literal export function isalpha(character: int): int
+declare literal export function iscntrl(character: int): int
+declare literal export function isdigit(character: int): int
+declare literal export function isgraph(character: int): int
+declare literal export function islower(character: int): int
+declare literal export function isprint(character: int): int
+declare literal export function ispunct(character: int): int
+declare literal export function isspace(character: int): int
+declare literal export function isupper(character: int): int
+declare literal export function isxdigit(character: int): int
 
 declare literal export function tolower(character: int): int
 declare literal export function toupper(character: int): int
