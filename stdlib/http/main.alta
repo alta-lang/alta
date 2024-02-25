@@ -495,9 +495,11 @@ export class Server {
 		res.end("Not found")
 	}
 
-	public function listen(address: Address = "0.0.0.0", port: uint16 = 80): void {
-		this.socket.bind(address, port)
-		this.socket.listen(10)
+	public function listen(address: Address = "0.0.0.0", port: uint16 = 80): Result<void, NetError> {
+		if (let res = this.socket.bind(address, port)).isError {
+			return res
+		}
+		return this.socket.listen(10)
 	}
 
 	private function tryParse(req: ref IncomingRequest, res: ref OutgoingResponse, data: ref Vector<uint8>): Result<bool, Error> {
