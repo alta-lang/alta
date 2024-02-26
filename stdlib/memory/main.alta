@@ -78,7 +78,7 @@ class BoxList {
       ptr = ptr.next
     }
 
-    let node = &new* BoxNode
+    let node = new* BoxNode
     node.item = $
     node.refCount = 0
     node.next = this.items
