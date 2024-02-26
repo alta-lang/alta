@@ -3797,13 +3797,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileReturnDirectiveNode(std::
 	}
 
 	if ((node->expression || inGenerator) && !inCoroutine) {
-		if (!expr) {
-			throw std::runtime_error("Invalid return value");
-		}
-
 		if (!inGenerator && *exprType == AltaCore::DET::Type(AltaCore::DET::NativeType::Void)) {
 			LLVMBuildRetVoid(_builders.top().get());
 		} else {
+			if (!expr) {
+				throw std::runtime_error("Invalid return value");
+			}
 			LLVMBuildRet(_builders.top().get(), expr);
 		}
 	} else {
