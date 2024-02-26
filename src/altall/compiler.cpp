@@ -6114,7 +6114,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassInstantiationExpress
 		if (info->persistent) {
 			mangled = "_persistent_" + mangled;
 			methodID = "_persistent_" + methodID;
-			retType = retType->reference();
+			retType = retType->point();
 		}
 
 		auto llret = co_await translateType(retType, true, false);
@@ -6810,7 +6810,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDeleteStatement(std::shar
 
 	if (info->persistent) {
 		bool didRetrieval = false;
-		auto root = co_await getRootInstance(target, targetType->reference(), &didRetrieval);
+		auto root = co_await getRootInstance(target, targetType->point(), &didRetrieval);
 		if (!didRetrieval) {
 			// this is actually fine
 		}
