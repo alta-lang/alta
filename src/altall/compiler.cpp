@@ -107,6 +107,59 @@ void AltaLL::registerAttributes(AltaCore::Filesystem::Path modulePath) {
 	AC_END_ATTRIBUTE;
 };
 
+static bool blockHasSuccessor(LLVMBasicBlockRef block, LLVMBasicBlockRef maybeSuccessor) {
+	std::unordered_set<LLVMBasicBlockRef> testedBlocks;
+	std::stack<std::pair<LLVMValueRef, size_t>> testStack;
+
+	// insert the block itself into the list so we don't follow it if it succeeds itself
+	testedBlocks.insert(block);
+
+	auto firstTerminator = LLVMGetBasicBlockTerminator(block);
+	if (!firstTerminator || LLVMGetNumSuccessors(firstTerminator) == 0) {
+		// technically, this is a misuse of this function (all the blocks in question should be fully built and have terminators),
+		// but let's tolerate it nonetheless
+		return false;
+	}
+
+	testStack.emplace(firstTerminator, 0);
+
+	while (!testStack.empty()) {
+		auto [testTerminator, succIdx] = testStack.top();
+		auto succCount = LLVMGetNumSuccessors(testTerminator);
+
+		if (succIdx >= succCount) {
+			testStack.pop();
+			continue;
+		}
+
+		++testStack.top().second;
+
+		auto succ = LLVMGetSuccessor(testTerminator, succIdx);
+		if (succ == maybeSuccessor) {
+			return true;
+		}
+
+		if (testedBlocks.find(succ) != testedBlocks.end()) {
+			// we've already tested this block; let's not end up in a cycle
+			continue;
+		}
+
+		testedBlocks.insert(succ);
+
+		// okay, so we tested and this wasn't the target, but maybe it has further successors that *do* lead to the target.
+		// let's test those next (if it has any).
+
+		auto succTerminator = LLVMGetBasicBlockTerminator(succ);
+		if (!succTerminator || LLVMGetNumSuccessors(succTerminator) == 0) {
+			continue;
+		}
+
+		testStack.emplace(succTerminator, 0);
+	}
+
+	return false;
+};
+
 AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::endBranch(LLVMBasicBlockRef mergeBlock, std::vector<LLVMBasicBlockRef> mergingBlocks, bool allowStateChange) {
 	auto size = sizesDuringBranching.top();
 	sizesDuringBranching.pop();
@@ -154,7 +207,7 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::endBranch(LLVMBa
 		bool found = false;
 
 		for (size_t j = 0; j < mergingBlocks.size(); ++j) {
-			if (mergingBlocks[j] == item.sourceBlock) {
+			if (mergingBlocks[j] == item.sourceBlock || blockHasSuccessor(item.sourceBlock, mergingBlocks[j])) {
 				if (found) {
 					throw std::runtime_error("Assumption violated: stack variables should only come from a single incoming block during a stack branch");
 				}
@@ -172,10 +225,9 @@ AltaLL::Compiler::Coroutine<void> AltaLL::Compiler::ScopeStack::endBranch(LLVMBa
 			}
 		}
 
-		// we currently assume the variables are only declared (or PHIed) in the immediate blocks being merged.
-		// just for sanity's sake, let's verify this assumption by making sure items pushed after the beginning of the branch only come from the blocks being merged.
+		// this should never happen, but just in case
 		if (!found) {
-			throw std::runtime_error("Assumption violated: when stack branching, stack variables must only be pushed within the blocks being merged");
+			throw std::runtime_error("impossible error: didn't find source block for stack item while merging stack branch");
 		}
 
 		if (suspendableContext) {
