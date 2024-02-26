@@ -41,6 +41,8 @@ template<typename T> T* unwrapDI(LLVMMetadataRef node) {
 
 static ALTACORE_MAP<std::string, bool> varargTable;
 ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> AltaLL::Compiler::invalidValueExpressionTable;
+ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> AltaLL::Compiler::infiniteValueExpressionTable;
+ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> AltaLL::Compiler::nanValueExpressionTable;
 
 #define AC_ATTRIBUTE_FUNC [=](std::shared_ptr<AltaCore::AST::Node> _target, std::shared_ptr<AltaCore::DH::Node> _info, std::vector<AltaCore::Attributes::AttributeArgument> args) -> void
 #define AC_ATTRIBUTE_CAST(x) auto target = std::dynamic_pointer_cast<AltaCore::AST::x>(_target);\
@@ -73,6 +75,34 @@ void AltaLL::registerAttributes(AltaCore::Filesystem::Path modulePath) {
 			throw std::runtime_error("expected a type argument for special fetch expression @invalid attribute");
 		}
 		Compiler::invalidValueExpressionTable[info->id] = type;
+		info->items.push_back(type);
+	AC_END_ATTRIBUTE;
+	AC_ATTRIBUTE(SpecialFetchExpression, "compiler", "infinity");
+		if (args.size() != 1) {
+			throw std::runtime_error("expected a single type argument to special fetch expression @compiler.infinity attribute");
+		}
+		if (!args.front().isScopeItem) {
+			throw std::runtime_error("expected a type argument for special fetch expression @compiler.infinity attribute");
+		}
+		auto type = std::dynamic_pointer_cast<AltaCore::DET::Type>(args.front().item);
+		if (!type) {
+			throw std::runtime_error("expected a type argument for special fetch expression @compiler.infinity attribute");
+		}
+		Compiler::infiniteValueExpressionTable[info->id] = type;
+		info->items.push_back(type);
+	AC_END_ATTRIBUTE;
+	AC_ATTRIBUTE(SpecialFetchExpression, "compiler", "nan");
+		if (args.size() != 1) {
+			throw std::runtime_error("expected a single type argument to special fetch expression @compiler.nan attribute");
+		}
+		if (!args.front().isScopeItem) {
+			throw std::runtime_error("expected a type argument for special fetch expression @compiler.nan attribute");
+		}
+		auto type = std::dynamic_pointer_cast<AltaCore::DET::Type>(args.front().item);
+		if (!type) {
+			throw std::runtime_error("expected a type argument for special fetch expression @compiler.nan attribute");
+		}
+		Compiler::nanValueExpressionTable[info->id] = type;
 		info->items.push_back(type);
 	AC_END_ATTRIBUTE;
 };
@@ -7191,6 +7221,12 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(st
 	if (invalidValueExpressionTable.find(info->id) != invalidValueExpressionTable.end()) {
 		popDebugLocation();
 		co_return LLVMConstNull(co_await translateType(invalidValueExpressionTable[info->id]));
+	} else if (infiniteValueExpressionTable.find(info->id) != infiniteValueExpressionTable.end()) {
+		popDebugLocation();
+		co_return LLVMConstReal(co_await translateType(infiniteValueExpressionTable[info->id]), std::numeric_limits<double>::infinity());
+	} else if (nanValueExpressionTable.find(info->id) != nanValueExpressionTable.end()) {
+		popDebugLocation();
+		co_return LLVMConstReal(co_await translateType(nanValueExpressionTable[info->id]), std::numeric_limits<double>::quiet_NaN());
 	} else if (info->items.size() == 1 && info->items.front()->id == AltaCore::Util::getModule(info->inputScope.get()).lock()->internal.schedulerVariable->id) {
 		throw std::runtime_error("TODO: scheduler fetch");
 	} else if (info->items.size() == 1 && info->items.front()->name == "$coroutine") {

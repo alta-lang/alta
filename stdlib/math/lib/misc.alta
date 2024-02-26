@@ -22,3 +22,11 @@ export generic function minimum<T>(a: T, b: T): T {
 export generic function maximum<T>(a: T, b: T): T {
   return a > b ? a : b
 }
+
+export function infinity<T>(): T {
+	return @compiler.infinity(type T) $
+}
+
+export function nan<T>(): T {
+	return @compiler.nan(type T) $
+}

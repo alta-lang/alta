@@ -675,6 +675,8 @@ namespace AltaLL {
 
 		static const CopyInfo defaultCopyInfo;
 		static ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> invalidValueExpressionTable;
+		static ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> infiniteValueExpressionTable;
+		static ALTACORE_MAP<std::string, std::shared_ptr<AltaCore::DET::Type>> nanValueExpressionTable;
 
 		friend void ::AltaLL::registerAttributes(AltaCore::Filesystem::Path);
 
