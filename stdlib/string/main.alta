@@ -447,6 +447,19 @@ export class String {
 ##end if
   }
 
+	protected function assignFrom(other: ref String): void {
+		free<byte>(this._data)
+
+		this._length = other._length
+		this._data = *allocate<byte>(this._length + 1)
+
+		for i: Size in 0..this._length {
+			this._data[i] = other._data[i]
+		}
+
+		this._data[this._length] = '\0'
+	}
+
   # Retrieves the character at the given index and returns a CodePoint
   #
   # @param i The index of the character to retrieve
