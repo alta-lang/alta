@@ -128,9 +128,8 @@ export generic class Box<T> {
   public destructor() {
     if this.handle != nullptr {
       let count: ref Size = boxList[(@rootClass this.handle) as ptr void]
-      if count != 0 {
-        ;--count
-      }
+      assert count != 0
+      ;--count
       if count == 0 {
         boxList.remove((@rootClass this.handle) as ptr void)
         delete* this.handle
