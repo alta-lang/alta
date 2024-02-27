@@ -268,7 +268,11 @@ void logger(AltaCore::Logging::Message message) {
     std::getline(fileSource, line);
     std::cout << line << std::endl;
     for (size_t i = 1; i < message.location().column; i++) {
-      std::cout << ' ';
+			if (line[i - 1] == '\t') {
+				std::cout << '\t';
+			} else {
+				std::cout << ' ';
+			}
     }
     std::cout << '^' << std::endl;
   }
