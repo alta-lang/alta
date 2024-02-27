@@ -1293,7 +1293,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doCopyCtor(LLVMValueRef expr, st
 	co_return expr;
 };
 
-AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didDtor, bool force) {
+AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::shared_ptr<AltaCore::DET::Type> exprType, bool* didDtor, bool force, bool destroyRootInstance) {
 	auto result = expr;
 
 	if (didDtor) {
@@ -1363,7 +1363,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 			result = co_await loadRef(result, exprType);
 
 			co_await forEachUnionMember(result, exprType->destroyReferences()->reference(), NULL, [&](LLVMValueRef memberRef, std::shared_ptr<AltaCore::DET::Type> memberType, size_t memberIndex) -> LLCoroutine {
-				return doDtor(memberRef, memberType, nullptr, force);
+				return doDtor(memberRef, memberType);
 			});
 		} else if (exprType->isOptional) {
 			auto loaded = co_await loadRef(LLVMBuildLoad2(_builders.top().get(), co_await translateType(exprType), result, ("@dtor_opt_" + tmpIdxStr + "_deref").c_str()), exprType);
@@ -1432,9 +1432,13 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 			LLVMPositionBuilderAtEnd(_builders.top().get(), notNullBlock);
 
 			bool didRetrieval = false;
+			if (destroyRootInstance) {
 			result = co_await getRootInstance(singleRef, exprType->reference(), &didRetrieval);
+			} else {
+				result = co_await getRealInstance(singleRef, exprType->reference(), &didRetrieval);
+			}
 			if (!didRetrieval) {
-				throw std::runtime_error("root instance retrieval must succeed");
+				throw std::runtime_error("root or real instance retrieval must succeed");
 			}
 			result = LLVMBuildPointerCast(_builders.top().get(), result, LLVMPointerType(_definedTypes["_Alta_basic_class"], 0), ("@dtor_instance_" + tmpIdxStr + "_root_basic_class").c_str());
 
@@ -5227,6 +5231,10 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 				co_await declareFunction(info->klass->destructor);
 			}
 
+			if (stackEntry.klass->destructor) {
+				co_await declareFunction(stackEntry.klass->destructor);
+			}
+
 			/*
 			struct _Alta_class_info {
 				const char* type_name;
@@ -5241,7 +5249,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileClassDefinitionNode(std::
 			*/
 			std::array<LLVMValueRef, 8> members {
 				LLVMBuildGlobalStringPtr(_builders.top().get(), mangled.c_str(), ""),
-				info->klass->destructor ? _definedFunctions[info->klass->destructor->id] : LLVMConstNull(dtorType),
+				stackEntry.klass->destructor ? _definedFunctions[stackEntry.klass->destructor->id] : LLVMConstNull(dtorType),
 				stackEntry.child ? LLVMBuildGlobalStringPtr(_builders.top().get(), mangledChild.c_str(), "") : LLVMConstNull(strType),
 				nullptr, // filled in later
 				LLVMConstInt(i64Type, stackEntry.offsetFromRoot, false),
@@ -6887,7 +6895,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileDeleteStatement(std::shar
 		throw std::runtime_error("TODO: support non-referential non-persistent delete statements");
 	}
 
-	co_await doDtor(target, targetType);
+	co_await doDtor(target, targetType, nullptr, false, info->persistent);
 
 	if (info->persistent) {
 		bool didRetrieval = false;
