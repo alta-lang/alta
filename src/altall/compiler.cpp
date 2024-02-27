@@ -4023,10 +4023,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 					auto mangled = mangleName(var);
 					_definedVariables[var->id] = LLVMAddGlobal(_llmod.get(), varType, mangled.c_str());
 					result = _definedVariables[var->id];
-
-					if (var->type->referenceLevel() > 0) {
-						result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@fetch_ref_" + tmpIdxStr).c_str());
-					}
 				}
 			}
 
@@ -4044,9 +4040,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 					if (var->id == info->narrowedTo->id) {
 						auto varType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(var)->destroyReferences());
 						result = _definedVariables["@lambda_copy@" + mangleName(parentFunc) + "@" + var->id];
-						if (var->type->referenceLevel() > 0) {
-							result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@lambda_fetch_ref_" + tmpIdxStr).c_str());
-						}
 						popDebugLocation();
 						co_return result;
 					}
@@ -4055,9 +4048,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 					if (var->id == info->narrowedTo->id) {
 						auto varType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(var)->destroyReferences());
 						result = _definedVariables["@lambda_ref@" + mangleName(parentFunc) + "@" + var->id];
-						if (var->type->referenceLevel() > 0) {
-							result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@lambda_fetch_ref_" + tmpIdxStr).c_str());
-						}
 						popDebugLocation();
 						co_return result;
 					}
@@ -4274,9 +4264,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 			if (var->id == info->narrowedTo->id) {
 				auto varType = co_await translateType(var->type);
 				auto result = _definedVariables["@lambda_copy@" + mangleName(parentFunc) + "@" + var->id];
-				if (var->type->referenceLevel() > 0 && !isThisContext) {
-					result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@lambda_fetch_ref_" + tmpIdxStr).c_str());
-				}
 				popDebugLocation();
 				co_return result;
 			}
@@ -4285,9 +4272,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 			if (var->id == info->narrowedTo->id) {
 				auto varType = co_await translateType(var->type);
 				auto result = _definedVariables["@lambda_ref@" + mangleName(parentFunc) + "@" + var->id];
-				if (var->type->referenceLevel() > 0 && !isThisContext) {
-					result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@lambda_fetch_ref_" + tmpIdxStr).c_str());
-				}
 				popDebugLocation();
 				co_return result;
 			}
@@ -4338,10 +4322,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 			auto mangled = mangleName(var);
 			_definedVariables[var->id] = LLVMAddGlobal(_llmod.get(), varType, mangled.c_str());
 			result = _definedVariables[var->id];
-		}
-
-		if (var->type->referenceLevel() > 0) {
-			result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@fetch_ref_" + tmpIdxStr).c_str());
 		}
 	}
 
@@ -7323,12 +7303,6 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(st
 
 		if (!var) {
 			throw std::runtime_error("special fetch did not return a variable?");
-		}
-
-		if (var->type->referenceLevel() > 0) {
-			auto tmpIdx = nextTemp();
-			auto tmpIdxStr = std::to_string(tmpIdx);
-			result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@special_fetch_ref_" + tmpIdxStr).c_str());
 		}
 
 		popDebugLocation();
