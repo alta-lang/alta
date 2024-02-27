@@ -51,7 +51,7 @@ export class Scheduler {
 		#if coroutine.basic_suspendable.done
 		#	return coroutine
 
-		let id = coroutine.id = ++this.counter
+		let id: ID = coroutine.id = ++this.counter
 		this.work.push(coroutine)
 		return id
 	}

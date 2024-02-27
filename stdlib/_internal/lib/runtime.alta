@@ -44,7 +44,7 @@ export literal function _Alta_get_child(instance: ptr void, parentContainers: ra
 	let inst = instance as ptr native._Alta_basic_class
 
 	for i: uint64 in 0..parentContainers.length {
-		let parentContainer = parentContainers[i]
+		let parentContainer: rawconststring = parentContainers[i]
 		let first = _Alta_get_real(inst)
 		let curr = first
 

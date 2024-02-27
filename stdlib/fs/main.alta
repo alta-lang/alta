@@ -243,8 +243,8 @@ export class Path {
 		for i: Size in 0..path.length {
 			let found = false
 			for j: Size in 0..separators.length {
-				let separator = separators[j]
-				let separatorLength = separatorLengths[j]
+				let separator: ref String = separators[j]
+				let separatorLength: ref Size = separatorLengths[j]
 				let ok = false
 				if path[i] == separator[0] {
 					let k: Size = 1
