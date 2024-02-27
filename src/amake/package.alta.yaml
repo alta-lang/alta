@@ -1,4 +1,0 @@
-name: amake
-version: 1.0.0
-type: exe
-main: amake.alta

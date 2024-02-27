@@ -1,1 +1,0 @@
-declare literal export function assert(expression: int): void

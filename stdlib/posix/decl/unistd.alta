@@ -1,1 +1,0 @@
-declare literal export function close(handle: int): int

@@ -1,5 +1,0 @@
-##if bitness == "64"
-	export type ssize_t = signed long long int
-##else if bitness == "32"
-	export type ssize_t = signed int
-##end if

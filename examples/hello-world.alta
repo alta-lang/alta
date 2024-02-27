@@ -1,7 +1,0 @@
-import printLine from "io"
-
-literal function main(): int {
-  printLine("Hello, world!")
-
-  return 0
-}

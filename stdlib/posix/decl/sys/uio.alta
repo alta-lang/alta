@@ -1,6 +1,0 @@
-import Size from "types"
-
-export struct iovec {
-	iov_base: ptr void;
-	iov_len: Size;
-}

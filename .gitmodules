@@ -1,6 +1,0 @@
-[submodule "deps/alta-core"]
-	path = deps/alta-core
-	url = https://github.com/alta-lang/alta-core.git
-[submodule "deps/PicoSHA2"]
-	path = deps/PicoSHA2
-	url = https://github.com/okdshin/PicoSHA2.git

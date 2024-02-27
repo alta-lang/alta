@@ -1,7 +1,0 @@
-name: altac
-version: 0.7.0
-summary: The Alta compiler, written in Alta
-targets:
-- name: altac
-  type: exe
-  main: bin/altac.alta

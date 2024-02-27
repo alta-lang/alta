@@ -1,3 +1,0 @@
-export abs, rand from "libc/lib/stdlib"
-
-export * from "./lib/misc.alta"
