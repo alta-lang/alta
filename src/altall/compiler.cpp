@@ -1433,7 +1433,7 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::doDtor(LLVMValueRef expr, std::s
 
 			bool didRetrieval = false;
 			if (destroyRootInstance) {
-			result = co_await getRootInstance(singleRef, exprType->reference(), &didRetrieval);
+				result = co_await getRootInstance(singleRef, exprType->reference(), &didRetrieval);
 			} else {
 				result = co_await getRealInstance(singleRef, exprType->reference(), &didRetrieval);
 			}
@@ -4042,14 +4042,22 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileAccessor(std::shared_ptr<
 			if (parentFunc && parentFunc->isLambda) {
 				for (const auto& var: parentFunc->copiedVariables) {
 					if (var->id == info->narrowedTo->id) {
+						auto varType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(var)->destroyReferences());
 						result = _definedVariables["@lambda_copy@" + mangleName(parentFunc) + "@" + var->id];
+						if (var->type->referenceLevel() > 0) {
+							result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@lambda_fetch_ref_" + tmpIdxStr).c_str());
+						}
 						popDebugLocation();
 						co_return result;
 					}
 				}
 				for (const auto& var: parentFunc->referencedVariables) {
 					if (var->id == info->narrowedTo->id) {
+						auto varType = co_await translateType(AltaCore::DET::Type::getUnderlyingType(var)->destroyReferences());
 						result = _definedVariables["@lambda_ref@" + mangleName(parentFunc) + "@" + var->id];
+						if (var->type->referenceLevel() > 0) {
+							result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@lambda_fetch_ref_" + tmpIdxStr).c_str());
+						}
 						popDebugLocation();
 						co_return result;
 					}
@@ -4254,30 +4262,44 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileFetch(std::shared_ptr<Alt
 
 	auto parentFunc = AltaCore::Util::getFunction(info->inputScope).lock();
 
+	bool isThisContext = false;
+
+	if (info->narrowedTo->nodeType() == AltaCore::DET::NodeType::Variable && info->narrowedTo->name == "this") {
+		auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(info->narrowedTo);
+		isThisContext = !var->parentScope.expired() && !var->parentScope.lock()->parentClass.expired();
+	}
+
 	if (parentFunc && parentFunc->isLambda) {
 		for (const auto& var: parentFunc->copiedVariables) {
 			if (var->id == info->narrowedTo->id) {
+				auto varType = co_await translateType(var->type);
+				auto result = _definedVariables["@lambda_copy@" + mangleName(parentFunc) + "@" + var->id];
+				if (var->type->referenceLevel() > 0 && !isThisContext) {
+					result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@lambda_fetch_ref_" + tmpIdxStr).c_str());
+				}
 				popDebugLocation();
-				co_return _definedVariables["@lambda_copy@" + mangleName(parentFunc) + "@" + var->id];
+				co_return result;
 			}
 		}
 		for (const auto& var: parentFunc->referencedVariables) {
 			if (var->id == info->narrowedTo->id) {
+				auto varType = co_await translateType(var->type);
+				auto result = _definedVariables["@lambda_ref@" + mangleName(parentFunc) + "@" + var->id];
+				if (var->type->referenceLevel() > 0 && !isThisContext) {
+					result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@lambda_fetch_ref_" + tmpIdxStr).c_str());
+				}
 				popDebugLocation();
-				co_return _definedVariables["@lambda_ref@" + mangleName(parentFunc) + "@" + var->id];
+				co_return result;
 			}
 		}
 	}
 
-	if (info->narrowedTo->nodeType() == AltaCore::DET::NodeType::Variable && info->narrowedTo->name == "this") {
-		auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(info->narrowedTo);
-		if (!var->parentScope.expired() && !var->parentScope.lock()->parentClass.expired()) {
-			if (_thisContextValue.empty()) {
-				throw std::runtime_error("No `this` context?");
-			}
-			popDebugLocation();
-			co_return _thisContextValue.top();
+	if (isThisContext) {
+		if (_thisContextValue.empty()) {
+			throw std::runtime_error("No `this` context?");
 		}
+		popDebugLocation();
+		co_return _thisContextValue.top();
 	}
 
 	auto result = _definedVariables[info->narrowedTo->id] ? _definedVariables[info->narrowedTo->id] : _definedFunctions[info->narrowedTo->id];
@@ -7292,9 +7314,21 @@ AltaLL::Compiler::LLCoroutine AltaLL::Compiler::compileSpecialFetchExpression(st
 		co_return _suspendableContext.top();
 	} else {
 		auto result = _definedVariables[info->items.front()->id];
+		auto var = std::dynamic_pointer_cast<AltaCore::DET::Variable>(info->items.front());
+		auto varType = co_await translateType(var->type);
 
 		if (!result) {
 			throw std::runtime_error("special fetch variable not defined");
+		}
+
+		if (!var) {
+			throw std::runtime_error("special fetch did not return a variable?");
+		}
+
+		if (var->type->referenceLevel() > 0) {
+			auto tmpIdx = nextTemp();
+			auto tmpIdxStr = std::to_string(tmpIdx);
+			result = LLVMBuildLoad2(_builders.top().get(), varType, result, ("@special_fetch_ref_" + tmpIdxStr).c_str());
 		}
 
 		popDebugLocation();
