@@ -1,5 +1,5 @@
 # Alta
-![Alta](docs/alta.png "Alta")
+![Alta](docs/alta-stylized-a-blue.png "Alta")
 
 Simple :dart:, safe :lock:, and powerful :muscle:
 

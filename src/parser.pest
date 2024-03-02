@@ -1,0 +1,59 @@
+root = { SOI ~ global_statement* ~ EOI }
+
+global_statement = _{
+	import_statement |
+	struct_definition_statement |
+	free_function_definition_statement |
+	empty_statement
+}
+
+statement = _{
+	empty_statement
+}
+
+empty_statement = { ";"+ }
+
+import_statement = { keyword_import ~ "{" ~ (import_item ~ ("," ~ import_item)* ~ ","?)? ~ "}" ~ keyword_from ~ double_quote_string ~ ";" }
+import_item = { ident_accessor ~ ("as" ~ ident)? }
+
+struct_definition_statement = { visibility ~ keyword_struct ~ ident ~ generic_parameters? ~ where_clause? ~ "{" ~ struct_member ~ ("," ~ struct_member)* ~ ","? ~ "}" ~ ";" }
+struct_member = { visibility? ~ ident ~ ":" ~ type }
+
+free_function_definition_statement = { visibility ~ keyword_function ~ ident ~ generic_parameters? ~ "(" ~ (function_parameter ~ ("," ~ function_parameter)* ~ ","?)? ~ ")" ~ ":" ~ type ~ where_clause? ~ block }
+
+block = { "{" ~ statement* ~ "}" ~ ";" }
+
+function_parameter = { keyword_mut? ~ (ident ~ "=")? ~ ident ~ ":" ~ type }
+
+generic_parameters = { "<" ~ ident ~ ("," ~ ident)* ~ ","? ~ ">" }
+
+where_clause = { keyword_where ~ "{" ~ (where_constraint ~ ";")* ~ "}" ~ ":" }
+where_constraint = { implements_constraint }
+implements_constraint = { ident ~ keyword_implements ~ implements_constraint_interface ~ ("," ~ implements_constraint_interface)* ~ ","? }
+implements_constraint_interface = { ident_accessor ~ ("<" ~ type ~ ("," ~ type)* ~ ","? ~ ">")? }
+
+type = { ident_accessor ~ ("<" ~ type ~ ("," ~ type) ~ ","? ~ ">")? }
+
+keyword_struct = @{ "struct" ~ !ident_char }
+keyword_import = @{ "import" ~ !ident_char }
+keyword_from = @{ "from" ~ !ident_char }
+keyword_where = @{ "where" ~ !ident_char }
+keyword_implements = @{ "implements" ~ !ident_char }
+keyword_function = @{ "function" ~ !ident_char }
+keyword_mut = @{ "mut" ~ !ident_char }
+
+visibility = @{ ("public" | "private" | "package") ~ !ident_char }
+
+ident_accessor = { ident ~ ("." ~ ident)* }
+ident = @{ ident_start ~ ident_char* }
+ident_start = _{ ASCII_ALPHA | "_" }
+ident_char = _{ ASCII_ALPHANUMERIC | "_" }
+
+double_quote_string = @{ "\"" ~ (double_quote_string_escape | !("\"" | "\\" | NEWLINE) ~ ANY)* ~ "\"" }
+double_quote_string_escape = _{ "\\" ~ ("n" | "r" | "t" | "0" | "\"" | "\\" | "x" ~ ASCII_HEX_DIGIT{2} | "u{" ~ ASCII_HEX_DIGIT{1, 6} ~ "}") }
+
+WHITESPACE = _{ " " | "\t" | NEWLINE }
+COMMENT = _{
+	"//" ~ (!NEWLINE ~ ANY)* |
+	"/*" ~ (!"*/" ~ ANY)* ~ "*/"
+}

@@ -1,0 +1,16 @@
+[package]
+name = "alta"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = { version = "4.5.1", features = ["derive"] }
+crossbeam-deque = "0.8.5"
+indenter = "0.3.3"
+path-clean = "1.0.1"
+pest = "2.7.7"
+pest_derive = "2.7.7"
+serde = { version = "1.0.197", features = ["derive"] }
+toml = "0.8.10"
