@@ -6,6 +6,7 @@ pub trait Visitor {
 
 	fn visit_root_node(&mut self, node: &super::RootNode) { let _ = node; }
 	fn visit_import_statement(&mut self, node: &super::ImportStatement) { let _ = node; }
+	fn visit_struct_definition_statement(&mut self, node: &super::StructDefinitionStatement) { let _ = node; }
 }
 
 pub trait Node: Send + Sync + Display {
